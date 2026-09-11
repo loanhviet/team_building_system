@@ -350,15 +350,38 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       công cụ browser automation khả dụng trong phiên này, cần verify thủ công trước khi coi UI là "done" thật sự
 - **Xong khi:** login được bằng 3 vai trò, import 120 CBNV từ Excel mẫu, đổi trạng thái event trên UI
 
-### Phase 2 — Module 1: Đăng ký Team Building + Email
-- [ ] Models: `registrations`, `registration_transport_needs`, `email_templates`, `email_outbox`, `jobs`
-- [ ] API: `GET/PUT /api/registrations/me`, `POST /api/registrations/me/submit`, `POST .../cancel`;
-      chặn theo `event.status` và hạn `registration_close_at`
-- [ ] Validate: chọn "Có tham gia" → bắt buộc tick đã đọc quy định + chính sách phí phạt mới cho Submit (mục 4.3)
-- [ ] Nhu cầu xe 4 chặng + chọn điểm đón/trả từ `pickup_points` (mục 4.5); ô mong muốn tự do (mục 4.6)
-- [ ] Task `send_email` + template `registration_confirmed` (Team, trạng thái, ca, nhu cầu xe) — mục 4.7
-- [ ] Admin: danh sách đăng ký có search/filter/sort/export Excel; xem cột "mong muốn"
-- [ ] FE: form đăng ký (react-hook-form + zod), màn hình xác nhận thành công, banner trạng thái event
+### Phase 2 — Module 1: Đăng ký Team Building + Email ✅ (2026-09-12)
+- [x] Models: `registrations`, `registration_transport_needs`, `email_templates`, `email_outbox`
+      (`jobs` đã có từ Phase 1)
+- [x] API: `GET/PUT /api/events/{id}/registrations/me`, `POST .../me/submit`, `POST .../me/cancel`
+      (nested dưới event thay vì global `/registrations/me` — nhất quán với shifts/legs/pickup-points,
+      và multi-event cần biết đăng ký cho event nào); chặn theo `event.status == registration_open` và
+      `registration_close_at`. Thêm `GET /api/events/current` (event đang mở đăng ký — phải khai báo
+      **trước** `GET /{event_id}` trong router, nếu không path param sẽ nuốt luôn literal "current" rồi
+      lỗi convert sang int) và `GET /api/events/{id}/terms` (đọc từ `event_settings`, có default)
+- [x] Validate: "Có tham gia" bắt buộc tick đồng ý quy định mới Submit được (mục 4.3) — chặn ở service
+      layer (`submit_registration`), không chỉ ở FE
+- [x] Nhu cầu xe theo từng chặng (`transport_needs`) + chọn điểm đón/trả từ `pickup_points` (mục 4.5);
+      ô mong muốn tự do `wish_note` (mục 4.6)
+- [x] Task `send_email` (ARQ, `max_tries=3` dùng cơ chế retry sẵn có của arq thay vì tự viết backoff
+      5s/30s/120s — không đáng để thêm code) + template `registration_confirmed`, render bằng Jinja2 từ
+      `EmailTemplate` trong DB nếu có, fallback về template mặc định hard-code trong
+      `services/notification/email_service.py`. `enqueue_email()` idempotent theo `dedupe_key`
+- [x] Admin: danh sách đăng ký có search + export Excel (đồng bộ, không qua queue — vài trăm dòng chưa
+      tới ngưỡng cần queue theo tinh thần mục 6 PLAN; chuẩn hoá toàn bộ export vào queue ở Phase 9)
+- [x] FE: `/register` — form một trang (radio tham gia, select ca, checkbox nhu cầu xe + chọn điểm đón,
+      textarea mong muốn, checkbox đồng ý quy định), banner khi đã submit, nút huỷ đăng ký. Tab "Đăng ký"
+      trong trang chi tiết event (admin) hiển thị danh sách + nút export
+- **Bug/quyết định đáng chú ý:** form đăng ký ban đầu dùng `useEffect` để đồng bộ state từ dữ liệu
+      registration fetch về — bị eslint rule mới (`react-hooks/set-state-in-effect`) chặn vì dễ gây
+      cascading render; sửa bằng cách tách thành component con `RegistrationForm` nhận `registration` làm
+      prop, khởi tạo `useState` bằng lazy initializer, và `key={registration.id}` ở component cha để remount
+      thay vì đồng bộ qua effect — đúng pattern React khuyến nghị cho "derive local state from server data"
+- **Đã kiểm chứng:** toàn bộ flow qua curl (mở đăng ký → xem terms → PUT nháp → submit thiếu tick quy định
+      bị chặn 400 → submit hợp lệ → email xuất hiện đúng nội dung trong MailHog → admin list thấy đăng ký →
+      export ra đúng file .xlsx đọc lại được); `ruff check`, `next lint`, `next build` đều sạch; 9 route FE
+      trả 200 khi chạy trong container dev. Chưa test bằng click chuột thật trên trình duyệt (xem ghi chú
+      Phase 1 — vẫn chưa có công cụ browser automation khả dụng trong phiên làm việc)
 - **Xong khi:** CBNV đăng ký xong nhận email trong MailHog; admin export danh sách ra Excel
 
 ### Phase 3 — Module 2a: Chuyến bay + Auto Allocation
