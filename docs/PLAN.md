@@ -312,14 +312,42 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       worker log "connected to redis", MailHog UI mở ở `:8025` trả 200, `ruff check` và `next lint` đều sạch
 - **Xong khi:** `make up` → web gọi được `/api/health`, worker log "connected to redis", MailHog UI mở được
 
-### Phase 1 — Auth, RBAC, Master data, Event lifecycle
-- [ ] Models + migration: `teams, sites, employees, users, refresh_tokens, events, event_settings, shifts, transport_legs, pickup_points, audit_logs`
-- [ ] Auth: `POST /api/auth/login|refresh|logout`, `GET /api/auth/me`, `POST /api/auth/change-password`; bcrypt; JWT access 15' + refresh 7d rotate
-- [ ] Dependency phân quyền + audit log middleware cho mọi thao tác ghi của admin
-- [ ] CRUD master data (teams, sites, shifts, legs, pickup points) + import CBNV từ Excel (qua queue) với báo cáo lỗi từng dòng
-- [ ] Event CRUD + **state machine** chuyển trạng thái có validate (không cho mở lại đăng ký khi đã published trừ super_admin)
-- [ ] FE: trang login, admin shell (sidebar + guard theo role), trang quản lý master data, trang quản lý event
-- [ ] Seed script: 1 super_admin, 2 site, ~8 team, ~120 employee giả, 1 event demo
+### Phase 1 — Auth, RBAC, Master data, Event lifecycle ✅ (2026-09-12)
+- [x] Models + migration: `teams, sites, employees, users, refresh_tokens, events, event_settings, shifts, transport_legs, pickup_points, audit_logs`
+      — cộng `jobs`, `import_batches` kéo sớm từ Phase 2/3 vì employee import cần ngay
+- [x] Auth: `POST /api/auth/login|refresh|logout`, `GET /api/auth/me`, `POST /api/auth/change-password`.
+      Access token (15') trả trong JSON, đọc qua header `Authorization`; refresh token (7d, rotate mỗi lần
+      dùng) là httpOnly cookie, hash SHA-256 lưu DB. Mật khẩu hash bằng **bcrypt trực tiếp**, không qua
+      passlib — bản tự-test nội bộ của passlib xung đột với bcrypt>=4.1 (`password cannot be longer than 72
+      bytes`), gỡ passlib thay vì ghim version
+- [x] Phân quyền: `require_roles/require_admin/require_super_admin` (FastAPI dependency) + `record_audit()`
+      gọi tường minh trong từng endpoint ghi của admin (không dùng middleware tự động — cần biết before/after
+      per entity nên middleware không đủ ngữ cảnh)
+- [x] CRUD master data: service generic `services/master_data.py` (list/get_or_404/create/update/soft_delete
+      dùng PEP 695 generics) tái dùng cho cả 5 entity (teams, sites, shifts, transport_legs, pickup_points)
+- [x] Import CBNV từ Excel qua ARQ: upload → `ImportBatch`+`Job` → worker parse (openpyxl) → mỗi dòng chạy
+      trong 1 SAVEPOINT (`db.begin_nested()`) nên 1 dòng lỗi không làm mất các dòng đã ok trong cùng batch →
+      upsert Employee + tự tạo User (role=employee, mật khẩu khởi tạo = employee_code, must_change_password)
+- [x] Event CRUD + state machine (`services/event_service.py`): organizer chỉ đi theo `FORWARD_TRANSITIONS`;
+      super_admin ghi đè được sang bất kỳ trạng thái nào, mọi lần chuyển đều ghi audit log
+- [x] FE: Next.js 16 + shadcn/ui — **lưu ý: bản shadcn CLI hiện tại mặc định dùng `@base-ui/react`, không phải
+      Radix** → `Dialog`/`Button` không có prop `asChild`, phải dùng `buttonVariants()` làm className thẳng lên
+      trigger. Login page, admin shell (sidebar + guard theo role — chỉ để chặn hiển thị, BE mới là nơi enforce
+      thật), trang master-data (tabs Team/Site), trang events (list/create/transition + cấu hình
+      shift/leg/pickup-point lồng trong từng event), trang employees (list + import Excel có poll job)
+- [x] Seed script: 1 super_admin, 1 organizer, 2 site, 8 team, 120 employee giả (1 promote team_leader), 1 event draft
+- **Bug phát hiện & sửa khi nối end-to-end** (xem chi tiết trong log commit): (1) lỗi 500 bị nuốt không log —
+      `unhandled_exception_handler` giờ gọi `logger.exception`; (2) SQLite không lưu tz-aware datetime thật, trộn
+      `datetime.now(UTC)` (aware) với giá trị đọc lại từ DB (naive) văng `TypeError` — chuẩn hoá toàn bộ app dùng
+      naive-UTC qua `app/core/time.py::utcnow()`, bỏ `DateTime(timezone=True)`; (3) `WorkerSettings.queue_name`
+      đặt khác mặc định của `enqueue_job()` nên job nằm im trong Redis, worker không bao giờ nhặt — bỏ override;
+      (4) dev override dùng named volume `web_node_modules` nên thêm package mới (shadcn, sonner) không tự
+      vào container đang chạy — phải xoá volume để nó tạo lại từ image mới build
+- **Đã kiểm chứng:** login 3 vai trò qua curl; RBAC chặn đúng (employee POST /teams → 403); state machine
+      (organizer forward-only, super_admin override) qua curl; import Excel mẫu (2 dòng OK + 2 dòng lỗi, báo lỗi
+      đúng theo dòng) và nhân viên mới import login được ngay; cả 8 route FE build/type-check sạch (`next build`)
+      và trả 200 khi chạy `next dev` trong container. **Chưa** click-through bằng trình duyệt thật — không có
+      công cụ browser automation khả dụng trong phiên này, cần verify thủ công trước khi coi UI là "done" thật sự
 - **Xong khi:** login được bằng 3 vai trò, import 120 CBNV từ Excel mẫu, đổi trạng thái event trên UI
 
 ### Phase 2 — Module 1: Đăng ký Team Building + Email
