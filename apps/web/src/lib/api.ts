@@ -69,6 +69,22 @@ export async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    credentials: "include",
+  });
+  if (!res.ok) throw new ApiError(res.status, "download_failed", "Tải file thất bại");
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const formData = new FormData();
   formData.append("file", file);

@@ -98,6 +98,39 @@ export type PickupPoint = {
   is_active: boolean;
 };
 
+export type TransportNeed = {
+  leg_id: number;
+  is_needed: boolean;
+  pickup_point_id: number | null;
+};
+
+export type RegistrationStatus = "draft" | "submitted" | "cancelled";
+
+export type Registration = {
+  id: number;
+  event_id: number;
+  employee_id: number;
+  status: RegistrationStatus;
+  is_participating: boolean | null;
+  shift_id: number | null;
+  wish_note: string | null;
+  submitted_at: string | null;
+  cancelled_at: string | null;
+  transport_needs: TransportNeed[];
+};
+
+export type RegistrationAdmin = Registration & {
+  employee_code: string | null;
+  full_name: string;
+  email: string;
+  team_name: string | null;
+};
+
+export type EventTerms = {
+  terms_text: string;
+  terms_version: string;
+};
+
 export type Job = {
   id: number;
   type: string;

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EntityCrudTable } from "@/components/domain/entity-crud-table";
+import { RegistrationsTable } from "@/components/domain/registrations-table";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS } from "@/lib/event-status";
@@ -107,6 +108,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </CardContent>
       </Card>
+
+      <div>
+        <h2 className="mb-2 text-lg font-medium">Đăng ký</h2>
+        <RegistrationsTable eventId={eventId} />
+      </div>
 
       <div>
         <h2 className="mb-2 text-lg font-medium">Ca bay</h2>
