@@ -1,0 +1,33 @@
+services:
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+
+  api:
+    volumes:
+      - ./apps/api:/app
+      - ./data:/data
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  worker:
+    volumes:
+      - ./apps/api:/app
+      - ./data:/data
+    command: arq app.worker.settings.WorkerSettings --watch .
+
+  web:
+    build:
+      target: deps
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - web_next_cache:/app/.next
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    command: sh -c "npm run dev"
+
+volumes:
+  web_node_modules:
+  web_next_cache:
