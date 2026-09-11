@@ -384,14 +384,39 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       Phase 1 — vẫn chưa có công cụ browser automation khả dụng trong phiên làm việc)
 - **Xong khi:** CBNV đăng ký xong nhận email trong MailHog; admin export danh sách ra Excel
 
-### Phase 3 — Module 2a: Chuyến bay + Auto Allocation
-- [ ] Models: `flights`, `flight_assignments`, `allocation_runs`, `import_batches`
-- [ ] CRUD chuyến bay + import Excel (mã chuyến, ngày/giờ, điểm đi/đến, slot)
-- [ ] `services/allocation/`: interface `AllocationStrategy`, `GreedyFlightStrategy`, scoring theo trọng số, validators
-- [ ] `POST /api/events/{id}/allocations/flight` → `202 {job_id}`; worker chạy; `GET /api/jobs/{id}` theo dõi progress
-- [ ] Màn hình kết quả: theo chuyến (đã xếp/slot còn lại), theo Team (mức độ bị tách), danh sách **flag** cần xử lý
-- [ ] Manual adjustment: đổi 1 người / bulk cả nhóm, ghim `is_locked`, cảnh báo vượt slot & vi phạm quy tắc, bắt nhập lý do
-- [ ] Audit log đầy đủ before/after (mục 5.6)
+### Phase 3 — Module 2a: Chuyến bay + Auto Allocation ✅ (2026-09-12)
+- [x] Models: `flights`, `flight_assignments`, `allocation_runs` (`import_batches` đã có từ Phase 1).
+      **`flight_assignments.flight_id` là nullable** — khác thiết kế ban đầu (xem bug bên dưới)
+- [x] CRUD chuyến bay (`/api/events/{id}/flights`) + import Excel — import chạy **đồng bộ** (không qua
+      queue) vì chỉ vài chục dòng, cùng lý do như export đăng ký ở Phase 2
+- [x] `services/allocation/`: `AllocationStrategy` (Protocol) trong `base.py` cùng dataclass thuần
+      (`Candidate/TeamGroup/FlightSlot/AllocationResult`) để sau này cắm CP-SAT mà không đụng caller;
+      `GreedyFlightStrategy` trong `greedy.py` hiện thực đúng thuật toán mục 7.1: xếp nguyên Team trước,
+      không vừa thì tách theo subgroup ca lớn nhất, còn dư thì flag `no_slot`/`shift_mismatch`
+- [x] `POST /api/events/{id}/allocations/flight` → `202 {job_id, allocation_run_id}`; worker chạy
+      `run_flight_allocation_task`; `GET /api/jobs/{id}` theo dõi; `GET /api/events/{id}/allocations`
+      xem lịch sử các lần chạy
+- [x] Màn hình kết quả: theo chuyến (đã xếp/capacity), tổng số Team bị tách, danh sách **flag** — tất cả
+      trong `FlightAllocationPanel` (FE), không tách trang riêng
+- [x] Manual adjustment: `POST /api/events/{id}/flight-assignments/adjust` — đổi 1 hoặc nhiều người
+      cùng lúc, ghim `is_locked=true` (lần chạy auto sau sẽ trừ slot của họ ra rồi mới xếp phần còn lại,
+      không bao giờ tự động di chuyển lại), vượt sức chứa → 409 kèm chi tiết trừ khi `force=true` (vẫn
+      bắt buộc `reason`)
+- [x] Audit log before/after cho mọi thao tác ghi (mục 5.6) — đã có từ pattern chung `record_audit()`
+- **Bug phát hiện khi test với 21 đăng ký / 8 team / 2 chuyến (capacity 6+6):**
+  - `flight_id` ban đầu NOT NULL nên người bị flag `no_slot` (không xếp được) **không có row nào cả** →
+    biến mất khỏi danh sách admin thay vì hiện "cần xử lý" như BRD mục 5.3 yêu cầu. Sửa: cho phép
+    `flight_id = NULL`, tạo row cho cả người chưa xếp được (để BTC nhìn thấy và xử lý thủ công)
+  - Import chuyến bay dùng `await db.rollback()` trực tiếp thay vì SAVEPOINT (`db.begin_nested()`) khi
+    1 dòng lỗi → làm sập session giữa vòng lặp trên SQLite NullPool, văng `MissingGreenlet` ở dòng tiếp
+    theo. Cùng lớp bug đã sửa ở employee import (Phase 1) nhưng bị bỏ sót ở đây — đã đồng bộ lại
+  - Xác nhận: sau khi 1 người được **ghim thủ công** (`is_locked`), chạy lại allocation **không** đụng
+    tới họ, và slot của họ bị trừ khỏi capacity trước khi phần còn lại được xếp tự động — đúng thiết kế
+- **Đã kiểm chứng qua curl:** tạo 2 chuyến (capacity 6 mỗi chuyến, 2 ca khác nhau) → 21 CBNV submit với
+      ca xen kẽ → chạy phân bổ: 12 xếp được / 9 flag, 4 team bị tách → ghim thủ công 1 người vượt capacity
+      (chặn 409, `force=true` mới cho qua) → chạy lại vẫn giữ nguyên người đã ghim; import Excel chuyến
+      bay với 1 dòng cố tình sai `direction` → báo lỗi đúng dòng, 2 dòng đúng vẫn được tạo. `ruff check`
+      sạch, FE `next build`/`next lint` sạch, route `/admin/events/[id]` trả 200
 - **Xong khi:** chạy phân bổ cho 120 CBNV + ~6 chuyến, xem được báo cáo, chỉnh tay được và có cảnh báo đúng
 
 ### Phase 4 — Module 2b: Khách sạn & phòng
