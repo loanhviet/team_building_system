@@ -5,6 +5,7 @@ from arq.connections import RedisSettings
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
+from app.worker.tasks.imports import import_employees_task
 from app.worker.tasks.system import ping
 
 settings = get_settings()
@@ -23,7 +24,6 @@ async def shutdown(ctx: dict) -> None:
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions: ClassVar[list] = [ping]
+    functions: ClassVar[list] = [ping, import_employees_task]
     on_startup = startup
     on_shutdown = shutdown
-    queue_name = "arq:default"
