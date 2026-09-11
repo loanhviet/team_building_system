@@ -2,9 +2,11 @@ import logging
 from typing import ClassVar
 
 from arq.connections import RedisSettings
+from arq.worker import func as arq_func
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
+from app.worker.tasks.email import send_email
 from app.worker.tasks.imports import import_employees_task
 from app.worker.tasks.system import ping
 
@@ -24,6 +26,10 @@ async def shutdown(ctx: dict) -> None:
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions: ClassVar[list] = [ping, import_employees_task]
+    functions: ClassVar[list] = [
+        ping,
+        import_employees_task,
+        arq_func(send_email, max_tries=3),
+    ]
     on_startup = startup
     on_shutdown = shutdown

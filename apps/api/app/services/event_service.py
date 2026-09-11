@@ -1,9 +1,11 @@
 from fastapi import status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.time import utcnow
 from app.models.enums import EventStatus, UserRole
-from app.models.event import Event
+from app.models.event import Event, EventSetting
 
 FORWARD_TRANSITIONS: dict[EventStatus, set[EventStatus]] = {
     EventStatus.draft: {EventStatus.registration_open},
@@ -38,3 +40,13 @@ def transition_event(event: Event, new_status: EventStatus, actor_role: UserRole
     event.status = new_status
     if new_status == EventStatus.information_published and event.published_at is None:
         event.published_at = utcnow()
+
+
+async def get_setting(db: AsyncSession, event_id: int, key: str, default: str) -> str:
+    result = await db.execute(
+        select(EventSetting.value_json).where(
+            EventSetting.event_id == event_id, EventSetting.key == key
+        )
+    )
+    value = result.scalar_one_or_none()
+    return value if value is not None else default

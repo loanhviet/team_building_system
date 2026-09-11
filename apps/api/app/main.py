@@ -16,7 +16,17 @@ from app.core.errors import (
 )
 from app.core.logging import setup_logging
 from app.core.queue import init_arq_pool
-from app.routers import auth, employees, event_config, events, health, jobs, sites, teams
+from app.routers import (
+    auth,
+    employees,
+    event_config,
+    events,
+    health,
+    jobs,
+    registrations,
+    sites,
+    teams,
+)
 
 setup_logging()
 
@@ -53,3 +63,4 @@ app.include_router(events.router, prefix="/api")
 app.include_router(event_config.router, prefix="/api")
 app.include_router(employees.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
+app.include_router(registrations.router, prefix="/api")

@@ -1,14 +1,17 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.models.auth import User
+from app.models.enums import EventStatus
 from app.models.event import Event
 from app.schemas.event import EventCreate, EventOut, EventTransition, EventUpdate
+from app.schemas.registration import EventTermsOut
 from app.services import master_data
 from app.services.audit_service import record_audit
-from app.services.event_service import transition_event
+from app.services.event_service import get_setting, transition_event
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -52,6 +55,34 @@ async def create_event(payload: EventCreate, db: DbSession, user: AdminUser) -> 
     await db.commit()
     await db.refresh(event)
     return _event_out(event)
+
+
+@router.get("/current", response_model=EventOut | None)
+async def get_current_event(db: DbSession, _user: CurrentUser) -> EventOut | None:
+    """The single event employees register against — the most recently opened
+    one still accepting registrations. Returns null when none is open."""
+    result = await db.execute(
+        select(Event)
+        .where(Event.status == EventStatus.registration_open)
+        .order_by(Event.registration_open_at.desc().nulls_last(), Event.id.desc())
+        .limit(1)
+    )
+    event = result.scalar_one_or_none()
+    return _event_out(event) if event else None
+
+
+@router.get("/{event_id}/terms", response_model=EventTermsOut)
+async def get_event_terms(event_id: int, db: DbSession, _user: CurrentUser) -> EventTermsOut:
+    await master_data.get_or_404(db, Event, event_id)
+    terms_text = await get_setting(
+        db,
+        event_id,
+        "terms_text",
+        "Tôi xác nhận đã đọc và đồng ý với quy định chương trình Team Building, "
+        "bao gồm chính sách/phí phạt trong trường hợp huỷ đăng ký không đúng quy định.",
+    )
+    terms_version = await get_setting(db, event_id, "terms_version", "v1")
+    return EventTermsOut(terms_text=terms_text, terms_version=terms_version)
 
 
 @router.get("/{event_id}", response_model=EventOut)
