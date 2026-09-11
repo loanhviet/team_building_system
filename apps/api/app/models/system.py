@@ -6,6 +6,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.models.enums import ImportBatchStatus, JobStatus
 
+AllocationType = Enum(
+    "flight", "bus", name="allocation_run_type", native_enum=False, length=20
+)
+AllocationRunStatus = Enum(
+    "running", "succeeded", "failed", name="allocation_run_status", native_enum=False, length=20
+)
+
 
 class Job(Base):
     __tablename__ = "jobs"
@@ -27,6 +34,20 @@ class Job(Base):
         DateTime, server_default=func.now()
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AllocationRun(Base):
+    __tablename__ = "allocation_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    type: Mapped[str] = mapped_column(AllocationType)
+    params_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(AllocationRunStatus, default="running")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class ImportBatch(Base):

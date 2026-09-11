@@ -21,6 +21,7 @@ from app.routers import (
     employees,
     event_config,
     events,
+    flights,
     health,
     jobs,
     registrations,
@@ -64,3 +65,4 @@ app.include_router(event_config.router, prefix="/api")
 app.include_router(employees.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(registrations.router, prefix="/api")
+app.include_router(flights.router, prefix="/api")
