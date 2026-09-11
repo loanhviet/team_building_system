@@ -131,6 +131,57 @@ export type EventTerms = {
   terms_version: string;
 };
 
+export type Flight = {
+  id: number;
+  event_id: number;
+  flight_code: string;
+  airline: string | null;
+  direction: "outbound" | "inbound";
+  shift_id: number | null;
+  depart_at: string | null;
+  arrive_at: string | null;
+  origin: string | null;
+  destination: string | null;
+  capacity: number;
+  note: string | null;
+};
+
+export type FlightAssignment = {
+  id: number;
+  flight_id: number | null;
+  employee_id: number;
+  direction: "outbound" | "inbound";
+  source: "auto" | "manual" | "import";
+  is_locked: boolean;
+  is_flagged: boolean;
+  flag_reason: string | null;
+  employee_code: string | null;
+  full_name: string;
+  team_name: string | null;
+};
+
+export type AllocationRun = {
+  id: number;
+  event_id: number;
+  job_id: number | null;
+  type: string;
+  status: string;
+  params_json: Record<string, unknown> | null;
+  summary_json: {
+    total_submitted: number;
+    total_assigned: number;
+    total_flagged: number;
+    split_team_ids: number[];
+    flights: { flight_id: number; capacity: number; assigned: number; remaining: number }[];
+  } | null;
+  created_at: string;
+};
+
+export type AllocationEnqueued = {
+  job_id: number;
+  allocation_run_id: number;
+};
+
 export type Job = {
   id: number;
   type: string;

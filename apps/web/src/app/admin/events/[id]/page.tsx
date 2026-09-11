@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EntityCrudTable } from "@/components/domain/entity-crud-table";
+import { FlightAllocationPanel } from "@/components/domain/flight-allocation-panel";
 import { RegistrationsTable } from "@/components/domain/registrations-table";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -112,6 +113,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
       <div>
         <h2 className="mb-2 text-lg font-medium">Đăng ký</h2>
         <RegistrationsTable eventId={eventId} />
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-lg font-medium">Chuyến bay &amp; Phân bổ</h2>
+        <FlightAllocationPanel eventId={eventId} />
       </div>
 
       <div>
