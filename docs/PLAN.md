@@ -292,17 +292,25 @@ Thực thi bằng FastAPI dependency `require_roles(...)` + `scope_to_self()` ch
 Mỗi phase kết thúc bằng một trạng thái **chạy được end-to-end** (`make up` lên là dùng được).
 Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
 
-### Phase 0 — Nền tảng & Docker
-- [ ] Khởi tạo git repo, `.gitignore`, `.env.example`, `Makefile`
-- [ ] Convert BRD `.docx` → `docs/BRD.md`; copy plan này → `docs/PLAN.md`
-- [ ] `apps/api`: FastAPI skeleton, `core/config.py` (pydantic-settings), `db/session.py` (async engine + PRAGMA WAL),
-      Alembic init, `/health`, structured logging (JSON), exception handler chuẩn hoá lỗi
-- [ ] `apps/web`: Next.js 15 + TS + Tailwind + shadcn/ui, TanStack Query provider, API client (fetch wrapper + refresh token), layout gốc
-- [ ] **Docker**: `apps/api/Dockerfile` (python:3.12-slim + uv), `apps/web/Dockerfile` (node:22-alpine multi-stage, output standalone)
-- [ ] **docker-compose.yml**: `api` (8000), `worker`, `web` (3000), `redis` (7-alpine), `qdrant`, `mailhog` (8025 UI)
-      — volumes `./data:/data`, `redis_data`, `qdrant_storage`; healthcheck cho redis/qdrant; `depends_on` có điều kiện
-- [ ] **docker-compose.override.yml** (dev): bind mount source, `uvicorn --reload`, `next dev`, ARQ `--watch`
-- **Xong khi:** `make up` → web gọi được `/health` của api, worker log "connected to redis", MailHog UI mở được
+### Phase 0 — Nền tảng & Docker ✅ (2026-09-11)
+- [x] Khởi tạo git repo, `.gitignore`, `.env.example`, `Makefile`
+- [x] Convert BRD `.docx` → `docs/BRD.md`; copy plan này → `docs/PLAN.md`
+- [x] `apps/api`: FastAPI skeleton, `core/config.py` (pydantic-settings), `db/session.py` (async engine + PRAGMA WAL),
+      Alembic init, `/api/health`, structured logging (JSON), exception handler chuẩn hoá lỗi
+- [x] `apps/web`: Next.js **16** (npx create-next-app@latest lấy bản mới nhất, không phải 15 như dự kiến ban đầu —
+      không ảnh hưởng kiến trúc, App Router + `output: standalone` vẫn hoạt động như plan) + TS + Tailwind,
+      TanStack Query provider, API client fetch wrapper cơ bản (chưa có refresh-token — sẽ bổ sung cùng Auth ở Phase 1),
+      trang chủ gọi thử `/api/health`. shadcn/ui **chưa cài** — để lúc cần UI component thật ở Phase 1/2
+- [x] **Docker**: `apps/api/Dockerfile` (python:3.12-slim + uv), `apps/web/Dockerfile` (node:22-alpine multi-stage, output standalone)
+- [x] **docker-compose.yml**: `api` (8000), `worker`, `web` (3000), `redis` (7-alpine), `qdrant` (profile `rag`, dùng từ Phase 8)
+      — volumes `./data:/data`, `redis_data`, `qdrant_storage`; healthcheck redis; `depends_on: condition: service_healthy`
+- [x] **docker-compose.override.yml** (dev, tự động áp dụng): bind mount source, `uvicorn --reload`, `next dev` (Turbopack),
+      `arq --watch`, và **MailHog** (8025) định nghĩa riêng ở đây vì chỉ cần khi dev
+- [x] ARQ worker cần tối thiểu 1 task mới khởi động được → thêm task `ping` placeholder (`app/worker/tasks/system.py`),
+      sẽ có task thật từ Phase 2 (`send_email`)
+- **Đã kiểm chứng:** `docker compose up -d --build` → `GET /api/health` trả `{"status":"ok"}`, web hiển thị "API status: ok",
+      worker log "connected to redis", MailHog UI mở ở `:8025` trả 200, `ruff check` và `next lint` đều sạch
+- **Xong khi:** `make up` → web gọi được `/api/health`, worker log "connected to redis", MailHog UI mở được
 
 ### Phase 1 — Auth, RBAC, Master data, Event lifecycle
 - [ ] Models + migration: `teams, sites, employees, users, refresh_tokens, events, event_settings, shifts, transport_legs, pickup_points, audit_logs`
@@ -401,10 +409,13 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
 | `web` | build `apps/web` | 3000 | — | Next standalone output; `NEXT_PUBLIC_API_URL` |
 | `redis` | `redis:7-alpine` | 6379 | `redis_data` | `--appendonly yes`, healthcheck `redis-cli ping` |
 | `qdrant` | `qdrant/qdrant:latest` | 6333 | `qdrant_storage` | chỉ cần từ Phase 8 (profile `rag`) |
-| `mailhog` | `mailhog/mailhog` | 1025/8025 | — | dev only (profile `dev`) |
+
+`mailhog/mailhog` (8025 UI) **không** nằm trong `docker-compose.yml` — Docker Compose merge `profiles` theo
+kiểu hợp union chứ không ghi đè, nên không thể "tắt" nó bằng override khi lên production. Thay vào đó
+`mailhog` được định nghĩa toàn bộ trong `docker-compose.override.yml` (chỉ áp dụng khi dev).
 
 **`docker-compose.override.yml`** (tự động áp dụng khi dev): bind mount `./apps/api:/app` và `./apps/web:/app`,
-`uvicorn --reload`, `next dev`, `arq --watch`, `NODE_ENV=development`.
+`uvicorn --reload`, `next dev` (Turbopack), `arq --watch`, service `mailhog` riêng.
 
 **Biến môi trường chính** (`.env.example`): `DATABASE_URL=sqlite+aiosqlite:////data/teambuilding.db`,
 `REDIS_URL`, `JWT_SECRET`, `ACCESS_TOKEN_MINUTES`, `REFRESH_TOKEN_DAYS`, `SMTP_HOST/PORT/USER/PASS/FROM`,
