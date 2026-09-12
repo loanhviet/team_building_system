@@ -166,7 +166,7 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
             ))}
             {(!schedule || schedule.length === 0) && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-zinc-500">
+                <TableCell colSpan={3} className="text-center text-muted-foreground">
                   Chưa có lịch trình
                 </TableCell>
               </TableRow>
@@ -221,11 +221,11 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
           {announcements?.map((a) => (
             <div key={a.id} className="rounded-md border p-2 text-sm">
               <p className="font-medium">{a.title}</p>
-              <p className="text-zinc-500">{a.body_md}</p>
+              <p className="text-muted-foreground">{a.body_md}</p>
             </div>
           ))}
           {(!announcements || announcements.length === 0) && (
-            <p className="text-sm text-zinc-500">Chưa có thông báo</p>
+            <p className="text-sm text-muted-foreground">Chưa có thông báo</p>
           )}
         </div>
       </div>

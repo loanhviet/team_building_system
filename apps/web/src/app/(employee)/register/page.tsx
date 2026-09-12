@@ -7,7 +7,9 @@ import { EmptyState } from "@/components/domain/empty-state";
 import { ProfileCard } from "@/components/domain/profile-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -211,24 +213,20 @@ function RegistrationForm({
           <CardTitle className="text-base">Xác nhận tham gia</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex gap-4">
+          <RadioGroup
+            value={isParticipating === null ? undefined : String(isParticipating)}
+            onValueChange={(v) => setIsParticipating(v === "true")}
+            className="flex flex-row gap-4"
+          >
             <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                checked={isParticipating === true}
-                onChange={() => setIsParticipating(true)}
-              />
+              <RadioGroupItem value="true" />
               Có tham gia
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                checked={isParticipating === false}
-                onChange={() => setIsParticipating(false)}
-              />
+              <RadioGroupItem value="false" />
               Không tham gia
             </label>
-          </div>
+          </RadioGroup>
 
           {isParticipating && (
             <>
@@ -262,15 +260,14 @@ function RegistrationForm({
                   return (
                     <div key={leg.id} className="flex flex-wrap items-center gap-3 text-sm">
                       <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={need?.is_needed ?? false}
-                          onChange={(e) =>
+                          onCheckedChange={(checked) =>
                             setNeeds((prev) => ({
                               ...prev,
                               [leg.id]: {
                                 leg_id: leg.id,
-                                is_needed: e.target.checked,
+                                is_needed: checked === true,
                                 pickup_point_id: prev[leg.id]?.pickup_point_id ?? null,
                               },
                             }))
@@ -320,11 +317,10 @@ function RegistrationForm({
 
               {terms && (
                 <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     className="mt-1"
                     checked={agreed}
-                    onChange={(e) => setAgreed(e.target.checked)}
+                    onCheckedChange={(checked) => setAgreed(checked === true)}
                   />
                   <span>{terms.terms_text}</span>
                 </label>

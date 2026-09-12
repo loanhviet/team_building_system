@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -362,7 +363,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                 <TableCell>{f.direction}</TableCell>
                 <TableCell>{shifts?.find((s) => s.id === f.shift_id)?.name ?? "—"}</TableCell>
                 <TableCell>{f.capacity}</TableCell>
-                <TableCell className="text-sm text-zinc-500">
+                <TableCell className="text-sm text-muted-foreground">
                   {f.origin ?? "—"} → {f.destination ?? "—"}
                 </TableCell>
                 <TableCell>
@@ -376,7 +377,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       </Table>
 
       {job && (job.status === "queued" || job.status === "running") && (
-        <p className="text-sm text-zinc-500">Đang chạy phân bổ...</p>
+        <p className="text-sm text-muted-foreground">Đang chạy phân bổ...</p>
       )}
       {summary && (
         <div className="rounded-md border p-4 text-sm">
@@ -390,13 +391,13 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-medium">Danh sách phân bổ ({direction})</p>
-          <label className="flex items-center gap-1 text-xs text-zinc-500">
-            <input type="checkbox" checked={flagsOnly} onChange={(e) => setFlagsOnly(e.target.checked)} />
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Checkbox checked={flagsOnly} onCheckedChange={(checked) => setFlagsOnly(checked === true)} />
             Chỉ hiện flag
           </label>
           {selected.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-zinc-500">{selected.size} đã chọn</span>
+              <span className="text-xs text-muted-foreground">{selected.size} đã chọn</span>
               <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Chuyển tới chuyến" />
@@ -440,13 +441,12 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             {visibleAssignments?.map((a) => (
               <TableRow key={a.employee_id}>
                 <TableCell>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.has(a.employee_id)}
-                    onChange={(e) =>
+                    onCheckedChange={(checked) =>
                       setSelected((prev) => {
                         const next = new Set(prev);
-                        if (e.target.checked) next.add(a.employee_id);
+                        if (checked === true) next.add(a.employee_id);
                         else next.delete(a.employee_id);
                         return next;
                       })
@@ -474,7 +474,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             ))}
             {(!visibleAssignments || visibleAssignments.length === 0) && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-zinc-500">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   Chưa có dữ liệu — hãy chạy phân bổ hoặc chờ CBNV đăng ký
                 </TableCell>
               </TableRow>
@@ -489,7 +489,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             <DialogTitle>Điều chỉnh chuyến bay</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               Chuyển {selected.size} người sang chuyến đã chọn. Cần ghi lý do (audit log).
             </p>
             <div className="flex flex-col gap-1.5">

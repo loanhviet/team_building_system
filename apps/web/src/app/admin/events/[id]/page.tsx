@@ -48,7 +48,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
                 {s.shift_name}: {s.count}
               </Badge>
             ))}
-            {dashboard.by_shift.length === 0 && <p className="text-sm text-zinc-500">Chưa có dữ liệu</p>}
+            {dashboard.by_shift.length === 0 && <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>}
           </CardContent>
         </Card>
         <Card>
@@ -62,7 +62,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
               </Badge>
             ))}
             {dashboard.transport_need_by_leg.length === 0 && (
-              <p className="text-sm text-zinc-500">Chưa có dữ liệu</p>
+              <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
             )}
           </CardContent>
         </Card>
@@ -77,7 +77,7 @@ export default function EventOverviewPage({ params }: { params: Promise<{ id: st
               </Badge>
             ))}
             {dashboard.flight_slots.length === 0 && (
-              <p className="text-sm text-zinc-500">Chưa có chuyến bay</p>
+              <p className="text-sm text-muted-foreground">Chưa có chuyến bay</p>
             )}
           </CardContent>
         </Card>

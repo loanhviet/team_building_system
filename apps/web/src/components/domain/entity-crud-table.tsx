@@ -129,14 +129,14 @@ export function EntityCrudTable({
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={fields.length + 2} className="text-center text-zinc-500">
+              <TableCell colSpan={fields.length + 2} className="text-center text-muted-foreground">
                 Đang tải...
               </TableCell>
             </TableRow>
           )}
           {!isLoading && data?.length === 0 && (
             <TableRow>
-              <TableCell colSpan={fields.length + 2} className="text-center text-zinc-500">
+              <TableCell colSpan={fields.length + 2} className="text-center text-muted-foreground">
                 Chưa có dữ liệu
               </TableCell>
             </TableRow>

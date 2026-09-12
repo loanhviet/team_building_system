@@ -114,7 +114,7 @@ export default function UsersPage() {
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-zinc-500">
+              <TableCell colSpan={6} className="text-center text-muted-foreground">
                 Đang tải...
               </TableCell>
             </TableRow>

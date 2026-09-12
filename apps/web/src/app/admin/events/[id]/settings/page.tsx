@@ -27,7 +27,7 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
   });
 
   if (!event || !settings) {
-    return <p className="text-sm text-zinc-500">Đang tải cấu hình...</p>;
+    return <p className="text-sm text-muted-foreground">Đang tải cấu hình...</p>;
   }
 
   return (

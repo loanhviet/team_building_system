@@ -7,7 +7,7 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0-R1 xong, R2 chưa bắt đầu
+Ngày lập: 2026-09-12 · Trạng thái: R0-R2 xong (R2 chưa click-through Chrome thật), R3 chưa bắt đầu
 
 ---
 
@@ -421,43 +421,70 @@ chỗ trong khi ~32 người chọn Ca 2), không phải lỗi thuật toán.
 **Xong là nhìn thấy gì:** không còn `<input type="checkbox">` trần nào trong repo; mọi nhãn tiếng Việt
 nhất quán; 1 bảng dùng chung có sort/filter/export chạy được trên ít nhất 1 màn hình thật (Employees).
 
-- [ ] Thêm shadcn primitive còn thiếu vào `apps/web/src/components/ui/`: `checkbox.tsx`,
+- [x] Thêm shadcn primitive còn thiếu vào `apps/web/src/components/ui/`: `checkbox.tsx`,
       `radio-group.tsx`, `skeleton.tsx`, `alert.tsx`, `alert-dialog.tsx`, `tooltip.tsx`, `popover.tsx`
       (dùng `npx shadcn add …` trong container web hoặc copy pattern các file `ui/*` hiện có)
-- [ ] Thay mọi `<input type="checkbox">` trần bằng `<Checkbox>`:
+- [x] Thay mọi `<input type="checkbox">` trần bằng `<Checkbox>`:
       `register/page.tsx:216,266,324`, `flight-allocation-panel.tsx:443`, `bus-allocation-panel.tsx:339`
-- [ ] Dẹp `text-zinc-*` literal trong `apps/web/src/app/admin/**` về token (`text-muted-foreground` …)
-- [ ] **`components/domain/data-table.tsx`** (mới, thay dần `entity-crud-table.tsx`):
-      cột định nghĩa khai báo, ô tìm kiếm debounce, filter dropdown theo cột, click-header để sort,
-      phân trang, nút Export (nhận callback build query string đúng filter đang bật — sửa đúng bug
-      registrations export ở R5), giữ khả năng edit-inline mà `entity-crud-table` đang thiếu
-- [ ] **`components/domain/confirm-dialog.tsx`** (mới) — `<ConfirmDialog trigger title description
-      confirmLabel onConfirm>`; dùng `AlertDialog` bên dưới
-- [ ] **`components/domain/job-progress.tsx`** (mới) — nhận `jobId`, tự poll `GET /api/jobs/{id}`, hiện
-      progress bar `progress/total` + trạng thái + nút huỷ theo dõi; tái dùng pattern đã có ở
-      `admin/employees/page.tsx:59-67`
-- [ ] **`components/domain/status-badge.tsx`** (mới) — map `EventStatus` → màu + nhãn Việt, dùng
-      `lib/event-status.ts` làm nguồn nhãn
-- [ ] **`components/domain/empty-state.tsx`** — thêm biến thể `variant="error"` với nút "Thử lại"
-      (`onRetry`), giữ biến thể rỗng hiện tại làm mặc định
-- [ ] **`lib/labels.ts`** (mới) — object tra cứu tiếng Việt cho: `direction` (outbound/inbound),
-      `source` (auto/manual/import), `flag_reason` (no_slot/shift_mismatch), `JobStatus`, `JobType`,
-      audit `action`/`entity_type`, Gala `config.status`/turn `status`. Export hàm `label(map, key)` trả
-      về key gốc nếu không tìm thấy (không bao giờ throw)
-- [ ] **`lib/api.ts`** — gộp các request refresh-token đang chạy song song thành 1 promise dùng chung
-      (`:54-57`); bắt `TypeError` mạng và ném `ApiError` với thông điệp tiếng Việt "Không thể kết nối
-      máy chủ"; thêm `AbortSignal` timeout mặc định
-- [ ] **`lib/providers.tsx`** — đặt `staleTime` mặc định hợp lý (không phải 0), thêm `QueryCache.onError`
-      bắn toast chung cho lỗi không được xử lý riêng
+      (cặp radio Có/Không tham gia ở dòng 216 cũng đổi sang `<RadioGroup>` luôn, cùng vấn đề)
+- [x] Dẹp `text-zinc-*` literal trong `apps/web/src/app/admin/**` về token (`text-muted-foreground` …)
+      — toàn bộ chỉ là `text-zinc-500`, sed 1 lệnh cho 13 file
+- [x] **`components/domain/data-table.tsx`** (mới) — cột khai báo qua `DataTableColumn<T>[]`
+      (`key`/`header`/`cell`/`sortValue?`/`className?`), click-header để sort (client-side, có mũi tên
+      lên/xuống), phân trang tuỳ chọn (`pageSize`, client-side). **Lệch so với mô tả gốc:** không tự
+      có ô tìm kiếm/filter/export bên trong — nhận `toolbar` (ReactNode) để màn hình cha tự quản search/
+      filter, vì nhiều màn hình lọc **server-side** (query param) và nút Export phải gửi đúng filter đó;
+      để DataTable tự giữ state search sẽ lệch khỏi request Export thật. `entity-crud-table.tsx` **chưa
+      xoá** — vẫn dùng cho Master Data/Settings, sẽ thay dần khi R5 chạm tới từng màn hình đó
+- [x] **`components/domain/confirm-dialog.tsx`** (mới) — `<ConfirmDialog trigger title description
+      confirmLabel onConfirm>`, dùng `AlertDialog` (Base UI) bên dưới, tự quản `pending`/đóng dialog
+      sau khi `onConfirm` xong
+- [x] **`components/domain/job-progress.tsx`** (mới) — nhận `jobId`, tự poll `GET /api/jobs/{id}`, hiện
+      thanh tiến trình `progress/total` + trạng thái; tái dùng pattern đã có ở
+      `admin/employees/page.tsx`. **Lược bớt:** không có nút huỷ theo dõi riêng — `refetchInterval` tự
+      dừng khi job `succeeded`/`failed`, không có job nào chạy vô hạn để cần huỷ
+- [x] **`components/domain/status-badge.tsx`** (mới, tên thật `EventStatusBadge`) — map `EventStatus` →
+      1 trong 3 `Badge` variant (default/secondary/outline) + nhãn Việt từ `lib/event-status.ts`
+- [x] **`components/domain/empty-state.tsx`** — thêm `variant="error"` (icon cảnh báo, tiêu đề màu đỏ)
+      + `onRetry` (nút "Thử lại"), biến thể rỗng cũ vẫn là mặc định, không phá API cũ
+- [x] **`lib/labels.ts`** (mới) — `direction`, `source` (auto/manual/import), `flag_reason`, job
+      `status`/`type`, audit `action`/`entity_type` (đủ 24 giá trị grep được từ backend), Gala
+      `config.status`/turn `status`/seat `status`. Mỗi map có hàm `xxxLabel(key)` riêng thay vì 1 hàm
+      `label(map, key)` chung — gọi `directionLabel(x)` rõ ràng hơn `label(directionMap, x)` tại chỗ dùng;
+      đều fallback về key gốc (hoặc "—" khi rỗng), không bao giờ throw
+- [x] **`lib/api.ts`** — `tryRefresh` giờ dùng 1 `refreshPromise` dùng chung (6 request 401 cùng lúc chỉ
+      gọi `/auth/refresh` đúng 1 lần); `fetchWithTimeout` bọc mọi `fetch` (trừ `apiChatStream` — stream SSE
+      cố ý không đặt timeout cố định) bắt `AbortError`/lỗi mạng thành `ApiError` tiếng Việt, timeout mặc
+      định 15s; thông điệp fallback đổi từ `Request failed: {status}` sang tiếng Việt
+- [x] **`lib/providers.tsx`** — `staleTime: 30_000` mặc định; `QueryCache.onError` bắn toast chung, bỏ
+      qua khi query có `meta.silent` (cơ chế opt-out cho màn hình đã tự hiện lỗi inline — **chưa** gắn
+      `meta.silent` vào query nào cả, để R3-R5 tự thêm khi chạm tới từng màn hình, tránh sửa lan man
+      ngoài phạm vi R2)
 
 **Nghiệm thu:**
 ```bash
 docker compose exec web npx tsc --noEmit
 docker compose exec web npm run lint
 ```
-Chrome thật: mở `/admin/employees`, thử sort theo cột, filter, export — kiểm tra bằng mắt.
+Cả 2 sạch. `apps/web/package.json`/`package-lock.json` không đổi (mọi primitive Base UI cần đều đã có
+sẵn trong `@base-ui/react`, không phải cài thêm gói nào).
 
-**Đã kiểm chứng:** _(điền khi xong)_
+**`/admin/employees` đã chuyển sang dùng `DataTable`** làm màn hình chứng minh cụ thể: cột Mã NV/Họ tên/
+Email/Team/Địa điểm có thể click để sort (client-side trên trang 50 dòng hiện tại), khối import dùng
+`JobProgress` thay vì dòng chữ tĩnh cũ. Search/filter/export/phân trang **giữ nguyên logic server-side
+đã có** (đây vốn là màn hình tốt nhất trong audit, không cần viết lại phần đó).
+
+**Đã kiểm chứng:** `ruff`/`pytest` không đổi vì R2 không đụng backend (32→43 test vẫn pass, xem R1).
+`tsc --noEmit` và `next lint` sạch sau toàn bộ thay đổi. `grep` xác nhận 0 `type="checkbox"`/`type="radio"`
+trần còn lại trong `src/`, 0 `zinc-` còn lại trong `admin/**`+`components/domain/**`. Seed lại
+(`--reset`) chạy sạch, `docker compose up` cả 5 service (thêm `mailhog`/`web`) lên khoẻ mạnh, `curl` xác
+nhận `/login` và `/admin/employees` trả 200.
+**Chưa click-through trình duyệt thật** — Chrome extension (`claude-in-chrome`) không kết nối được
+trong môi trường sandbox này (`tabs_context_mcp` báo "Browser extension is not connected"). Đây đúng là
+việc mà audit đã chỉ ra là nguyên nhân gốc của toàn bộ đợt làm lại này, nên **không** giả vờ đã làm khi
+chưa làm được: cần người dùng hoặc phiên có Chrome extension kết nối, mở `/admin/employees`, thử sort
+theo cột, filter, export bằng mắt thật trước khi coi bước này là xong hoàn toàn. Việc này nên làm ngay
+khi có điều kiện, và bắt buộc phải làm trước R6.
 
 ---
 

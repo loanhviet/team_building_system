@@ -62,7 +62,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
   });
 
   if (isLoading || !event) {
-    return <p className="text-sm text-zinc-500">Đang tải sự kiện...</p>;
+    return <p className="text-sm text-muted-foreground">Đang tải sự kiện...</p>;
   }
 
   const nextStatuses = EVENT_FORWARD_TRANSITIONS[event.status];

@@ -56,13 +56,13 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
                 </TableCell>
                 <TableCell className="text-xs">
                   {log.entity_type} #{log.entity_id}
-                  {log.reason && <span className="text-zinc-500"> — {log.reason}</span>}
+                  {log.reason && <span className="text-muted-foreground"> — {log.reason}</span>}
                 </TableCell>
               </TableRow>
             ))}
             {(!auditLogs || auditLogs.length === 0) && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-zinc-500">
+                <TableCell colSpan={3} className="text-center text-muted-foreground">
                   Chưa có thay đổi nào
                 </TableCell>
               </TableRow>
@@ -105,7 +105,7 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
             ))}
             {(!jobs || jobs.length === 0) && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-zinc-500">
+                <TableCell colSpan={3} className="text-center text-muted-foreground">
                   Chưa có job nào
                 </TableCell>
               </TableRow>

@@ -133,14 +133,14 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={8} className="text-center text-zinc-500">
+              <TableCell colSpan={8} className="text-center text-muted-foreground">
                 Đang tải...
               </TableCell>
             </TableRow>
           )}
           {!isLoading && data?.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="text-center text-zinc-500">
+              <TableCell colSpan={8} className="text-center text-muted-foreground">
                 Chưa có ai đăng ký
               </TableCell>
             </TableRow>

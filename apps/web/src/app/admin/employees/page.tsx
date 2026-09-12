@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { JobProgress } from "@/components/domain/job-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
 import type { Employee, EmployeeList, ImportBatch, ImportEnqueued, Job, Site, Team } from "@/types/api";
 
@@ -153,6 +154,49 @@ export default function EmployeesPage() {
   const total = data?.total ?? 0;
   const canPrev = offset > 0;
   const canNext = offset + limit < total;
+
+  const columns: DataTableColumn<Employee>[] = [
+    {
+      key: "employee_code",
+      header: "Mã NV",
+      cell: (emp) => <span className="font-mono">{emp.employee_code ?? "—"}</span>,
+      sortValue: (emp) => emp.employee_code ?? "",
+    },
+    { key: "full_name", header: "Họ tên", cell: (emp) => emp.full_name, sortValue: (emp) => emp.full_name },
+    { key: "email", header: "Email", cell: (emp) => emp.email, sortValue: (emp) => emp.email },
+    {
+      key: "team_name",
+      header: "Team",
+      cell: (emp) => emp.team_name ?? "—",
+      sortValue: (emp) => emp.team_name ?? "",
+    },
+    {
+      key: "site_name",
+      header: "Địa điểm",
+      cell: (emp) => emp.site_name ?? "—",
+      sortValue: (emp) => emp.site_name ?? "",
+    },
+    { key: "phone", header: "SĐT", cell: (emp) => emp.phone ?? "—" },
+    {
+      key: "is_active",
+      header: "Trạng thái",
+      cell: (emp) => (
+        <Badge variant={emp.is_active ? "default" : "secondary"}>
+          {emp.is_active ? "Hoạt động" : "Ngừng"}
+        </Badge>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      className: "text-right",
+      cell: (emp) => (
+        <Button size="sm" variant="ghost" onClick={() => openEdit(emp)}>
+          Sửa
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -322,11 +366,7 @@ export default function EmployeesPage() {
         )}
       </div>
 
-      {job && (job.status === "queued" || job.status === "running") && (
-        <p className="text-sm text-zinc-500">
-          Đang xử lý import (job #{job.id})... {job.progress}/{job.total ?? "?"}
-        </p>
-      )}
+      <JobProgress jobId={activeJobId} />
       {job && job.status === "succeeded" && batch && (
         <div className="rounded-md border p-4 text-sm">
           <p className="font-medium">
@@ -343,53 +383,16 @@ export default function EmployeesPage() {
           )}
         </div>
       )}
-      {job && job.status === "failed" && <p className="text-sm text-red-500">Import thất bại: {job.error}</p>}
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Mã NV</TableHead>
-            <TableHead>Họ tên</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Team</TableHead>
-            <TableHead>Địa điểm</TableHead>
-            <TableHead>SĐT</TableHead>
-            <TableHead>Trạng thái</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={8} className="text-center text-zinc-500">
-                Đang tải...
-              </TableCell>
-            </TableRow>
-          )}
-          {data?.items.map((emp) => (
-            <TableRow key={emp.id}>
-              <TableCell className="font-mono">{emp.employee_code ?? "—"}</TableCell>
-              <TableCell>{emp.full_name}</TableCell>
-              <TableCell>{emp.email}</TableCell>
-              <TableCell>{emp.team_name ?? "—"}</TableCell>
-              <TableCell>{emp.site_name ?? "—"}</TableCell>
-              <TableCell>{emp.phone ?? "—"}</TableCell>
-              <TableCell>
-                <Badge variant={emp.is_active ? "default" : "secondary"}>
-                  {emp.is_active ? "Hoạt động" : "Ngừng"}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Button size="sm" variant="ghost" onClick={() => openEdit(emp)}>
-                  Sửa
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <DataTable
+        columns={columns}
+        rows={data?.items ?? []}
+        rowKey={(emp) => emp.id}
+        isLoading={isLoading}
+        emptyMessage="Chưa có CBNV nào khớp bộ lọc"
+      />
 
-      <div className="flex items-center justify-between text-sm text-zinc-500">
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
         <p>
           {total} CBNV · trang {Math.floor(offset / limit) + 1}
         </p>

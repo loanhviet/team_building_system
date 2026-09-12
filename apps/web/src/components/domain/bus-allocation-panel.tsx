@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -259,7 +260,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           ))}
           {(!buses || buses.length === 0) && (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-zinc-500">
+              <TableCell colSpan={4} className="text-center text-muted-foreground">
                 Chưa có xe cho chặng này
               </TableCell>
             </TableRow>
@@ -268,7 +269,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       </Table>
 
       {job && (job.status === "queued" || job.status === "running") && (
-        <p className="text-sm text-zinc-500">Đang chạy phân xe...</p>
+        <p className="text-sm text-muted-foreground">Đang chạy phân xe...</p>
       )}
 
       {summary && (
@@ -295,7 +296,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           <p className="text-sm font-medium">Danh sách nhu cầu xe (chặng đã chọn)</p>
           {selected.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-zinc-500">{selected.size} đã chọn</span>
+              <span className="text-xs text-muted-foreground">{selected.size} đã chọn</span>
               <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Chuyển tới xe" />
@@ -336,13 +337,12 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             {assignments?.map((a) => (
               <TableRow key={a.employee_id}>
                 <TableCell>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.has(a.employee_id)}
-                    onChange={(e) =>
+                    onCheckedChange={(checked) =>
                       setSelected((prev) => {
                         const next = new Set(prev);
-                        if (e.target.checked) next.add(a.employee_id);
+                        if (checked === true) next.add(a.employee_id);
                         else next.delete(a.employee_id);
                         return next;
                       })
@@ -370,7 +370,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             ))}
             {(!assignments || assignments.length === 0) && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-zinc-500">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Chưa có dữ liệu
                 </TableCell>
               </TableRow>
@@ -385,7 +385,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             <DialogTitle>Điều chỉnh xe</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               Chuyển {selected.size} người sang xe đã chọn. Cần ghi lý do (audit log).
             </p>
             <div className="flex flex-col gap-1.5">

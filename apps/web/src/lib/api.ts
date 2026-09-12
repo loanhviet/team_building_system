@@ -1,4 +1,5 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const DEFAULT_TIMEOUT_MS = 15000;
 
 let accessToken: string | null = null;
 
@@ -21,8 +22,27 @@ export class ApiError extends Error {
   }
 }
 
+/** Every raw `fetch` in this file goes through here so a dropped connection
+ * or a slow server doesn't hang a screen forever or throw a raw browser
+ * `TypeError` into Vietnamese UI text. Not used by apiChatStream — an SSE
+ * stream is expected to run long, so a fixed timeout would kill it early. */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError(0, "timeout", "Máy chủ phản hồi quá lâu, vui lòng thử lại.");
+    }
+    throw new ApiError(0, "network_error", "Không thể kết nối máy chủ. Vui lòng kiểm tra kết nối mạng.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function rawFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API_URL}${path}`, {
+  return fetchWithTimeout(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -33,15 +53,38 @@ async function rawFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+// Six queries can all get a 401 at once (a page that fires several requests
+// on mount) — without this, each one kicks off its own /auth/refresh call,
+// which races a rotating refresh token into logging everyone out. One
+// in-flight refresh is shared by every caller instead.
+let refreshPromise: Promise<boolean> | null = null;
+
 async function tryRefresh(): Promise<boolean> {
-  const res = await rawFetch("/api/auth/refresh", { method: "POST" });
-  if (!res.ok) {
-    setAccessToken(null);
-    return false;
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const res = await rawFetch("/api/auth/refresh", { method: "POST" });
+    if (!res.ok) {
+      setAccessToken(null);
+      return false;
+    }
+    const data = await res.json();
+    setAccessToken(data.access_token);
+    return true;
+  })();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
   }
-  const data = await res.json();
-  setAccessToken(data.access_token);
-  return true;
+}
+
+async function errorFromResponse(res: Response): Promise<ApiError> {
+  const body = await res.json().catch(() => null);
+  return new ApiError(
+    res.status,
+    body?.error?.code ?? "unknown_error",
+    body?.error?.message ?? `Yêu cầu thất bại (mã lỗi ${res.status})`,
+  );
 }
 
 export async function apiFetch<T>(
@@ -56,21 +99,14 @@ export async function apiFetch<T>(
     if (refreshed) return apiFetch<T>(path, init, true);
   }
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new ApiError(
-      res.status,
-      body?.error?.code ?? "unknown_error",
-      body?.error?.message ?? `Request failed: ${res.status}`,
-    );
-  }
+  if (!res.ok) throw await errorFromResponse(res);
 
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
 export async function apiDownload(path: string, filename: string): Promise<void> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetchWithTimeout(`${API_URL}${path}`, {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     credentials: "include",
   });
@@ -128,21 +164,14 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetchWithTimeout(`${API_URL}${path}`, {
     method: "POST",
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     credentials: "include",
     body: formData,
   });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new ApiError(
-      res.status,
-      body?.error?.code ?? "unknown_error",
-      body?.error?.message ?? `Request failed: ${res.status}`,
-    );
-  }
+  if (!res.ok) throw await errorFromResponse(res);
 
   return res.json() as Promise<T>;
 }

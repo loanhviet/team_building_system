@@ -270,7 +270,7 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
               ))}
               {allRooms.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-zinc-500">
+                  <TableCell colSpan={3} className="text-center text-muted-foreground">
                     Chưa có phòng
                   </TableCell>
                 </TableRow>
@@ -383,7 +383,7 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
             ))}
             {(!assignments || assignments.length === 0) && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-zinc-500">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Chưa gán phòng cho ai
                 </TableCell>
               </TableRow>

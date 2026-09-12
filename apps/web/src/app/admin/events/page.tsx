@@ -108,7 +108,7 @@ export default function EventsPage() {
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-zinc-500">
+              <TableCell colSpan={4} className="text-center text-muted-foreground">
                 Đang tải...
               </TableCell>
             </TableRow>
