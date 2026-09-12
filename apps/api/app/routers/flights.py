@@ -17,6 +17,7 @@ from app.models.auth import User
 from app.models.event import Event
 from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
+from app.models.registration import Registration
 from app.models.system import AllocationRun, Job
 from app.schemas.flight import (
     AdjustAssignmentRequest,
@@ -30,7 +31,8 @@ from app.schemas.flight import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
-from app.services.notification.email_service import enqueue_email
+from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
+from app.services.notification.email_service import dispatch_email, enqueue_email
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
@@ -56,6 +58,8 @@ async def list_flights(
 async def create_flight(
     event_id: int, payload: FlightCreate, db: DbSession, user: AdminUser
 ) -> Flight:
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     flight = await master_data.create(db, Flight, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="flight", entity_id=flight.id,
@@ -70,6 +74,8 @@ async def create_flight(
 async def update_flight(
     event_id: int, flight_id: int, payload: FlightUpdate, db: DbSession, user: AdminUser
 ) -> Flight:
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     flight = await master_data.get_or_404(db, Flight, flight_id, event_id=event_id)
     before = FlightOut.model_validate(flight).model_dump(mode="json")
     await master_data.update(db, flight, payload.model_dump(exclude_unset=True))
@@ -88,7 +94,8 @@ async def import_flights(
     event_id: int, db: DbSession, user: AdminUser, file: UploadFile
 ) -> dict:
     """Small dataset (a handful of flights) — parsed synchronously, no queue needed."""
-    await master_data.get_or_404(db, Event, event_id)
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     content = await file.read()
     workbook = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     sheet = workbook.active
@@ -118,21 +125,31 @@ async def import_flights(
                     raise ValueError("direction phải là outbound hoặc inbound")
                 depart_at = row.get("depart_at")
                 arrive_at = row.get("arrive_at")
-                flight = Flight(
-                    event_id=event_id,
-                    flight_code=str(row["flight_code"]).strip(),
-                    airline=str(row["airline"]).strip() if row.get("airline") else None,
-                    direction=direction,
-                    depart_at=depart_at if isinstance(depart_at, datetime) else None,
-                    arrive_at=arrive_at if isinstance(arrive_at, datetime) else None,
-                    origin=str(row["origin"]).strip() if row.get("origin") else None,
-                    destination=(
-                        str(row["destination"]).strip() if row.get("destination") else None
-                    ),
-                    capacity=int(row["capacity"]),
-                    note=str(row["note"]).strip() if row.get("note") else None,
+                flight_code = str(row["flight_code"]).strip()
+
+                # upsert by (event_id, flight_code): re-importing the same file
+                # (or a corrected one) updates the existing flight in place
+                # instead of creating a duplicate every time
+                existing = await db.execute(
+                    select(Flight).where(
+                        Flight.event_id == event_id, Flight.flight_code == flight_code
+                    )
                 )
-                db.add(flight)
+                flight = existing.scalar_one_or_none()
+                if flight is None:
+                    flight = Flight(event_id=event_id, flight_code=flight_code)
+                    db.add(flight)
+
+                flight.airline = str(row["airline"]).strip() if row.get("airline") else None
+                flight.direction = direction
+                flight.depart_at = depart_at if isinstance(depart_at, datetime) else None
+                flight.arrive_at = arrive_at if isinstance(arrive_at, datetime) else None
+                flight.origin = str(row["origin"]).strip() if row.get("origin") else None
+                flight.destination = (
+                    str(row["destination"]).strip() if row.get("destination") else None
+                )
+                flight.capacity = int(row["capacity"])
+                flight.note = str(row["note"]).strip() if row.get("note") else None
                 await db.flush()
             ok_rows += 1
         except Exception as exc:  # noqa: BLE001
@@ -232,7 +249,8 @@ async def run_flight_allocation_endpoint(
     user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> AllocationEnqueuedOut:
-    await master_data.get_or_404(db, Event, event_id)
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_allocation_allowed(event)
 
     run = AllocationRun(
         event_id=event_id,
@@ -287,7 +305,47 @@ async def adjust_flight_assignments(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
     event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     target_flight = await master_data.get_or_404(db, Flight, payload.flight_id, event_id=event_id)
+
+    employee_ids = set(payload.employee_ids)
+    if payload.team_id is not None:
+        team_result = await db.execute(
+            select(Registration.employee_id)
+            .join(Employee, Employee.id == Registration.employee_id)
+            .where(
+                Registration.event_id == event_id,
+                Registration.status == "submitted",
+                Employee.team_id == payload.team_id,
+            )
+        )
+        employee_ids |= {row[0] for row in team_result.all()}
+
+    if not employee_ids:
+        raise AppError(
+            "no_employees", "Không có CBNV nào để chuyển (kiểm tra employee_ids/team_id)",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    # every id must actually belong to a submitted registration in *this* event,
+    # otherwise a bogus/foreign id would hit the FK constraint on insert below
+    # and surface as an unhandled 500 instead of a clear 400
+    valid_result = await db.execute(
+        select(Registration.employee_id).where(
+            Registration.event_id == event_id,
+            Registration.employee_id.in_(employee_ids),
+            Registration.status == "submitted",
+        )
+    )
+    valid_ids = {row[0] for row in valid_result.all()}
+    invalid_ids = employee_ids - valid_ids
+    if invalid_ids:
+        raise AppError(
+            "invalid_employee_ids",
+            f"Các mã CBNV không có đăng ký hợp lệ trong sự kiện này: {sorted(invalid_ids)}",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    employee_ids = valid_ids
 
     result = await db.execute(
         select(FlightAssignment).where(
@@ -297,7 +355,7 @@ async def adjust_flight_assignments(
         )
     )
     current_on_target = {a.employee_id for a in result.scalars().all()}
-    moving_in = set(payload.employee_ids) - current_on_target
+    moving_in = employee_ids - current_on_target
     would_be_count = len(current_on_target) + len(moving_in)
 
     warnings = []
@@ -311,7 +369,7 @@ async def adjust_flight_assignments(
             )
         warnings.append("over_capacity_forced")
 
-    for employee_id in payload.employee_ids:
+    for employee_id in employee_ids:
         result = await db.execute(
             select(FlightAssignment).where(
                 FlightAssignment.event_id == event_id,
@@ -349,12 +407,13 @@ async def adjust_flight_assignments(
     await db.commit()
 
     if event.status.value in ("information_published", "event_started"):
-        for employee_id in payload.employee_ids:
+        outbox_ids = []
+        for employee_id in employee_ids:
             employee = await db.get(Employee, employee_id)
             if employee is None:
                 continue
-            await enqueue_email(
-                db, queue, event_id=event_id, to_email=employee.email,
+            outbox_id = await enqueue_email(
+                db, event_id=event_id, to_email=employee.email,
                 template_code="flight_changed",
                 payload={
                     "full_name": employee.full_name, "event_name": event.name,
@@ -362,6 +421,11 @@ async def adjust_flight_assignments(
                 },
                 dedupe_key=f"flight_changed:{event_id}:{employee_id}:{utcnow().isoformat()}",
             )
+            outbox_ids.append(outbox_id)
         await db.commit()
+        # dispatch only after commit — the worker loads each row on its own
+        # connection and won't see it until this transaction is durable
+        for outbox_id in outbox_ids:
+            await dispatch_email(queue, outbox_id)
 
-    return {"moved": len(payload.employee_ids), "warnings": warnings}
+    return {"moved": len(employee_ids), "warnings": warnings}

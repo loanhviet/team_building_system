@@ -34,5 +34,9 @@ async def get_my_journey(
             status.HTTP_400_BAD_REQUEST,
         )
     employee = await db.get(Employee, user.employee_id)
+    if employee is None:
+        raise AppError(
+            "not_found", "Hồ sơ nhân viên không còn tồn tại", status.HTTP_404_NOT_FOUND
+        )
     event = await resolve_published_event(db, user.employee_id)
     return await build_journey(db, event, employee)

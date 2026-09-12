@@ -17,6 +17,7 @@ from app.models.auth import User
 from app.models.bus import Bus, BusAssignment
 from app.models.event import Event
 from app.models.organization import Employee
+from app.models.registration import Registration
 from app.models.system import AllocationRun, Job
 from app.schemas.bus import (
     BusAdjustRequest,
@@ -29,7 +30,8 @@ from app.schemas.bus import (
 from app.schemas.flight import AllocationEnqueuedOut, AllocationRunOut
 from app.services import master_data
 from app.services.audit_service import record_audit
-from app.services.notification.email_service import enqueue_email
+from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
+from app.services.notification.email_service import dispatch_email, enqueue_email
 
 router = APIRouter(prefix="/events/{event_id}", tags=["buses"])
 
@@ -50,6 +52,8 @@ async def list_buses(
 
 @router.post("/buses", response_model=BusOut, status_code=status.HTTP_201_CREATED)
 async def create_bus(event_id: int, payload: BusCreate, db: DbSession, user: AdminUser) -> Bus:
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     bus = await master_data.create(db, Bus, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="bus", entity_id=bus.id,
@@ -64,6 +68,8 @@ async def create_bus(event_id: int, payload: BusCreate, db: DbSession, user: Adm
 async def update_bus(
     event_id: int, bus_id: int, payload: BusUpdate, db: DbSession, user: AdminUser
 ) -> Bus:
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     bus = await master_data.get_or_404(db, Bus, bus_id, event_id=event_id)
     before = BusOut.model_validate(bus).model_dump(mode="json")
     await master_data.update(db, bus, payload.model_dump(exclude_unset=True))
@@ -110,7 +116,8 @@ async def run_bus_allocation_endpoint(
     user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> AllocationEnqueuedOut:
-    await master_data.get_or_404(db, Event, event_id)
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_allocation_allowed(event)
 
     run = AllocationRun(
         event_id=event_id, type="bus", params_json={"leg_id": payload.leg_id},
@@ -160,7 +167,47 @@ async def adjust_bus_assignments(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
     event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     target_bus = await master_data.get_or_404(db, Bus, payload.bus_id, event_id=event_id)
+
+    employee_ids = set(payload.employee_ids)
+    if payload.team_id is not None:
+        team_result = await db.execute(
+            select(Registration.employee_id)
+            .join(Employee, Employee.id == Registration.employee_id)
+            .where(
+                Registration.event_id == event_id,
+                Registration.status == "submitted",
+                Employee.team_id == payload.team_id,
+            )
+        )
+        employee_ids |= {row[0] for row in team_result.all()}
+
+    if not employee_ids:
+        raise AppError(
+            "no_employees", "Không có CBNV nào để chuyển (kiểm tra employee_ids/team_id)",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    # every id must belong to a submitted registration in *this* event, otherwise
+    # a bogus/foreign id would hit the FK constraint on insert below and surface
+    # as an unhandled 500 instead of a clear 400
+    valid_result = await db.execute(
+        select(Registration.employee_id).where(
+            Registration.event_id == event_id,
+            Registration.employee_id.in_(employee_ids),
+            Registration.status == "submitted",
+        )
+    )
+    valid_ids = {row[0] for row in valid_result.all()}
+    invalid_ids = employee_ids - valid_ids
+    if invalid_ids:
+        raise AppError(
+            "invalid_employee_ids",
+            f"Các mã CBNV không có đăng ký hợp lệ trong sự kiện này: {sorted(invalid_ids)}",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    employee_ids = valid_ids
 
     result = await db.execute(
         select(BusAssignment).where(
@@ -170,7 +217,7 @@ async def adjust_bus_assignments(
         )
     )
     current_on_target = {a.employee_id for a in result.scalars().all()}
-    moving_in = set(payload.employee_ids) - current_on_target
+    moving_in = employee_ids - current_on_target
     would_be_count = len(current_on_target) + len(moving_in)
 
     warnings = []
@@ -184,7 +231,7 @@ async def adjust_bus_assignments(
             )
         warnings.append("over_capacity_forced")
 
-    for employee_id in payload.employee_ids:
+    for employee_id in employee_ids:
         result = await db.execute(
             select(BusAssignment).where(
                 BusAssignment.event_id == event_id,
@@ -216,12 +263,13 @@ async def adjust_bus_assignments(
 
     await db.commit()
     if event.status.value in ("information_published", "event_started"):
-        for employee_id in payload.employee_ids:
+        outbox_ids = []
+        for employee_id in employee_ids:
             employee = await db.get(Employee, employee_id)
             if employee is None:
                 continue
-            await enqueue_email(
-                db, queue, event_id=event_id, to_email=employee.email,
+            outbox_id = await enqueue_email(
+                db, event_id=event_id, to_email=employee.email,
                 template_code="bus_changed",
                 payload={
                     "full_name": employee.full_name, "event_name": event.name,
@@ -229,9 +277,13 @@ async def adjust_bus_assignments(
                 },
                 dedupe_key=f"bus_changed:{event_id}:{employee_id}:{utcnow().isoformat()}",
             )
+            outbox_ids.append(outbox_id)
         await db.commit()
+        # dispatch only after commit — see enqueue_email's docstring
+        for outbox_id in outbox_ids:
+            await dispatch_email(queue, outbox_id)
 
-    return {"moved": len(payload.employee_ids), "warnings": warnings}
+    return {"moved": len(employee_ids), "warnings": warnings}
 
 
 @router.get("/bus-assignments/export")

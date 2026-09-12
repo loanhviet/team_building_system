@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.request_context import get_client_ip
 from app.models.audit import AuditLog
 
 
@@ -15,6 +16,10 @@ async def record_audit(
     reason: str | None = None,
     event_id: int | None = None,
 ) -> None:
+    # `ip` comes from the request-scoped contextvar set by main.py's
+    # capture_client_ip middleware, not a parameter — every call site logging
+    # an HTTP-triggered action gets it for free; a worker-task caller (no
+    # request in flight) just gets None, which is correct for it too.
     db.add(
         AuditLog(
             event_id=event_id,
@@ -25,5 +30,6 @@ async def record_audit(
             before_json=before,
             after_json=after,
             reason=reason,
+            ip=get_client_ip(),
         )
     )

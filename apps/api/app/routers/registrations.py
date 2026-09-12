@@ -14,7 +14,7 @@ from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.models.auth import User
-from app.models.event import Event, Shift, TransportLeg
+from app.models.event import Event, PickupPoint, Shift, TransportLeg
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.schemas.registration import (
@@ -26,7 +26,8 @@ from app.schemas.registration import (
     TransportNeedOut,
 )
 from app.services import master_data
-from app.services.notification.email_service import enqueue_email
+from app.services.audit_service import record_audit
+from app.services.notification.email_service import dispatch_email, enqueue_email
 from app.services.registration_service import (
     assert_can_edit,
     cancel_registration,
@@ -94,9 +95,37 @@ async def update_my_registration(
     assert_can_edit(event, reg)
 
     data = payload.model_dump(exclude={"transport_needs"}, exclude_unset=True)
+    if data.get("shift_id") is not None:
+        shift = await db.get(Shift, data["shift_id"])
+        if shift is None or shift.event_id != event_id:
+            raise AppError("invalid_shift", "Ca không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST)
     for key, value in data.items():
         setattr(reg, key, value)
+
     if payload.transport_needs is not None:
+        leg_ids = {n.leg_id for n in payload.transport_needs}
+        pickup_ids = {n.pickup_point_id for n in payload.transport_needs if n.pickup_point_id is not None}
+        if leg_ids:
+            result = await db.execute(
+                select(TransportLeg.id).where(
+                    TransportLeg.event_id == event_id, TransportLeg.id.in_(leg_ids)
+                )
+            )
+            if {row[0] for row in result.all()} != leg_ids:
+                raise AppError(
+                    "invalid_leg", "Chặng xe không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST
+                )
+        if pickup_ids:
+            result = await db.execute(
+                select(PickupPoint.id).where(
+                    PickupPoint.event_id == event_id, PickupPoint.id.in_(pickup_ids)
+                )
+            )
+            if {row[0] for row in result.all()} != pickup_ids:
+                raise AppError(
+                    "invalid_pickup_point", "Điểm đón không thuộc sự kiện này",
+                    status.HTTP_400_BAD_REQUEST,
+                )
         await replace_transport_needs(
             db, reg.id, [n.model_dump() for n in payload.transport_needs]
         )
@@ -138,9 +167,12 @@ async def submit_my_registration(
     needed_count = sum(1 for n in needs if n.is_needed)
     transport_summary = f"{needed_count} chặng" if needed_count else "Không có nhu cầu"
 
-    await enqueue_email(
+    # dedupe key is per-registration, not per-submission: submit_registration()
+    # bumps submitted_at on every resubmit, so keying on it would send a fresh
+    # "confirmed" email every time someone edits and resubmits before the
+    # registration deadline instead of only once
+    outbox_id = await enqueue_email(
         db,
-        queue,
         event_id=event_id,
         to_email=employee.email,
         template_code="registration_confirmed",
@@ -153,10 +185,15 @@ async def submit_my_registration(
             "transport_summary": transport_summary,
             "app_url": settings.app_base_url,
         },
-        dedupe_key=f"registration_confirmed:{reg.id}:{reg.submitted_at.isoformat()}",
+        dedupe_key=f"registration_confirmed:{reg.id}",
     )
 
+    await record_audit(
+        db, actor_user_id=user.id, action="submit", entity_type="registration", entity_id=reg.id,
+        after={"is_participating": reg.is_participating, "shift_id": reg.shift_id}, event_id=event_id,
+    )
     await db.commit()
+    await dispatch_email(queue, outbox_id)
     return await _registration_out(db, reg)
 
 
@@ -169,6 +206,10 @@ async def cancel_my_registration(
     reg = await get_or_create_registration(db, event_id, employee.id)
     assert_can_edit(event, reg)
     cancel_registration(reg, payload.reason)
+    await record_audit(
+        db, actor_user_id=user.id, action="cancel", entity_type="registration", entity_id=reg.id,
+        reason=payload.reason, event_id=event_id,
+    )
     await db.commit()
     return await _registration_out(db, reg)
 

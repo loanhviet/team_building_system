@@ -69,7 +69,8 @@ class BusAssignmentOut(BaseModel):
 
 
 class BusAdjustRequest(BaseModel):
-    employee_ids: list[int]
+    employee_ids: list[int] = []
+    team_id: int | None = None  # move every registered member of this team, in addition to employee_ids
     bus_id: int
     reason: str
     force: bool = False

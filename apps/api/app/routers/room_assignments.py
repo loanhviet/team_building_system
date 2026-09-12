@@ -89,6 +89,20 @@ async def assign_room(
     if hotel is None or hotel.event_id != event_id:
         raise AppError("not_found", "Room không thuộc event này", status.HTTP_404_NOT_FOUND)
 
+    reg_result = await db.execute(
+        select(Registration.id).where(
+            Registration.event_id == event_id,
+            Registration.employee_id == payload.employee_id,
+            Registration.status == "submitted",
+        )
+    )
+    if reg_result.scalar_one_or_none() is None:
+        raise AppError(
+            "invalid_employee_id",
+            "CBNV không có đăng ký hợp lệ trong sự kiện này",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     result = await db.execute(select(RoomAssignment).where(RoomAssignment.room_id == room.id))
     occupants = result.scalars().all()
     already_here = any(a.employee_id == payload.employee_id for a in occupants)

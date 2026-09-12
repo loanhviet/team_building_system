@@ -17,6 +17,7 @@ AssignmentSource = Enum(
 
 class Flight(TimestampMixin, Base):
     __tablename__ = "flights"
+    __table_args__ = (UniqueConstraint("event_id", "flight_code", name="uq_flight_event_code"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)

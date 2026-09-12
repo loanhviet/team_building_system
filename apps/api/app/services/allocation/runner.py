@@ -55,9 +55,11 @@ async def run_flight_allocation(
         f.id: FlightSlot(flight_id=f.id, shift_id=f.shift_id, capacity=f.capacity)
         for f in result.scalars().all()
     }
+    team_by_employee = {employee_id: team_id for employee_id, _shift_id, team_id in rows}
     for a in locked:
         if a.flight_id in slots:
             slots[a.flight_id].assigned.append(a.employee_id)
+            slots[a.flight_id].assigned_team_ids.append(team_by_employee.get(a.employee_id))
 
     by_team: dict[int | None, list[Candidate]] = defaultdict(list)
     for employee_id, shift_id, team_id in rows:

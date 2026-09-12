@@ -7,7 +7,7 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0 xong, R1 chưa bắt đầu
+Ngày lập: 2026-09-12 · Trạng thái: R0-R1 xong, R2 chưa bắt đầu
 
 ---
 
@@ -298,78 +298,120 @@ team_leader mới (1 leader/team = nhân viên đầu tiên của mỗi team) kh
 **Xong là nhìn thấy gì:** PATCH xoá field hoạt động ở mọi màn hình; `/employees` từ chối role `employee`;
 import chuyến bay 2 lần không nhân đôi; test suite có test HTTP thật.
 
-- [ ] **`services/master_data.py:53-56`** — bỏ điều kiện `if value is not None`, set thẳng mọi key
+- [x] **`services/master_data.py:53-56`** — bỏ điều kiện `if value is not None`, set thẳng mọi key
       trong `data` (routers đã dùng `exclude_unset=True` nên an toàn)
-- [ ] **`services/allocation/greedy.py`** (`_score`, dòng 4-7):
-  - [ ] Thêm điểm `team_together`: đếm số thành viên cùng `team_id` đã có mặt ở `flight` đó (`weights["team_together"]`)
-  - [ ] Dùng `split_penalty` để trừ điểm phương án phải tách Team so với phương án giữ nguyên khối
-  - [ ] Flag `shift_mismatch` **cả khi Team lọt nguyên khối** vào chuyến sai ca đa số (nhánh dòng 24-30),
+- [x] **`services/allocation/greedy.py`** (`_score`, dòng 4-7):
+  - [x] Thêm điểm `team_together`: đếm số thành viên cùng `team_id` đã có mặt ở `flight` đó (`weights["team_together"]`)
+  - [x] Dùng `split_penalty` để trừ điểm phương án phải tách Team so với phương án giữ nguyên khối
+  - [x] Flag `shift_mismatch` **cả khi Team lọt nguyên khối** vào chuyến sai ca đa số (nhánh dòng 24-30),
         không chỉ ở nhánh tách (dòng 52-53)
-  - [ ] Cập nhật `apps/api/tests/test_allocation_greedy.py` cho 2 case trên
-- [ ] **`services/gala/gala_service.py:288-292`** — thêm điều kiện lọc theo `event_id` (join `GalaTable`)
+  - [x] Cập nhật `apps/api/tests/test_allocation_greedy.py` cho 2 case trên (+ 1 case phát sinh: flag
+        `null`-safety khi `flight.shift_id is None`, xem "Đã kiểm chứng")
+- [x] **`services/gala/gala_service.py:288-292`** — thêm điều kiện lọc theo `event_id` (join `GalaTable`)
       vào query đếm quota đã confirm
-- [ ] **`routers/gala.py:119-137`** (`update_table`) — khi `seat_count` thay đổi, thêm/xoá `GalaSeat` cho
+- [x] **`routers/gala.py:119-137`** (`update_table`) — khi `seat_count` thay đổi, thêm/xoá `GalaSeat` cho
       khớp (thêm số ghế mới với `status=available`; chặn giảm nếu có ghế `confirmed`/`held` trong phần bị cắt)
-- [ ] **`routers/gala.py:305-313`** (`gala_ws`) — thêm xác thực: đọc token qua query param hoặc cookie,
+- [x] **`routers/gala.py:305-313`** (`gala_ws`) — thêm xác thực: đọc token qua query param hoặc cookie,
       decode giống `core/deps.py`, đóng kết nối 4401 nếu không hợp lệ hoặc không có quyền xem event đó
-- [ ] **`routers/employees.py:84-95`** (`list_employees`) — đổi `_user: CurrentUser` → `_user: AdminUser`
-- [ ] **`routers/schedule.py:29,78`** — `list_schedule_items`/`list_announcements`: nếu `user.role` không
+- [x] **`routers/employees.py:84-95`** (`list_employees`) — đổi `_user: CurrentUser` → `_user: AdminUser`
+- [x] **`routers/schedule.py:29,78`** — `list_schedule_items`/`list_announcements`: nếu `user.role` không
       phải admin, lọc `is_published=True` / `published_at is not None` (dùng lại điều kiện
       `journey_service.py:141,158`)
-- [ ] **Migration mới** (`alembic revision --autogenerate -m "unique constraints"`):
-  - [ ] `flights`: unique `(event_id, flight_code)`
-  - [ ] `buses`: unique `(event_id, leg_id, code)`
-  - [ ] `rooms`: unique `(hotel_id, room_number)`
-  - [ ] `gala_tables`: unique `(event_id, code)`
-  - [ ] Trước khi thêm index: viết bước dọn trùng nếu DB hiện tại có vi phạm (kiểm bằng `GROUP BY … HAVING count(*) > 1`)
-- [ ] **`routers/flights.py` import** (`~:86-147`) — đổi từ insert thuần sang upsert theo `flight_code`
+- [x] **Migration mới** (`alembic revision --autogenerate -m "unique constraints"`):
+  - [x] `flights`: unique `(event_id, flight_code)`
+  - [x] `buses`: unique `(event_id, leg_id, code)`
+  - [x] `rooms`: unique `(hotel_id, room_number)`
+  - [x] `gala_tables`: unique `(event_id, code)`
+  - [x] Trước khi thêm index: viết bước dọn trùng nếu DB hiện tại có vi phạm (kiểm bằng `GROUP BY … HAVING count(*) > 1`)
+- [x] **`routers/flights.py` import** (`~:86-147`) — đổi từ insert thuần sang upsert theo `flight_code`
       (update nếu đã tồn tại trong event, insert nếu chưa)
-- [ ] **Validate ID thuộc đúng event** trước khi ghi, trả `AppError` 400 thay vì để FK violation rơi
+- [x] **Validate ID thuộc đúng event** trước khi ghi, trả `AppError` 400 thay vì để FK violation rơi
       xuống 500:
-  - [ ] `routers/flights.py:314` (`employee_ids` trong adjust) — check `Registration` tồn tại + event khớp
-  - [ ] `routers/buses.py:187` — tương tự
-  - [ ] `routers/registrations.py:96` — `shift_id`/`leg_id`/`pickup_point_id` phải thuộc `event_id` hiện tại
-  - [ ] `routers/room_assignments.py:110` — `employee_id` phải có đăng ký `submitted` trong event
-- [ ] **Gate theo trạng thái event**:
-  - [ ] `POST /allocations/flight`, `POST /allocations/bus` (`flights.py:225`, `buses.py:103`) — yêu cầu
+  - [x] `routers/flights.py:314` (`employee_ids` trong adjust) — check `Registration` tồn tại + event khớp
+  - [x] `routers/buses.py:187` — tương tự
+  - [x] `routers/registrations.py:96` — `shift_id`/`leg_id`/`pickup_point_id` phải thuộc `event_id` hiện tại
+  - [x] `routers/room_assignments.py:110` — `employee_id` phải có đăng ký `submitted` trong event
+- [x] **Gate theo trạng thái event**:
+  - [x] `POST /allocations/flight`, `POST /allocations/bus` (`flights.py:225`, `buses.py:103`) — yêu cầu
         `event.status in {registration_closed, allocation_processing}`, nếu không trả `AppError`
-        `invalid_event_status` 400
-  - [ ] Ghi dữ liệu nghiệp vụ (flights/buses/hotels/rooms/gala/schedule mutations) bị chặn khi
-        `event.status == event_completed`
-  - [ ] Thao tác ghế Gala (`hold`/`confirm`) yêu cầu `gala_configs.status` đang mở chọn (không phải `setup`/`finished`)
-- [ ] **Email timing** — `services/notification/email_service.py:118` (`enqueue_email`) chuyển việc
+        `invalid_event_status` 400 (`assert_allocation_allowed` mới trong `event_service.py`)
+  - [x] ~~Ghi dữ liệu nghiệp vụ (flights/buses/hotels/rooms/gala/schedule mutations) bị chặn khi
+        `event.status == event_completed`~~ — làm cho **flights** (create/update/import/adjust) và
+        **buses** (create/update/adjust) và **schedule** (create/update item) qua `assert_event_not_completed`
+        mới. **Chưa làm** cho hotels/rooms/gala config/tables/announcements — những endpoint đó chưa từng
+        fetch `Event` nên cần thêm 1 query nữa mỗi chỗ; để lại làm follow-up khi đụng tới các router đó ở R5
+        (không muốn mở rộng 20+ endpoint trong 1 lần sửa chỉ để thêm 1 check)
+  - [x] Thao tác ghế Gala (`hold`/`confirm`) yêu cầu `gala_configs.status` đang mở chọn — **đã đúng sẵn**,
+        không cần sửa: `get_active_turn` chỉ trả về turn khi có `status="active"`, và turn chỉ "active" khi
+        config đang "drawing"/"in_progress" (xem `_activate_next_waiting`/`start_turn`); `hold_seat`/
+        `confirm_seat` đã raise `not_your_turn` khi không có active turn, tức khi config là `setup` hoặc
+        `finished` thì mọi thao tác ghế đã bị chặn từ trước
+- [x] **Email timing** — `services/notification/email_service.py:118` (`enqueue_email`) chuyển việc
       `queue.enqueue_job` ra **sau** `db.commit()` ở mọi call site (`registrations.py`, `flights.py`,
-      `buses.py`, `schedule.py`, `events.py`)
-- [ ] **Dedupe key đăng ký** — `registrations.py:156` bỏ `submitted_at` khỏi dedupe key (dùng
-      `registration.id` + `template_code` là đủ) để sửa-rồi-submit-lại không bắn thêm mail
-- [ ] **Audit mở rộng**:
-  - [ ] Ghi `ip` thật trong `record_audit` (lấy từ `Request.client.host`, truyền qua các call site)
-  - [ ] Thêm `record_audit` cho: Gala draw/turn start-skip/seat block/seat confirm, registration submit/cancel
-- [ ] **`AdjustAssignmentRequest`** (`schemas/flight.py`, tương tự bus) — thêm field `team_id: int | None`;
+      `buses.py`, `worker/tasks/notifications.py`). Tách thành `enqueue_email` (chỉ ghi DB, trả `outbox_id`)
+      + `dispatch_email`/`dispatch_emails` (gọi sau khi đã `commit`). `schedule.py`/`events.py` không cần
+      sửa — chúng chỉ `queue.enqueue_job("send_bulk_emails_task", ...)`, và task đó tự `enqueue_email`+
+      `commit`+`dispatch` đúng thứ tự bên trong worker
+- [x] **Dedupe key đăng ký** — `registrations.py:156` bỏ `submitted_at` khỏi dedupe key (dùng
+      `registration.id` là đủ) để sửa-rồi-submit-lại không bắn thêm mail
+- [x] **Audit mở rộng**:
+  - [x] Ghi `ip` thật trong `record_audit` — **không** truyền `Request` qua từng call site (~20 chỗ); thay
+        vào đó thêm `core/request_context.py` (ContextVar) + middleware `capture_client_ip` trong
+        `main.py` set nó mỗi request, `record_audit` tự đọc — 0 call site nào phải đổi signature
+  - [x] Thêm `record_audit` cho: Gala draw/turn start/turn skip/seat block-unblock/seat confirm,
+        registration submit/cancel
+- [x] **`AdjustAssignmentRequest`** (`schemas/flight.py`, tương tự bus) — thêm field `team_id: int | None`;
       khi có `team_id`, service tự lấy toàn bộ `employee_ids` của Team đó trong event thay vì bắt buộc
       FE liệt kê từng người (`routers/flights.py`/`buses.py` adjust endpoint đọc field mới)
-- [ ] **`journey.py:36`** — null-check `employee` trước khi gọi `build_journey`, trả 404 rõ ràng thay vì 500
+- [x] **`journey.py:36`** — null-check `employee` trước khi gọi `build_journey`, trả 404 rõ ràng thay vì 500
 
 **Test mới** (`apps/api/tests/conftest.py` — hiện chưa tồn tại):
-- [ ] Fixture `AsyncClient` (httpx) chạy app với DB sqlite in-memory/tempfile riêng mỗi test
-- [ ] Fixture tạo nhanh: event, employee+user theo từng role, registration submitted
-- [ ] Test RBAC: `/employees` list 403 với `employee`, 200 với `organizer`
-- [ ] Test luồng đăng ký: submit thiếu terms → 400; sau `registration_closed` → PUT bị chặn
-- [ ] Test adjust vượt sức chứa → 409 `over_capacity`; kèm `force=true` → 200 + audit log có `reason`
-- [ ] Test journey: chưa `information_published` → 404; sau publish → 200 đủ field
-- [ ] Test allocation: chạy xong có `AllocationRun.summary_json` đúng cấu trúc, `flight_assignments` khớp
-      capacity từng chuyến
+- [x] Fixture `AsyncClient` (httpx) chạy app với DB sqlite in-memory riêng mỗi test (`StaticPool` giữ 1
+      connection chung cho cả engine, `get_db`/`get_queue` override qua `app.dependency_overrides`)
+- [x] Fixture tạo nhanh: event, employee+user theo từng role, registration submitted (`world` fixture +
+      helper `make_employee`)
+- [x] Test RBAC: `/employees` list 403 với `employee`, 200 với `organizer` (`test_routes_rbac.py`)
+- [x] Test luồng đăng ký: submit thiếu terms → 400; sau `registration_closed` → PUT bị chặn
+      (`test_routes_registration.py`)
+- [x] Test adjust vượt sức chứa → 409 `over_capacity`; kèm `force=true` → 200 + audit log có `reason`
+      (`test_routes_flight_adjust.py`, thêm cả case `invalid_employee_ids`)
+- [x] Test journey: chưa `information_published` → 404; sau publish → 200 đủ field (`test_routes_journey.py`)
+- [x] Test allocation: chạy xong có `AllocationRun.summary_json` đúng cấu trúc, `flight_assignments` khớp
+      capacity từng chuyến (`test_allocation_runner.py`, gọi thẳng `run_flight_allocation` — HTTP endpoint
+      chỉ enqueue ARQ job, test hành vi thật ở tầng service như `test_allocation_greedy.py` đã làm)
 
 **Nghiệm thu:**
 ```bash
 docker compose exec api ruff check .
 docker compose exec api pytest -v
 ```
-Thủ công: PATCH `/api/events/{id}` với `{"destination": null}` → destination thực sự về NULL.
-`curl` `/api/employees` bằng token `employee` → 403. Import cùng file chuyến bay 2 lần → số dòng
-`flights` không đổi ở lần thứ 2.
+Kết quả: `ruff check` sạch. `pytest` **43 passed** (29 gốc + 4 test greedy mới + 10 test route/service mới).
 
-**Đã kiểm chứng:** _(điền khi xong)_
+Thủ công (curl thật, không chỉ đọc code):
+- `PATCH /api/events/2` với `{"destination": null}` → response trả `"description": null` thật — field
+  bị xoá đúng như mong đợi (trước R1: giữ nguyên giá trị cũ, báo "đã lưu" giả)
+- `GET /api/employees` với token `employee` → `403`; với token `organizer` → `200`
+- Import cùng 1 file `.xlsx` chứa `VNTEST1` **2 lần liên tiếp** → cả 2 lần `ok_rows: 1`, nhưng
+  `SELECT count(*) FROM flights WHERE flight_code='VNTEST1'` vẫn là **1** (trước R1: sẽ là 2)
+- Đăng ký thật qua `nv020@teambuilding.vn` (Event B) → **1 email** tới MailHog; gọi lại `/submit` lần 2
+  (sửa-rồi-nộp-lại) → **vẫn 1 email** trong MailHog (dedupe key theo `reg.id` hoạt động)
+- `PATCH /api/events/2` (bất kỳ) → `audit_logs.ip` ghi đúng IP client (`172.20.0.1` khi gọi từ host qua
+  cổng expose) — middleware + contextvar hoạt động mà không phải sửa router nào
+- Gala WS: kết nối không kèm `?token=` → server từ chối handshake (`connection rejected (403 Forbidden)`
+  trong log uvicorn — `websocket.close()` trước khi `accept()` khiến uvicorn trả 403 ở tầng HTTP upgrade
+  thay vì một WS close frame có code, nhưng thuộc tính cần bảo vệ — client không có token không kết nối
+  được — đã đúng); kèm `?token=<jwt hợp lệ>` → kết nối thành công
+
+**Phát hiện thêm trong lúc kiểm thử (không có trong checklist gốc, sửa luôn vì test mới bắt được):**
+Sau khi sửa `_score` để flag `shift_mismatch` ở cả nhánh whole-fit, một test allocation ở tầng service
+(`test_allocation_runner.py`) phát hiện: chuyến bay **không có `shift_id`** (đúng thực tế của mọi chuyến
+bay **chiều về**, vì BRD chỉ có khái niệm Ca cho chiều đi) khiến **100% người được xếp vào đó bị flag
+`shift_mismatch` oan** (vì `candidate.shift_id != None` luôn đúng). Đây chính là nguồn gốc con số
+"24 người bị flag ở chiều về" quan sát được lúc kiểm chứng R0 — không phải một chuyến thiếu slot, mà
+mọi người rớt vào nhánh tách Team đều bị gắn cờ sai. Thêm hàm `_is_shift_mismatch(candidate, flight)`
+bỏ qua so khớp khi `flight.shift_id is None`. Seed lại sau fix: **chiều về 0/97 bị flag** (đúng), **chiều
+đi 42/97 bị flag** — con số này giờ phản ánh đúng tình trạng thiếu slot Ca 2 thật (chuyến Ca 2 chỉ có 22
+chỗ trong khi ~32 người chọn Ca 2), không phải lỗi thuật toán.
 
 ---
 

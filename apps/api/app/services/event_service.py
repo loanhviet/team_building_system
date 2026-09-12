@@ -16,6 +16,34 @@ DEFAULT_TERMS_TEXT = (
 )
 DEFAULT_TERMS_VERSION = "v1"
 
+ALLOCATION_ALLOWED_STATUSES = {EventStatus.registration_closed, EventStatus.allocation_processing}
+
+
+def assert_allocation_allowed(event: Event) -> None:
+    """Flight/bus auto-allocation is only meaningful once registration is closed
+    and before the event is fully wrapped up — running it while registration is
+    still open would allocate against an incomplete roster."""
+    if event.status not in ALLOCATION_ALLOWED_STATUSES:
+        raise AppError(
+            "invalid_event_status",
+            f"Không thể chạy phân bổ khi sự kiện đang ở trạng thái "
+            f"'{event.status.value}'. Cần đóng đăng ký trước.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+
+def assert_event_not_completed(event: Event) -> None:
+    """Once an event is `event_completed`, its operational data (flights, buses,
+    manual reassignments, schedule) is history — block further edits rather than
+    silently letting someone change a record of what already happened."""
+    if event.status == EventStatus.event_completed:
+        raise AppError(
+            "event_completed",
+            "Sự kiện đã kết thúc, không thể chỉnh sửa dữ liệu vận hành",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+
 FORWARD_TRANSITIONS: dict[EventStatus, set[EventStatus]] = {
     EventStatus.draft: {EventStatus.registration_open},
     EventStatus.registration_open: {EventStatus.registration_closed},

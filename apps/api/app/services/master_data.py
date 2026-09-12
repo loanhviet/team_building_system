@@ -51,9 +51,12 @@ async def create[ModelT](
 
 
 async def update[ModelT](db: AsyncSession, instance: ModelT, data: dict[str, Any]) -> ModelT:
+    # Callers always pass `model_dump(exclude_unset=True)`, so every key here was
+    # explicitly sent by the client — including an explicit `null` meaning "clear
+    # this field". Skipping None here (as a previous version did) silently made
+    # every optional field on every entity in the app impossible to clear via PATCH.
     for key, value in data.items():
-        if value is not None:
-            setattr(instance, key, value)
+        setattr(instance, key, value)
     try:
         await db.flush()
     except IntegrityError as exc:

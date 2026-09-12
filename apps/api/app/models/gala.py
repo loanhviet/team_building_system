@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -40,6 +40,7 @@ class GalaConfig(Base):
 
 class GalaTable(Base):
     __tablename__ = "gala_tables"
+    __table_args__ = (UniqueConstraint("event_id", "code", name="uq_gala_table_event_code"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)

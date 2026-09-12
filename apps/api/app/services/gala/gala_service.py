@@ -19,6 +19,34 @@ def auto_table_position(index: int) -> tuple[int, int]:
     return 40 + (index % 3) * 220, 28 + (index // 3) * 200
 
 
+async def resize_table_seats(db: AsyncSession, table: GalaTable, new_seat_count: int) -> None:
+    """Keep `gala_seats` in sync with `GalaTable.seat_count`. Growing appends new
+    `available` seats; shrinking refuses if any seat past the new count is
+    already held/confirmed/blocked — resize doesn't get to silently evict
+    someone's chosen seat."""
+    result = await db.execute(
+        select(GalaSeat).where(GalaSeat.table_id == table.id).order_by(GalaSeat.seat_number)
+    )
+    seats = list(result.scalars().all())
+
+    if new_seat_count > len(seats):
+        for n in range(len(seats) + 1, new_seat_count + 1):
+            db.add(GalaSeat(table_id=table.id, seat_number=n, label=f"{table.code}-{n}"))
+    elif new_seat_count < len(seats):
+        to_remove = seats[new_seat_count:]
+        if any(s.status != "available" for s in to_remove):
+            raise AppError(
+                "seats_in_use",
+                "Không thể giảm số ghế: có ghế đã được giữ/xác nhận trong phần bị cắt",
+                status.HTTP_409_CONFLICT,
+            )
+        for s in to_remove:
+            await db.delete(s)
+
+    table.seat_count = new_seat_count
+    await db.flush()
+
+
 async def compute_team_quota(db: AsyncSession, event_id: int, team_id: int, config: GalaConfig) -> int:
     if config.seat_quota_rule == "fixed":
         return config.fixed_quota or 0
@@ -286,8 +314,12 @@ async def confirm_seat(
         raise AppError("not_your_turn", "Chưa đến lượt của Team bạn", status.HTTP_403_FORBIDDEN)
 
     result = await db.execute(
-        select(func.count(GalaSeat.id)).where(
-            GalaSeat.team_id == team_id, GalaSeat.status == "confirmed"
+        select(func.count(GalaSeat.id))
+        .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+        .where(
+            GalaTable.event_id == event_id,
+            GalaSeat.team_id == team_id,
+            GalaSeat.status == "confirmed",
         )
     )
     already_confirmed = result.scalar_one()

@@ -36,6 +36,7 @@ class RoomType(Base):
 
 class Room(Base):
     __tablename__ = "rooms"
+    __table_args__ = (UniqueConstraint("hotel_id", "room_number", name="uq_room_hotel_number"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), index=True)

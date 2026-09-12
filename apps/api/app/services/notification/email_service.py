@@ -94,17 +94,25 @@ async def render_email(
 
 async def enqueue_email(
     db: AsyncSession,
-    queue: ArqRedis,
     *,
     event_id: int | None,
     to_email: str,
     template_code: str,
     payload: dict,
     dedupe_key: str,
-) -> None:
+) -> int | None:
+    """Writes the outbox row only — does NOT touch the queue. The worker loads
+    the row by id on its own DB connection, so enqueuing the ARQ job before the
+    caller's transaction commits is a race: a fast worker can look up the row
+    before it's visible, find nothing, and the email is silently never sent
+    (the job returns cleanly, no retry). Callers must `await db.commit()` and
+    then call `dispatch_email`/`dispatch_emails` with the id(s) this returns.
+
+    Returns None (nothing to dispatch) when `dedupe_key` already exists.
+    """
     result = await db.execute(select(EmailOutbox).where(EmailOutbox.dedupe_key == dedupe_key))
     if result.scalar_one_or_none() is not None:
-        return  # already queued/sent — idempotent no-op
+        return None  # already queued/sent — idempotent no-op
 
     outbox = EmailOutbox(
         event_id=event_id,
@@ -115,7 +123,17 @@ async def enqueue_email(
     )
     db.add(outbox)
     await db.flush()
-    await queue.enqueue_job("send_email", outbox.id)
+    return outbox.id
+
+
+async def dispatch_email(queue: ArqRedis, outbox_id: int | None) -> None:
+    if outbox_id is not None:
+        await queue.enqueue_job("send_email", outbox_id)
+
+
+async def dispatch_emails(queue: ArqRedis, outbox_ids: list[int]) -> None:
+    for outbox_id in outbox_ids:
+        await dispatch_email(queue, outbox_id)
 
 
 async def list_templates(db: AsyncSession, event_id: int) -> list[dict]:

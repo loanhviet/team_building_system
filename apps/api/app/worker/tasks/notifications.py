@@ -7,7 +7,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.event import Event
 from app.models.organization import Employee
 from app.models.registration import Registration
-from app.services.notification.email_service import enqueue_email
+from app.services.notification.email_service import dispatch_emails, enqueue_email
 
 logger = logging.getLogger("worker")
 settings = get_settings()
@@ -35,17 +35,23 @@ async def send_bulk_emails_task(
         )
         employees = result.scalars().all()
 
-        queue = ctx["redis"]
+        outbox_ids = []
         for employee in employees:
-            await enqueue_email(
-                db, queue, event_id=event_id, to_email=employee.email, template_code=template_code,
+            outbox_id = await enqueue_email(
+                db, event_id=event_id, to_email=employee.email, template_code=template_code,
                 payload={
                     "full_name": employee.full_name, "event_name": event.name,
                     "app_url": settings.app_base_url,
                 },
                 dedupe_key=f"{template_code}:{event_id}:{employee.id}:{dedupe_suffix}".rstrip(":"),
             )
+            outbox_ids.append(outbox_id)
         await db.commit()
+        # dispatch only after commit — see enqueue_email's docstring. This is
+        # exactly the loop where the race used to bite hardest: 100+ jobs fired
+        # into Redis while the row for job #1 might still be uncommitted.
+        queue = ctx["redis"]
+        await dispatch_emails(queue, [oid for oid in outbox_ids if oid is not None])
         logger.info(
             "send_bulk_emails_task: queued %s emails (%s) for event %s",
             len(employees), template_code, event_id,

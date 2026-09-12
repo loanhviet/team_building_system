@@ -14,6 +14,7 @@ BusAssignmentSource = Enum(
 
 class Bus(TimestampMixin, Base):
     __tablename__ = "buses"
+    __table_args__ = (UniqueConstraint("event_id", "leg_id", "code", name="uq_bus_event_leg_code"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)

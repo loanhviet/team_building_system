@@ -28,6 +28,10 @@ class FlightSlot:
     shift_id: int | None
     capacity: int
     assigned: list[int] = field(default_factory=list)
+    # parallel to `assigned` (same index = same employee) so `_score` can reward
+    # "team_together" without a second lookup — appended alongside every
+    # assigned.append(employee_id) call, including for pre-locked assignments
+    assigned_team_ids: list[int | None] = field(default_factory=list)
 
     @property
     def remaining(self) -> int:

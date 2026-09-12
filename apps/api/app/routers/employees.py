@@ -86,7 +86,7 @@ def _employee_filters(search: str | None, team_id: int | None, site_id: int | No
 @router.get("", response_model=EmployeeListOut)
 async def list_employees(
     db: DbSession,
-    _user: CurrentUser,
+    _user: AdminUser,
     search: str | None = None,
     team_id: int | None = None,
     site_id: int | None = None,

@@ -42,6 +42,7 @@ class GalaTableUpdate(BaseModel):
     x: int | None = None
     y: int | None = None
     shape: str | None = None
+    seat_count: int | None = None
     is_active: bool | None = None
 
 

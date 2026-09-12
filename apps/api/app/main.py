@@ -1,7 +1,7 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -16,6 +16,7 @@ from app.core.errors import (
 )
 from app.core.logging import setup_logging
 from app.core.queue import init_arq_pool
+from app.core.request_context import set_client_ip
 from app.core.ws_manager import gala_manager
 from app.routers import (
     auth,
@@ -65,6 +66,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def capture_client_ip(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    set_client_ip(request.client.host if request.client else None)
+    return await call_next(request)
 
 app.add_exception_handler(AppError, app_error_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)

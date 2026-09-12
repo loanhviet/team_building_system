@@ -7,6 +7,7 @@ from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
+from app.models.enums import UserRole
 from app.models.event import Event
 from app.models.schedule import Announcement, ScheduleItem
 from app.schemas.schedule import (
@@ -19,6 +20,7 @@ from app.schemas.schedule import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.event_service import assert_event_not_completed
 from app.services.notification.email_service import enqueue_schedule_changed
 
 router = APIRouter(prefix="/events/{event_id}", tags=["schedule"])
@@ -26,9 +28,21 @@ router = APIRouter(prefix="/events/{event_id}", tags=["schedule"])
 AdminUser = Annotated[User, Depends(require_admin)]
 
 
+def _is_admin(user: User) -> bool:
+    return user.role in (UserRole.organizer, UserRole.super_admin)
+
+
 @router.get("/schedule-items", response_model=list[ScheduleItemOut])
-async def list_schedule_items(event_id: int, db: DbSession, _user: CurrentUser) -> list[ScheduleItem]:
-    return await master_data.list_all(db, ScheduleItem, event_id=event_id, order_by=ScheduleItem.sort_order)
+async def list_schedule_items(event_id: int, db: DbSession, user: CurrentUser) -> list[ScheduleItem]:
+    items = await master_data.list_all(
+        db, ScheduleItem, event_id=event_id, order_by=ScheduleItem.sort_order
+    )
+    # BTC needs to see drafts to edit them; everyone else only sees what's published
+    # (this mirrors journey_service's filter — that's the endpoint CBNV actually
+    # use, but this generic list shouldn't leak drafts to a direct API call either)
+    if not _is_admin(user):
+        items = [i for i in items if i.is_published]
+    return items
 
 
 @router.post("/schedule-items", response_model=ScheduleItemOut, status_code=status.HTTP_201_CREATED)
@@ -40,6 +54,7 @@ async def create_schedule_item(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> ScheduleItem:
     event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     item = await master_data.create(db, ScheduleItem, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="schedule_item", entity_id=item.id,
@@ -61,6 +76,7 @@ async def update_schedule_item(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> ScheduleItem:
     event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
     item = await master_data.get_or_404(db, ScheduleItem, item_id, event_id=event_id)
     before = ScheduleItemOut.model_validate(item).model_dump(mode="json")
     await master_data.update(db, item, payload.model_dump(exclude_unset=True))
@@ -76,8 +92,10 @@ async def update_schedule_item(
 
 
 @router.get("/announcements", response_model=list[AnnouncementOut])
-async def list_announcements(event_id: int, db: DbSession, _user: CurrentUser) -> list[Announcement]:
+async def list_announcements(event_id: int, db: DbSession, user: CurrentUser) -> list[Announcement]:
     result = await master_data.list_all(db, Announcement, event_id=event_id)
+    if not _is_admin(user):
+        result = [a for a in result if a.published_at is not None]
     return sorted(result, key=lambda a: (not a.is_pinned, a.id), reverse=False)
 
 

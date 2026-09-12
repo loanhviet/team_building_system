@@ -1,5 +1,6 @@
 from typing import Annotated
 
+import jwt
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
+from app.core.security import decode_access_token
 from app.core.ws_manager import gala_manager, publish_gala_event
 from app.models.auth import User
 from app.models.enums import UserRole
@@ -26,12 +28,15 @@ from app.schemas.gala import (
     GalaTurnOut,
 )
 from app.services import master_data
+from app.services.audit_service import record_audit
 from app.services.gala.gala_service import (
     auto_table_position,
     confirm_seat,
     draw_turns,
+    get_active_turn,
     hold_seat,
     release_seat,
+    resize_table_seats,
     set_seat_blocked,
     skip_turn,
     start_turn,
@@ -126,7 +131,11 @@ async def update_table(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaTable:
     table = await master_data.get_or_404(db, GalaTable, table_id, event_id=event_id)
-    await master_data.update(db, table, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    new_seat_count = data.pop("seat_count", None)
+    await master_data.update(db, table, data)
+    if new_seat_count is not None and new_seat_count != table.seat_count:
+        await resize_table_seats(db, table, new_seat_count)
     await db.commit()
     await db.refresh(table)
     await publish_gala_event(
@@ -138,7 +147,7 @@ async def update_table(
 
 
 @router.post("/draw", response_model=list[GalaTurnOut])
-async def draw(event_id: int, db: DbSession, _user: AdminUser) -> list[GalaTurnOut]:
+async def draw(event_id: int, db: DbSession, user: AdminUser) -> list[GalaTurnOut]:
     config = await _get_or_create_config(db, event_id)
     result = await db.execute(
         select(Employee.team_id)
@@ -156,6 +165,10 @@ async def draw(event_id: int, db: DbSession, _user: AdminUser) -> list[GalaTurnO
         raise AppError("no_teams", "Không có Team nào để bốc thăm", status.HTTP_400_BAD_REQUEST)
 
     await draw_turns(db, event_id, config, team_ids)
+    await record_audit(
+        db, actor_user_id=user.id, action="draw", entity_type="gala_turn", entity_id=event_id,
+        after={"team_ids": team_ids}, event_id=event_id,
+    )
     await db.commit()
     return await _turns_out(db, event_id)
 
@@ -164,11 +177,15 @@ async def draw(event_id: int, db: DbSession, _user: AdminUser) -> list[GalaTurnO
 async def start_next_turn(
     event_id: int,
     db: DbSession,
-    _user: AdminUser,
+    user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaTurnOut:
     config = await _get_or_create_config(db, event_id)
     turn = await start_turn(db, event_id, config)
+    await record_audit(
+        db, actor_user_id=user.id, action="turn_start", entity_type="gala_turn", entity_id=turn.id,
+        after={"team_id": turn.team_id, "order_no": turn.order_no}, event_id=event_id,
+    )
     await db.commit()
     await publish_gala_event(
         queue,
@@ -188,11 +205,17 @@ async def start_next_turn(
 async def skip_current_turn(
     event_id: int,
     db: DbSession,
-    _user: AdminUser,
+    user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> list[GalaTurnOut]:
     config = await _get_or_create_config(db, event_id)
+    active_turn = await get_active_turn(db, event_id)
+    skipped_team_id = active_turn.team_id if active_turn else None
     await skip_turn(db, queue, event_id, config)
+    await record_audit(
+        db, actor_user_id=user.id, action="turn_skip", entity_type="gala_turn", entity_id=event_id,
+        before={"team_id": skipped_team_id}, event_id=event_id,
+    )
     await db.commit()
     return await _turns_out(db, event_id)
 
@@ -270,6 +293,10 @@ async def confirm(
     team_id = await _my_team_id(db, user)
     config = await _get_or_create_config(db, event_id)
     seat = await confirm_seat(db, queue, event_id, config, seat_id, team_id)
+    await record_audit(
+        db, actor_user_id=user.id, action="confirm", entity_type="gala_seat", entity_id=seat_id,
+        after={"team_id": team_id, "seat_id": seat_id}, event_id=event_id,
+    )
     await db.commit()
     return seat
 
@@ -280,10 +307,15 @@ async def block_seat(
     seat_id: int,
     payload: GalaSeatBlockIn,
     db: DbSession,
-    _user: AdminUser,
+    user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaSeat:
     seat = await set_seat_blocked(db, queue, event_id, seat_id, payload.blocked)
+    await record_audit(
+        db, actor_user_id=user.id,
+        action="block" if payload.blocked else "unblock",
+        entity_type="gala_seat", entity_id=seat_id, event_id=event_id,
+    )
     await db.commit()
     return seat
 
@@ -303,7 +335,25 @@ async def release(
 
 
 @router.websocket("/ws")
-async def gala_ws(websocket: WebSocket, event_id: int) -> None:
+async def gala_ws(
+    websocket: WebSocket, event_id: int, db: DbSession, token: str | None = None
+) -> None:
+    # Browsers can't set an Authorization header on a WebSocket handshake, so the
+    # access token travels as a query param instead (?token=...) — same JWT the
+    # client already has from login, just relayed differently. Same auth level as
+    # GET /state (any active logged-in user): this only guards against strangers
+    # who don't have a token at all, not per-event scoping beyond that.
+    user = None
+    if token:
+        try:
+            payload = decode_access_token(token)
+            user = await db.get(User, int(payload["sub"]))
+        except (jwt.InvalidTokenError, KeyError, ValueError):
+            user = None
+    if user is None or not user.is_active:
+        await websocket.close(code=4401)
+        return
+
     await gala_manager.connect(event_id, websocket)
     try:
         while True:
