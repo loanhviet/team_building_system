@@ -42,7 +42,7 @@ toàn bộ hành trình, còn BTC có công cụ phân bổ tự động + đi�
 | Multi-event | **Có ngay từ đầu** | Mọi bảng nghiệp vụ mang `event_id` |
 | Phân phòng | **Quản lý + import + gán thủ công** | Không auto-allocate (đúng đề xuất MVP mục 6 BRD) |
 | Vector DB | **Qdrant** | Chỉ dùng ở Phase 8 |
-| LLM/Embedding | **Provider-agnostic** | Interface `LLMProvider` / `EmbeddingProvider`, chọn qua env. Mặc định Claude API + embedding local đa ngữ |
+| LLM/Embedding | **Provider-agnostic** | Interface `LLMProvider` / `EmbeddingProvider`, chọn qua env. Embedding: fastembed local đa ngữ. LLM: đang cấu hình DashScope (Qwen3-Max-Preview) qua endpoint tương thích OpenAI thay vì Claude API — đổi bằng `LLM_PROVIDER` trong `.env`, không cần sửa code |
 | Môi trường | **docker-compose toàn bộ** | api, worker, web, redis, qdrant, mailhog. Có file override cho dev hot-reload |
 | Email | SMTP qua MailHog ở dev | Production đổi bằng env, không đổi code |
 
@@ -554,18 +554,22 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       dùng chung Dockerfile/context ở `apps/api` — compose coi mỗi service là build target riêng trừ khi
       cùng khai báo `image:`. Từ giờ mọi thay đổi ở `apps/api` phải `docker compose build api worker` (hoặc
       build không tham số), không chỉ `build api`
-- **Giới hạn đã biết:** chưa cấu hình `ANTHROPIC_API_KEY` thật trong môi trường này nên **không** kiểm chứng
-      được nội dung câu trả lời LLM thực tế — toàn bộ phần còn lại (ingest, checksum-diff, lưu Qdrant, lọc
-      quyền khi retrieval, lưu/đọc session và message, xử lý lỗi SSE) đã kiểm chứng đầy đủ qua Qdrant thật.
-      Cache model fastembed nằm trong filesystem tạm của container (không phải volume) nên container mới sẽ
-      tải lại model lần đầu dùng (~150 giây) — chấp nhận được cho MVP, có thể mount volume riêng sau nếu cần
-- **Đã kiểm chứng:** reindex ra 24 tài liệu; retrieval với `employee_id=2` chỉ trả tài liệu hành trình của
-      chính họ (không bao giờ thấy tài liệu của employee 3), và ngược lại — đúng yêu cầu bảo mật cốt lõi;
-      gửi chat message không có API key thật vẫn lưu đúng tin nhắn user và trả lỗi SSE sạch. `ruff check`,
-      `next lint`, `next build` sạch
+- **Giới hạn đã biết:** cache model fastembed nằm trong filesystem tạm của container (không phải volume)
+      nên container mới sẽ tải lại model lần đầu dùng (~150 giây) — chấp nhận được cho MVP, có thể mount
+      volume riêng sau nếu cần
+- **LLM provider thực tế dùng:** không phải Anthropic mà là **Alibaba Cloud DashScope (Qwen3-Max-Preview)**
+      qua endpoint tương thích OpenAI — người dùng cung cấp API key riêng, đã cấu hình
+      `LLM_PROVIDER=dashscope` trong `.env` local (xem thêm ghi chú provider trong commit riêng). Kiến trúc
+      Protocol từ đầu Phase 8 chứng minh đúng giá trị: thêm provider mới chỉ cần 1 file implementation +
+      1 nhánh trong factory, không đụng gì khác
+- **Đã kiểm chứng — kể cả câu trả lời LLM thật:** reindex ra 24 tài liệu; retrieval với `employee_id=2`
+      chỉ trả tài liệu hành trình của chính họ (không bao giờ thấy tài liệu của employee 3), và ngược lại;
+      hỏi thật qua chat với 2 nhân viên khác nhau ("mấy giờ tôi tập trung ở sân bay và xe đó tên gì?" /
+      "tôi tên gì và tôi ở phòng nào?") — mỗi người nhận đúng câu trả lời của riêng mình (giờ tập trung, mã
+      xe, tên+SĐT trưởng xe, tên khách sạn/phòng), không ai thấy thông tin người kia, kèm citation đúng
+      nguồn. `ruff check`, `next lint`, `next build` sạch
 - **Xong khi:** hỏi "mấy giờ tôi tập trung ở sân bay?" trả đúng theo dữ liệu cá nhân, và không lộ dữ liệu
-      người khác — **retrieval đã chứng minh đúng; câu trả lời cuối cùng cần `ANTHROPIC_API_KEY` thật để BTC
-      tự kiểm chứng nốt**
+      người khác — **đã kiểm chứng đầy đủ với LLM thật (DashScope Qwen3-Max-Preview)**
 
 ### Phase 9 — Hoàn thiện
 - [ ] Admin Dashboard (mục 10): tổng CBNV, đã/chưa đăng ký, theo ca, nhu cầu xe từng chặng, tình trạng slot bay, tình trạng phân xe/phòng
