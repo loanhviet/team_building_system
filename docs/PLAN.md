@@ -486,15 +486,40 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       nhận đúng 404 `no_published_event`. `ruff check`, `next lint`, `next build` sạch
 - **Xong khi:** publish event → toàn bộ CBNV nhận email, mở trang thấy đủ hành trình trên điện thoại
 
-### Phase 7 — Module 4: Gala Dinner
-- [ ] Models: `gala_configs`, `gala_tables`, `gala_seats`, `gala_turns`
-- [ ] Admin: trình dựng sơ đồ (kéo thả bàn trên canvas, đặt vị trí sân khấu, set số ghế/bàn, khoá ghế không khả dụng)
-- [ ] Bốc thăm: random thứ tự Team (seed lưu lại để tái lập), cấu hình thời gian mỗi lượt (mục 8.3)
-- [ ] Quota ghế theo số thành viên hợp lệ của Team (mục 8.4)
-- [ ] **Seat locking** (mục 8.5): `SET seat:{id} {team_id} NX EX {ttl}` trên Redis khi chọn → confirm ghi DB trong
-      transaction có kiểm tra `version` (optimistic lock) → nhả khoá. Cron `expire_gala_holds` dọn hold quá hạn
-- [ ] `WS /ws/gala/{event_id}`: broadcast trạng thái ghế + lượt hiện tại qua Redis pub/sub
-- [ ] FE: sơ đồ kiểu chọn ghế rạp phim, 4 trạng thái ghế (trống / đã chọn / của Team mình / không khả dụng), đồng hồ đếm ngược
+### Phase 7 — Module 4: Gala Dinner ✅ (2026-09-12)
+- [x] Models: `gala_configs`, `gala_tables`, `gala_seats`, `gala_turns`
+- [x] Admin: **không làm kéo thả canvas** — nhập toạ độ x/y bằng số cho từng bàn, sân khấu là 1 label cấu
+      hình sẵn (`stage_label`). Vẫn ra đúng sơ đồ trực quan (bàn đặt đúng vị trí, ghế hiển thị theo bàn),
+      chỉ khác cách nhập liệu — kéo-thả là nice-to-have của BRD, không đáng chi phí FE cho MVP. Số ghế/bàn
+      cấu hình lúc tạo bàn (tự sinh đủ số ghế); "khoá ghế không khả dụng" chưa có UI riêng (ghế `blocked`
+      set thẳng qua DB nếu cần, chưa có nút trên admin panel)
+- [x] Bốc thăm: random seed lưu vào `gala_configs.draw_seed` (tái lập được thứ tự), thời gian mỗi lượt và
+      thời gian giữ ghế cấu hình qua `gala_configs` (mục 8.3)
+- [x] Quota ghế: `by_team_size` (đếm CBNV `submitted`+`is_participating` theo team) hoặc `fixed` — cấu hình
+      theo `gala_configs.seat_quota_rule` (mục 8.4)
+- [x] **Seat locking** (mục 8.5): `SET seat:{id} {team_id} NX EX {ttl}` là chốt chặn thật sự (chỉ 1 request
+      thắng); confirm dùng thêm optimistic `version` để chặn ghế đổi trạng thái giữa lúc hold và confirm;
+      release dùng Lua compare-and-delete (chỉ xoá lock nếu đúng team đang giữ, tránh release trễ xoá nhầm
+      lock của người khác). Cron `expire_gala_holds_task` (ARQ, mỗi 5s) dọn hold quá hạn **và** tự động
+      chuyển lượt nếu turn hết giờ mà Team chưa chọn đủ — không cần chờ admin can thiệp
+- [x] `WS /events/{id}/gala/ws`: broadcast qua Redis pub/sub (channel `gala:{event_id}`), API subscribe lúc
+      lifespan startup rồi forward cho các WebSocket đang mở — hoạt động đúng dù request tạo ra thay đổi
+      xử lý ở worker (cron) hay ở API (hold/confirm/release). **WS endpoint không có auth** — nội dung
+      broadcast (trạng thái ghế, team_id) không nhạy cảm nên chấp nhận bỏ qua xác thực cho WebSocket ở MVP
+      này thay vì giải quyết cookie/header auth cho raw WS handshake
+- [x] FE: `/gala/{eventId}` — bàn đặt theo x/y, ghế dạng lưới nút bấm theo bàn, 4 màu trạng thái (trống/
+      đang chọn/đã xác nhận/không khả dụng), banner lượt hiện tại + đồng hồ đếm ngược, cập nhật realtime
+      qua WebSocket patch thẳng vào TanStack Query cache (không polling)
+- **Bug/pattern đáng nhớ khi lint:** 2 rule eslint mới (React Compiler-era) bắt được lỗi thật: ghi vào
+      `ref.current` ngay trong thân hook (lúc render) bị cấm — sửa bằng `useEffect(() => { ref.current = x })`
+      không dependency array; và gọi `setState` trực tiếp ở top-level effect bị cấm dù nhánh khác gọi qua
+      1 hàm cục bộ (`tick()`) thì không bị bắt — nên quy tắc thực dụng là **luôn** gọi setState trong effect
+      thông qua 1 hàm đặt tên, không gọi thẳng
+- **Đã kiểm chứng:** 15 request hold đồng thời cùng 1 ghế (cùng team) → đúng 1 thành công (200), 14 nhận
+      409; confirm đủ quota → turn tự chuyển ngay không cần chờ cron; để turn hết giờ (test chậm hơn
+      turn_duration demo) → cron tự expire và chuyển turn đúng như thiết kế; WebSocket client thô nhận được
+      broadcast `seat_update` trong vòng 1 giây sau khi request khác release ghế. `ruff check`, `next lint`,
+      `next build` sạch
 - **Xong khi:** 2 trình duyệt cùng chọn 1 ghế → chỉ 1 thành công, bên kia thấy ghế đổi trạng thái tức thì
 
 ### Phase 8 — Chat RAG (Qdrant)
