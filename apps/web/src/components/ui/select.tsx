@@ -5,7 +5,48 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "cn"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+/**
+ * Base UI's <Select.Value> only shows a real label when the Root's `items`
+ * prop maps value -> label — unlike Radix, it does NOT infer the label from
+ * mounted <Select.Item> children. Every call site here renders items
+ * declaratively as JSX instead of building an items array, so without this,
+ * every Select trigger in the app would show the raw stored value (an id, a
+ * status code) once something is selected, instead of its label. Walking the
+ * children tree once here means every existing `<Select><SelectContent>...`
+ * call site gets a working label for free, with no call site changes.
+ */
+function collectItemLabels(children: React.ReactNode): Record<string, React.ReactNode> {
+  const items: Record<string, React.ReactNode> = {}
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return
+    if (child.type === SelectItem) {
+      const { value, children: label } = child.props as SelectPrimitive.Item.Props
+      if (value != null) items[String(value)] = label
+      return
+    }
+    if (child.type === SelectContent || child.type === SelectGroup) {
+      const nested = (child.props as { children?: React.ReactNode }).children
+      Object.assign(items, collectItemLabels(nested))
+    }
+  })
+  return items
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>({
+  children,
+  items,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  const derivedItems = React.useMemo(
+    () => items ?? collectItemLabels(children),
+    [items, children]
+  )
+  return (
+    <SelectPrimitive.Root items={derivedItems} {...props}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
