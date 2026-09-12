@@ -17,6 +17,7 @@ import { EntityCrudTable } from "@/components/domain/entity-crud-table";
 import { FlightAllocationPanel } from "@/components/domain/flight-allocation-panel";
 import { BusAllocationPanel } from "@/components/domain/bus-allocation-panel";
 import { HotelRoomsPanel } from "@/components/domain/hotel-rooms-panel";
+import { ScheduleAnnouncementsPanel } from "@/components/domain/schedule-announcements-panel";
 import { RegistrationsTable } from "@/components/domain/registrations-table";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -115,6 +116,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
       <div>
         <h2 className="mb-2 text-lg font-medium">Đăng ký</h2>
         <RegistrationsTable eventId={eventId} />
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-lg font-medium">Lịch trình &amp; Thông báo</h2>
+        <ScheduleAnnouncementsPanel eventId={eventId} />
       </div>
 
       <div>

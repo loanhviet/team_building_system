@@ -131,6 +131,45 @@ export type EventTerms = {
   terms_version: string;
 };
 
+export type Journey = {
+  event_id: number;
+  event_name: string;
+  full_name: string;
+  team_name: string | null;
+  is_participating: boolean | null;
+  flights: {
+    direction: "outbound" | "inbound";
+    flight_code: string;
+    depart_at: string | null;
+    arrive_at: string | null;
+    origin: string | null;
+    destination: string | null;
+  }[];
+  buses: {
+    leg_name: string;
+    bus_code: string;
+    gather_at: string | null;
+    depart_at: string | null;
+    destination: string | null;
+    leader_name: string | null;
+    leader_phone: string | null;
+  }[];
+  room: { hotel_name: string; room_number: string } | null;
+  schedule: {
+    day_date: string | null;
+    start_at: string | null;
+    end_at: string | null;
+    title: string;
+    location: string | null;
+  }[];
+  announcements: {
+    title: string;
+    body_md: string;
+    is_pinned: boolean;
+    published_at: string | null;
+  }[];
+};
+
 export type Hotel = {
   id: number;
   event_id: number;
