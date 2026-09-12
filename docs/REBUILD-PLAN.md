@@ -7,7 +7,10 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0-R5 xong (R2-R5 chưa click-through Chrome thật), R6 chưa bắt đầu — chờ kết nối trình duyệt
+Ngày lập: 2026-09-12 · Trạng thái: R0-R5 xong, browser đã kết nối được và đã click-through rộng (không
+theo đúng kịch bản R6) — tìm + sửa 4 lỗi thật (Select/RadioGroup controlled-value, seed thiếu
+params_json). R6 CHƯA xong: còn thiếu kịch bản đăng ký 3 người, đóng đăng ký→phân bổ→công bố trọn
+luồng, đua 2 tab Gala, và test 390px thật
 
 ---
 
@@ -769,25 +772,80 @@ Rủi ro cụ thể cần click thật trước khi coi R5 là "xong" theo đún
 
 **Mục tiêu:** lần đầu tiên trong dự án, chạy trọn kịch bản BRD §14 bằng trình duyệt thật, không phải curl.
 
-- [ ] `make down && rm -f data/teambuilding.db* && make up && make migrate && make seed`
-- [ ] BTC login → Event B: kiểm tra cấu hình → mở đăng ký
-- [ ] 3 CBNV khác nhau đăng ký (1 người chọn Không tham gia) → kiểm tra MailHog `localhost:8025`
-- [ ] Đóng đăng ký → nhập/import chuyến bay → chạy Auto Flight Allocation → xử lý ca bị flag → chỉnh tay
-      1 người **và** cả 1 Team → xác nhận cảnh báo vượt slot hiện đúng
-- [ ] Import phân phòng → tạo xe đủ trường (giờ/điểm tập trung/trưởng xe) → chạy phân xe → sửa 1 xe
-- [ ] Dựng sơ đồ Gala → bốc thăm → **2 trình duyệt** cùng bấm 1 ghế, xác nhận chỉ 1 bên thành công,
-      bên kia nhận thông báo rõ ràng
-- [ ] Nhập lịch trình + thông báo → Công bố thông tin (qua checklist mới) → kiểm tra mail hàng loạt
-- [ ] CBNV đăng nhập, xem Journey ở khung rộng **390px** — đủ 7 khối, không cuộn ngang
-- [ ] Audit log hiện đủ người thực hiện + before/after cho vài thao tác vừa làm
-- [ ] Ghi lại GIF các luồng chính (dùng `mcp__claude-in-chrome__gif_creator` nếu chạy bằng Claude Code)
+- [x] `docker compose exec api python -m app.db.seed --reset` (tương đương phần dữ liệu của bước
+      `make down/up/migrate/seed` — không restart lại container vì stack đã chạy sẵn)
+- [ ] BTC login → Event B: kiểm tra cấu hình → mở đăng ký _(đã login + xem dashboard/Sự kiện, chưa
+      chủ động bấm "mở đăng ký" vì Event B đã ở `registration_open` sẵn từ seed)_
+- [ ] 3 CBNV khác nhau đăng ký (1 người chọn Không tham gia) — **mới làm 1/3**: nv001 đăng ký "Không
+      tham gia" trên Event B trọn luồng (submit → email → summary → xem lại/sửa), MailHog nhận đúng
+      mail `registration_confirmed`. Chưa thử 2 người còn lại (nhất là chưa thử luồng "Có tham gia" +
+      chọn ca + tick xe, vì đó là nhánh code chưa test qua browser)
+- [ ] Đóng đăng ký → import/allocation/xử lý flag/chỉnh tay từng người + cả Team — **chưa làm**; chỉ mới
+      xem panel Chuyến bay ở trạng thái đã có sẵn dữ liệu (không tự chạy lại allocation/import trong
+      phiên này)
+- [ ] Import phân phòng → tạo xe đủ trường → chạy phân xe → sửa 1 xe — **chưa làm** việc tạo xe mới/
+      chạy phân xe; chỉ xem panel Xe với dữ liệu có sẵn
+- [ ] Dựng sơ đồ Gala → bốc thăm → 2 trình duyệt cùng bấm 1 ghế — **chưa làm** (cần 2 tab/2 phiên đăng
+      nhập khác nhau cùng lúc, chưa dựng kịch bản này)
+- [ ] Công bố thông tin (qua checklist mới) → kiểm tra mail hàng loạt — **chỉ test dialog xác nhận rồi
+      Huỷ** (cố ý không bấm thật để tránh gửi ~120 email giả cho seed data); dialog + checklist cảnh
+      báo hiện đúng, nhưng luồng gửi mail thật cho `information_published` chưa được xác nhận qua
+      browser
+- [ ] CBNV xem Journey ở khung 390px — **không thực hiện được**: `resize_window` (cả tab hiện tại lẫn
+      tab mới) không thực sự thu nhỏ cửa sổ trình duyệt trong môi trường này (`window.innerWidth` vẫn
+      báo 1920 sau khi gọi resize) — đây là giới hạn công cụ của phiên này, không phải đã kiểm tra và
+      đạt. Cần thử lại ở môi trường/công cụ khác trước khi coi mục này là xong
+- [x] Audit log hiện đúng người thực hiện + before/after — xác nhận bằng thao tác thật (sửa Loại phòng
+      "Phòng Đôi", xem lại trong tab Audit ngay sau đó: đúng `btc@teambuilding.vn`, đúng nhãn thao tác,
+      before/after JSON đúng)
+- [ ] Ghi GIF — chưa làm
 
 **Sau khi xong:**
 - [ ] Cập nhật `docs/PLAN.md` — thêm dòng trỏ sang `docs/REBUILD-PLAN.md` ở đầu file
 - [ ] Cập nhật README nếu số tài khoản/lệnh seed thay đổi
 - [ ] Điền "Đã kiểm chứng" cho R0–R6 ở tài liệu này
 
-**Đã kiểm chứng:** _(điền khi xong)_
+**Đã kiểm chứng — R6 CHƯA XONG, đây là ghi nhận một phiên browser-testing thật đầu tiên (không theo
+kịch bản đủ 8 bước ở trên, mà đi lướt qua gần hết các màn hình R2–R5 để tìm lỗi thật):**
+
+`claude-in-chrome` đã kết nối được lần đầu trong đợt rebuild này. Thay vì chạy đúng kịch bản 8 bước ở
+trên từ đầu đến cuối, phiên này đi kiểm tra rộng — gần như mọi màn hình Admin (Tổng quan, Sự kiện,
+Master Data, Tài khoản, Chuyến bay, Xe, Khách sạn, Gala, Lịch & TB, Email, Audit) và CBNV (Đăng ký,
+Hành trình, Team, Gala) — và tìm ra **4 lỗi thật, đều đã sửa và có commit riêng trên nhánh
+`rebuild/r6-browser-acceptance`**:
+
+1. **`874f63f`** — Mọi `<Select>` trong toàn hệ thống hiện giá trị thô (vd "2") thay vì nhãn (vd "Team
+   Building 2027") khi đã chọn giá trị nào đó. Nguyên nhân: `<Select.Value>` của Base UI cần prop
+   `items` trên `Select.Root` để tự tra nhãn — component `Select` dùng chung ở
+   `components/ui/select.tsx` chưa từng truyền prop này. Sửa 1 chỗ, mọi `Select` trong app tự có nhãn
+   đúng mà không phải sửa từng nơi gọi.
+2. **`c66254d`** — `Select` bị "kẹt" ở chế độ uncontrolled vĩnh viễn nếu giá trị ban đầu là `undefined`
+   (ví dụ chọn "chặng đầu tiên" sau khi danh sách chặng load xong) — Base UI chốt trạng thái
+   controlled/uncontrolled ngay ở lần render đầu và không bao giờ kiểm tra lại. Phát hiện qua bộ chọn
+   chặng xe: dữ liệu bên dưới đúng nhưng ô chọn vẫn hiện "Chọn chặng". Sửa bằng cách remount 1 lần
+   đúng lúc giá trị thật xuất hiện lần đầu. Cùng commit này còn sửa `seed.py` thiếu `params_json` cho
+   `AllocationRun` (khiến cột "Còn trống" và thẻ tóm tắt phân bổ luôn trống khi mở trang, chỉ hiện sau
+   khi tự bấm chạy phân bổ ngay trong tab đó).
+3. **`022d009`** — `RadioGroup` bị đúng lỗi y hệt #2 — phát hiện qua overlay lỗi dev của Next.js khi
+   test form đăng ký: ô "Có tham gia / Không tham gia" không hiện đúng lựa chọn đã lưu khi mở lại một
+   đăng ký đã gửi trước đó (dữ liệu load sau khi mount). Sửa cùng cách với Select.
+
+Đã xác nhận hoạt động đúng qua click thật (không chỉ đọc code): Master Data sửa tên team, Tài khoản
+đổi role/khoá/reset mật khẩu (hiện mật khẩu tạm trong dialog copy được), Chuyến bay (cột Còn trống,
+tên Team bị tách, dialog lịch sử phân bổ), Xe (form đủ field, bộ chọn chặng hiện đúng nhãn ngay khi
+load), Khách sạn (Room Types CRUD, xoá phòng/loại phòng bị chặn 409 đúng khi còn người ở/còn phòng
+dùng), Lịch & TB (form sửa đủ field, `ConfirmDialog` lồng trong `Dialog` đang mở — mẫu hình mới, rủi ro
+đã nêu ở R5 — hoạt động đúng không lỗi z-index/focus), Email (xem trước render đúng với dữ liệu mẫu),
+Audit (actor + before/after + như trên), CBNV Hành trình (đủ khối chuyến bay 2 chiều/xe 4 chặng/phòng/
+Gala/lịch trình cho tài khoản có dữ liệu thật), CBNV Đăng ký (nộp → email → màn hình thành công → xem
+lại đúng lựa chọn đã lưu), Gala CBNV (hàng chờ lượt bốc thăm, "đã xong" gạch ngang đúng, viền "team
+của mình" không che mất gạch ngang — chỉ là ảnh chụp màn hình lúc đầu zoom chưa đủ, xem kỹ lại thì
+đúng).
+
+**Việc mở khoá cho phiên R6 tiếp theo:** chạy đúng 8 bước kịch bản BRD §14 còn thiếu ở trên — đặc biệt
+kịch bản 2 trình duyệt bấm cùng 1 ghế Gala (chỉ có thể test thật bằng trình duyệt, không mô phỏng được
+bằng curl tuần tự) và test ở khung 390px thật (cần môi trường mà `resize_window` hoạt động, hoặc test
+trên thiết bị di động thật / DevTools device toolbar thủ công).
 
 ---
 
