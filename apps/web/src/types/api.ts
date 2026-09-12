@@ -215,6 +215,63 @@ export type ImportResult = {
   errors: { row: number; error: string }[];
 };
 
+export type GalaConfig = {
+  id: number;
+  event_id: number;
+  name: string;
+  stage_label: string;
+  turn_duration_seconds: number;
+  hold_ttl_seconds: number;
+  seat_quota_rule: "by_team_size" | "fixed";
+  fixed_quota: number | null;
+  status: "setup" | "drawing" | "in_progress" | "finished";
+  draw_seed: number | null;
+};
+
+export type GalaTable = {
+  id: number;
+  event_id: number;
+  code: string;
+  name: string | null;
+  x: number;
+  y: number;
+  shape: "round" | "rect";
+  seat_count: number;
+  is_active: boolean;
+};
+
+export type GalaSeatStatus = "available" | "held" | "confirmed" | "blocked";
+
+export type GalaSeat = {
+  id: number;
+  table_id: number;
+  seat_number: number;
+  label: string | null;
+  status: GalaSeatStatus;
+  held_by_team_id: number | null;
+  team_id: number | null;
+  version: number;
+};
+
+export type GalaTurn = {
+  id: number;
+  team_id: number;
+  team_name: string | null;
+  order_no: number;
+  seat_quota: number;
+  status: "waiting" | "active" | "done" | "skipped" | "expired";
+  started_at: string | null;
+  expires_at: string | null;
+};
+
+export type GalaState = {
+  config: GalaConfig | null;
+  tables: GalaTable[];
+  seats: GalaSeat[];
+  turns: GalaTurn[];
+  my_team_id: number | null;
+};
+
 export type Bus = {
   id: number;
   event_id: number;

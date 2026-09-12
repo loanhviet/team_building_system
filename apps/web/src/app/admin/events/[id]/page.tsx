@@ -16,6 +16,7 @@ import {
 import { EntityCrudTable } from "@/components/domain/entity-crud-table";
 import { FlightAllocationPanel } from "@/components/domain/flight-allocation-panel";
 import { BusAllocationPanel } from "@/components/domain/bus-allocation-panel";
+import { GalaAdminPanel } from "@/components/domain/gala-admin-panel";
 import { HotelRoomsPanel } from "@/components/domain/hotel-rooms-panel";
 import { ScheduleAnnouncementsPanel } from "@/components/domain/schedule-announcements-panel";
 import { RegistrationsTable } from "@/components/domain/registrations-table";
@@ -136,6 +137,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
       <div>
         <h2 className="mb-2 text-lg font-medium">Khách sạn &amp; Phân phòng</h2>
         <HotelRoomsPanel eventId={eventId} />
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-lg font-medium">Gala Dinner</h2>
+        <GalaAdminPanel eventId={eventId} />
       </div>
 
       <div>
