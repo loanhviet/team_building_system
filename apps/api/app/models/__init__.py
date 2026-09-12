@@ -1,5 +1,6 @@
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, User
+from app.models.bus import Bus, BusAssignment
 from app.models.event import Event, EventSetting, PickupPoint, Shift, TransportLeg
 from app.models.flight import Flight, FlightAssignment
 from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
@@ -11,6 +12,8 @@ from app.models.system import AllocationRun, ImportBatch, Job
 __all__ = [
     "AllocationRun",
     "AuditLog",
+    "Bus",
+    "BusAssignment",
     "EmailOutbox",
     "EmailTemplate",
     "Employee",

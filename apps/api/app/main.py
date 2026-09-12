@@ -18,6 +18,7 @@ from app.core.logging import setup_logging
 from app.core.queue import init_arq_pool
 from app.routers import (
     auth,
+    buses,
     employees,
     event_config,
     events,
@@ -70,3 +71,4 @@ app.include_router(registrations.router, prefix="/api")
 app.include_router(flights.router, prefix="/api")
 app.include_router(hotels.router, prefix="/api")
 app.include_router(room_assignments.router, prefix="/api")
+app.include_router(buses.router, prefix="/api")
