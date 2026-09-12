@@ -459,14 +459,31 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       người + export ra đúng file kèm Trưởng xe. `ruff check`, `next lint`, `next build` sạch
 - **Xong khi:** phân xe tự động cho cả 4 chặng dựa trên kết quả Phase 3, in được danh sách từng xe
 
-### Phase 6 — Module 5: My Team Building Journey + Thông báo
-- [ ] Models: `schedule_items`, `announcements`
-- [ ] `GET /api/journey/me` — aggregate 1 lần gọi: cá nhân & Team, chuyến bay đi/về, xe 4 chặng (kèm Trưởng xe),
-      khách sạn/phòng, chỗ Gala (nếu có), lịch trình, thông báo mới nhất
-- [ ] Chỉ trả dữ liệu khi `event.status = information_published` (trừ admin xem preview)
-- [ ] Admin: soạn lịch trình, soạn thông báo, nút **Công bố thông tin** → enqueue `send_bulk_emails`
-- [ ] Trigger email khi đổi chuyến bay / đổi xe / đổi lịch trình (mục 11) — gom nhóm, chống spam bằng `dedupe_key`
-- [ ] FE: trang Journey dạng timeline, responsive mobile-first (mục 13)
+### Phase 6 — Module 5: My Team Building Journey + Thông báo ✅ (2026-09-12)
+- [x] Models: `schedule_items`, `announcements`
+- [x] `GET /api/journey/me` — aggregate 1 lần gọi: cá nhân & Team, chuyến bay đi/về, xe từng chặng (kèm
+      Trưởng xe), khách sạn/phòng, lịch trình đã publish, thông báo ghim/mới nhất. **Chỗ Gala để trống**
+      (`null`/không có field) vì Module 4 (Phase 7) chưa xây — sẽ bổ sung khi có
+- [x] Không cần `event_id` tường minh cho CBNV — tự tìm event mà nhân viên có đăng ký `submitted`+
+      `is_participating` và `event.status` đã thuộc `information_published/event_started/event_completed`;
+      admin xem preview qua `?event_id=&employee_id=` bỏ qua điều kiện trạng thái
+- [x] Admin: soạn lịch trình (toggle publish), soạn thông báo. **Không có nút "Công bố thông tin" riêng**
+      — tái dùng nút chuyển trạng thái event có sẵn từ Phase 1 (`POST /transition` sang
+      `information_published`), gắn thêm side-effect enqueue `send_bulk_emails_task` ngay tại đó thay vì
+      tạo luồng publish riêng
+- [x] Trigger email khi đổi chuyến bay/xe (mục 11): gắn thẳng vào endpoint `adjust` đã có ở Phase 3/5,
+      chỉ khi `event.status` đã publish; **không** làm trigger riêng cho đổi lịch trình (schedule_items) vì
+      phase đã đủ lớn, để dành nếu cần sau. `send_bulk_emails_task` (publish) dedupe theo
+      `template_code:event_id:employee_id` (chỉ gửi 1 lần/employee cho lần publish đó); các trigger
+      "đổi sau publish" dedupe kèm timestamp nên luôn gửi mới mỗi lần đổi — hai kiểu dedupe khác nhau vì
+      mục đích khác nhau (chặn gửi trùng do retry vs. luôn báo thay đổi mới)
+- [x] FE: `/journey` dạng timeline (Card theo từng khối: thông báo, chuyến bay, xe, phòng, lịch trình),
+      mobile-first; trang chủ giờ thử gọi `/api/journey/me` trước để quyết định điều hướng
+      `/journey` hay `/register` cho CBNV
+- **Đã kiểm chứng:** chạy hết chuỗi transition đến `information_published` → 21 email được enqueue và
+      worker xử lý xong (thấy trong log + MailHog); `GET /journey/me` trả đúng đủ chuyến bay/xe (kèm
+      Trưởng xe)/phòng/lịch trình/thông báo cho 1 nhân viên đã seed; nhân viên chưa có đăng ký được publish
+      nhận đúng 404 `no_published_event`. `ruff check`, `next lint`, `next build` sạch
 - **Xong khi:** publish event → toàn bộ CBNV nhận email, mở trang thấy đủ hành trình trên điện thoại
 
 ### Phase 7 — Module 4: Gala Dinner
