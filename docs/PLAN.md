@@ -441,11 +441,22 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       `/admin/events/[id]` trả 200
 - **Xong khi:** import được file phân phòng mẫu, gán tay được, không cho vượt sức chứa
 
-### Phase 5 — Module 3: Xe & điều phối
-- [ ] Models: `buses`, `bus_assignments`
-- [ ] CRUD xe theo từng chặng (mã, sức chứa, giờ tập trung/khởi hành, điểm đón/đến); chỉ định **Trưởng xe** (họ tên + SĐT — mục 7.4)
-- [ ] `GreedyBusStrategy` chạy qua queue, ưu tiên cùng chuyến bay → cùng Team → lấp đầy → không vượt sức chứa
-- [ ] Manual adjust + cảnh báo + audit; export danh sách xe theo chặng
+### Phase 5 — Module 3: Xe & điều phối ✅ (2026-09-12)
+- [x] Models: `buses`, `bus_assignments` — thêm `is_locked`/`is_flagged`/`flag_reason` dù bảng gốc ở
+      mục 5.5 không liệt kê, rút kinh nghiệm trực tiếp từ Phase 3 (không muốn lặp lại đúng cái gap
+      "người không xếp được biến mất khỏi tầm nhìn admin")
+- [x] CRUD xe theo từng chặng (mã, sức chứa, giờ tập trung/khởi hành, điểm đón/đến); chỉ định Trưởng xe
+      (họ tên + SĐT — mục 7.4)
+- [x] `services/allocation/bus_greedy.py`: gom theo `(flight_id, team_id)`, nhóm lớn nhất trước, ưu
+      tiên xe đã có người cùng chuyến bay, best-fit theo phần còn lại của nhóm — đúng thứ tự ưu tiên
+      mục 7.3 (cùng chuyến bay → cùng Team → lấp đầy → không vượt sức chứa). Chỉ đối chiếu chuyến bay khi
+      `transport_leg.direction` là `outbound`/`inbound` (khớp quy ước của `flight_assignments`); chặng
+      nào đặt direction khác thì thuật toán tự rơi về chỉ xét Team + sức chứa
+- [x] Manual adjust (`POST /bus-assignments/adjust`) + cảnh báo vượt sức chứa (409 trừ khi `force=true`,
+      luôn bắt `reason`) + audit log; export danh sách xe theo chặng kèm Trưởng xe/SĐT (mục 7.5)
+- **Đã kiểm chứng qua curl:** 2 xe (capacity 12) cho 1 chặng, 21 người có nhu cầu xe → phân xe tự động
+      giữ nguyên từng Team trong cùng 1 xe, chỉ tách khi xe đầy 12 chỗ, 0 người bị flag; chuyển tay 1
+      người + export ra đúng file kèm Trưởng xe. `ruff check`, `next lint`, `next build` sạch
 - **Xong khi:** phân xe tự động cho cả 4 chặng dựa trên kết quả Phase 3, in được danh sách từng xe
 
 ### Phase 6 — Module 5: My Team Building Journey + Thông báo
