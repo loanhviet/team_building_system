@@ -2,6 +2,7 @@ from app.models.audit import AuditLog
 from app.models.auth import RefreshToken, User
 from app.models.event import Event, EventSetting, PickupPoint, Shift, TransportLeg
 from app.models.flight import Flight, FlightAssignment
+from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
 from app.models.notification import EmailOutbox, EmailTemplate
 from app.models.organization import Employee, Site, Team
 from app.models.registration import Registration, RegistrationTransportNeed
@@ -17,12 +18,16 @@ __all__ = [
     "EventSetting",
     "Flight",
     "FlightAssignment",
+    "Hotel",
     "ImportBatch",
     "Job",
     "PickupPoint",
     "RefreshToken",
     "Registration",
     "RegistrationTransportNeed",
+    "Room",
+    "RoomAssignment",
+    "RoomType",
     "Shift",
     "Site",
     "Team",
