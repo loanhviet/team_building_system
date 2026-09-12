@@ -1,14 +1,33 @@
 "use client"
 
+import * as React from "react"
 import { Radio as RadioPrimitive } from "@base-ui/react/radio"
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group"
 import { cn } from "cn"
 
-function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
+function RadioGroup({ className, value, ...props }: RadioGroupPrimitive.Props) {
+  // Same fix as components/ui/select.tsx's Select: Base UI latches
+  // controlled-vs-uncontrolled from whether `value` is defined on the first
+  // render and never re-checks (confirmed in node_modules — logs "A
+  // component is changing the uncontrolled value state of RadioGroup to be
+  // controlled" otherwise). Any RadioGroup whose value comes from data that
+  // loads after mount — e.g. showing an already-submitted registration's
+  // "có/không tham gia" choice once the fetch resolves — starts as
+  // `value={undefined}` and then gets stuck ignoring the real value forever.
+  const [prevValue, setPrevValue] = React.useState(value)
+  const [mountGeneration, setMountGeneration] = React.useState(0)
+  if (value !== prevValue) {
+    setPrevValue(value)
+    if (value != null && prevValue == null) {
+      setMountGeneration((n) => n + 1)
+    }
+  }
   return (
     <RadioGroupPrimitive
+      key={mountGeneration}
       data-slot="radio-group"
       className={cn("grid w-full gap-2", className)}
+      value={value}
       {...props}
     />
   )
