@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import JSON, DateTime, ForeignKey, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -22,3 +22,9 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), index=True
     )
+
+    actor: Mapped["User | None"] = relationship(lazy="joined")  # noqa: F821
+
+    @property
+    def actor_email(self) -> str | None:
+        return self.actor.email if self.actor else None

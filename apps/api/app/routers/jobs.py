@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.deps import DbSession, require_admin
 from app.models.auth import User
@@ -25,12 +25,21 @@ def _job_out(job: Job) -> JobOut:
         error=job.error,
         created_at=job.created_at,
         finished_at=job.finished_at,
+        event_id=(job.params_json or {}).get("event_id"),
     )
 
 
 @router.get("", response_model=list[JobOut])
-async def list_jobs(db: DbSession, _user: AdminUser, limit: int = 50) -> list[JobOut]:
-    result = await db.execute(select(Job).order_by(Job.created_at.desc()).limit(min(limit, 200)))
+async def list_jobs(
+    db: DbSession, _user: AdminUser, limit: int = 50, event_id: int | None = None
+) -> list[JobOut]:
+    stmt = select(Job).order_by(Job.created_at.desc())
+    if event_id is not None:
+        # event_id lives inside params_json (jobs aren't all event-scoped —
+        # e.g. employee import is global), so filter via SQLite's json_extract
+        # rather than adding a column only some job types would ever populate.
+        stmt = stmt.where(func.json_extract(Job.params_json, "$.event_id") == event_id)
+    result = await db.execute(stmt.limit(min(limit, 200)))
     return [_job_out(j) for j in result.scalars().all()]
 
 

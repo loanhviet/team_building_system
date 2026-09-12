@@ -1,15 +1,26 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { BrandMark } from "@/components/domain/brand-mark";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useCurrentEventId } from "@/lib/use-current-event-id";
 import { ROLE_LABEL } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { Event } from "@/types/api";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Tổng quan" },
@@ -22,6 +33,49 @@ const NAV_ITEMS = [
 function isActive(pathname: string, href: string) {
   if (href === "/admin") return pathname === "/admin";
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function EventPicker({ className }: { className?: string }) {
+  const router = useRouter();
+  const [currentEventId, setCurrentEventId] = useCurrentEventId();
+  const { data: events } = useQuery({
+    queryKey: ["events"],
+    queryFn: () => apiFetch<Event[]>("/api/events"),
+  });
+
+  useEffect(() => {
+    if (currentEventId == null && events && events.length > 0) {
+      setCurrentEventId(events[events.length - 1].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, currentEventId]);
+
+  if (!events || events.length === 0) return null;
+
+  return (
+    <div className={className}>
+      <p className="mb-1 text-[11px] text-white/45">Sự kiện đang thao tác</p>
+      <Select
+        value={currentEventId ? String(currentEventId) : undefined}
+        onValueChange={(v) => {
+          const id = Number(v);
+          setCurrentEventId(id);
+          router.push(`/admin/events/${id}`);
+        }}
+      >
+        <SelectTrigger className="w-full border-white/20 bg-white/5 text-white">
+          <SelectValue placeholder="Chọn sự kiện" />
+        </SelectTrigger>
+        <SelectContent>
+          {events.map((e) => (
+            <SelectItem key={e.id} value={String(e.id)}>
+              {e.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 function NavLinks({
@@ -87,6 +141,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <BrandMark light className="[&>span:last-child]:text-[15px]" />
           <p className="mt-2 pl-9 text-[11px] text-white/45">Bàn điều hành BTC</p>
         </div>
+        <EventPicker className="mb-4 px-1" />
         <NavLinks pathname={pathname} showUsers={showUsers} />
         <div className="mt-auto flex flex-col gap-2 px-1 text-sm text-white/55">
           <p className="truncate text-white/80">{user.email}</p>
@@ -118,7 +173,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   <BrandMark light />
                 </SheetTitle>
               </SheetHeader>
-              <div className="px-2 pb-4">
+              <div className="flex flex-col gap-4 px-2 pb-4">
+                <EventPicker />
                 <NavLinks pathname={pathname} showUsers={showUsers} />
               </div>
             </SheetContent>

@@ -313,8 +313,16 @@ async def list_registrations(
 
 
 @router.get("/export")
-async def export_registrations(event_id: int, db: DbSession, _user: AdminUser) -> StreamingResponse:
-    regs = await _admin_list_query(db, event_id, None, None)
+async def export_registrations(
+    event_id: int,
+    db: DbSession,
+    _user: AdminUser,
+    search: str | None = None,
+    status_filter: str | None = None,
+    team_id: int | None = None,
+    shift_id: int | None = None,
+) -> StreamingResponse:
+    regs = await _admin_list_query(db, event_id, search, status_filter, team_id, shift_id)
 
     wb = Workbook()
     ws = wb.active

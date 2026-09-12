@@ -3,6 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { LiteMarkdown } from "@/components/domain/lite-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -15,32 +18,41 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch, ApiError } from "@/lib/api";
+import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import type { Announcement, Event, ScheduleItem, Shift, Team } from "@/types/api";
 
-type ScheduleItem = {
-  id: number;
-  title: string;
-  location: string | null;
-  is_published: boolean;
+const PUBLISHED_STATUSES = new Set(["information_published", "event_started", "event_completed"]);
+
+const EMPTY_SCHEDULE = {
+  day_date: "",
+  start_at: "",
+  end_at: "",
+  title: "",
+  description: "",
+  location: "",
+  audience: "all" as "all" | "shift" | "team",
+  audience_ref_id: "",
 };
 
-type Announcement = {
-  id: number;
-  title: string;
-  body_md: string;
-  is_pinned: boolean;
-};
+const EMPTY_ANNOUNCEMENT = { title: "", body_md: "", is_pinned: false };
 
 export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [scheduleTitle, setScheduleTitle] = useState("");
-  const [scheduleLocation, setScheduleLocation] = useState("");
+  const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
+  const [scheduleForm, setScheduleForm] = useState(EMPTY_SCHEDULE);
   const [announcementOpen, setAnnouncementOpen] = useState(false);
-  const [announcementTitle, setAnnouncementTitle] = useState("");
-  const [announcementBody, setAnnouncementBody] = useState("");
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [announcementForm, setAnnouncementForm] = useState(EMPTY_ANNOUNCEMENT);
 
   const { data: schedule } = useQuery({
     queryKey: ["events", eventId, "schedule-items"],
@@ -52,18 +64,85 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
     queryFn: () => apiFetch<Announcement[]>(`/api/events/${eventId}/announcements`),
   });
 
-  const createScheduleMutation = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/events/${eventId}/schedule-items`, {
-        method: "POST",
-        body: JSON.stringify({ title: scheduleTitle, location: scheduleLocation || null }),
-      }),
+  const { data: shifts } = useQuery({
+    queryKey: ["events", eventId, "shifts"],
+    queryFn: () => apiFetch<Shift[]>(`/api/events/${eventId}/shifts`),
+  });
+
+  const { data: teams } = useQuery({
+    queryKey: ["teams"],
+    queryFn: () => apiFetch<Team[]>("/api/teams"),
+  });
+
+  const { data: event } = useQuery({
+    queryKey: ["events", eventId],
+    queryFn: () => apiFetch<Event>(`/api/events/${eventId}`),
+  });
+  const isPublished = !!event && PUBLISHED_STATUSES.has(event.status);
+
+  const invalidateSchedule = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "schedule-items"] });
+  const invalidateAnnouncements = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "announcements"] });
+
+  const openCreateSchedule = () => {
+    setEditingSchedule(null);
+    setScheduleForm(EMPTY_SCHEDULE);
+    setScheduleOpen(true);
+  };
+  const openEditSchedule = (item: ScheduleItem) => {
+    setEditingSchedule(item);
+    setScheduleForm({
+      day_date: item.day_date ?? "",
+      start_at: toDatetimeLocal(item.start_at),
+      end_at: toDatetimeLocal(item.end_at),
+      title: item.title,
+      description: item.description ?? "",
+      location: item.location ?? "",
+      audience: item.audience,
+      audience_ref_id: item.audience_ref_id ? String(item.audience_ref_id) : "",
+    });
+    setScheduleOpen(true);
+  };
+
+  const saveScheduleMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
+        day_date: scheduleForm.day_date || null,
+        start_at: fromDatetimeLocal(scheduleForm.start_at),
+        end_at: fromDatetimeLocal(scheduleForm.end_at),
+        title: scheduleForm.title,
+        description: scheduleForm.description || null,
+        location: scheduleForm.location || null,
+        audience: scheduleForm.audience,
+        audience_ref_id: scheduleForm.audience !== "all" && scheduleForm.audience_ref_id
+          ? Number(scheduleForm.audience_ref_id)
+          : null,
+      };
+      return editingSchedule
+        ? apiFetch<ScheduleItem>(`/api/events/${eventId}/schedule-items/${editingSchedule.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : apiFetch<ScheduleItem>(`/api/events/${eventId}/schedule-items`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+    },
     onSuccess: () => {
-      toast.success("Đã thêm lịch trình");
+      toast.success(editingSchedule ? "Đã cập nhật lịch trình" : "Đã thêm lịch trình");
       setScheduleOpen(false);
-      setScheduleTitle("");
-      setScheduleLocation("");
-      queryClient.invalidateQueries({ queryKey: ["events", eventId, "schedule-items"] });
+      invalidateSchedule();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const deleteScheduleMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/events/${eventId}/schedule-items/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Đã xoá mục lịch trình");
+      invalidateSchedule();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -74,26 +153,130 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
         method: "PATCH",
         body: JSON.stringify({ is_published: !item.is_published }),
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["events", eventId, "schedule-items"] }),
+    onSuccess: invalidateSchedule,
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
-  const createAnnouncementMutation = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/events/${eventId}/announcements`, {
-        method: "POST",
-        body: JSON.stringify({ title: announcementTitle, body_md: announcementBody }),
-      }),
+  const openCreateAnnouncement = () => {
+    setEditingAnnouncement(null);
+    setAnnouncementForm(EMPTY_ANNOUNCEMENT);
+    setAnnouncementOpen(true);
+  };
+  const openEditAnnouncement = (a: Announcement) => {
+    setEditingAnnouncement(a);
+    setAnnouncementForm({ title: a.title, body_md: a.body_md, is_pinned: a.is_pinned });
+    setAnnouncementOpen(true);
+  };
+
+  const saveAnnouncementMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
+        title: announcementForm.title,
+        body_md: announcementForm.body_md,
+        is_pinned: announcementForm.is_pinned,
+      };
+      return editingAnnouncement
+        ? apiFetch<Announcement>(`/api/events/${eventId}/announcements/${editingAnnouncement.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : apiFetch<Announcement>(`/api/events/${eventId}/announcements`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+    },
     onSuccess: () => {
-      toast.success("Đã đăng thông báo");
+      toast.success(editingAnnouncement ? "Đã cập nhật thông báo" : "Đã đăng thông báo");
       setAnnouncementOpen(false);
-      setAnnouncementTitle("");
-      setAnnouncementBody("");
-      queryClient.invalidateQueries({ queryKey: ["events", eventId, "announcements"] });
+      invalidateAnnouncements();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
+
+  const deleteAnnouncementMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/events/${eventId}/announcements/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Đã xoá thông báo");
+      invalidateAnnouncements();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const togglePinMutation = useMutation({
+    mutationFn: (a: Announcement) =>
+      apiFetch(`/api/events/${eventId}/announcements/${a.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_pinned: !a.is_pinned }),
+      }),
+    onSuccess: invalidateAnnouncements,
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const audienceLabel = (item: ScheduleItem) => {
+    if (item.audience === "all") return "Tất cả";
+    if (item.audience === "shift") return shifts?.find((s) => s.id === item.audience_ref_id)?.name ?? "Ca #" + item.audience_ref_id;
+    return teams?.find((t) => t.id === item.audience_ref_id)?.name ?? "Team #" + item.audience_ref_id;
+  };
+
+  const scheduleColumns: DataTableColumn<ScheduleItem>[] = [
+    {
+      key: "day_date",
+      header: "Ngày",
+      cell: (s) => s.day_date ?? "—",
+      sortValue: (s) => s.day_date,
+    },
+    {
+      key: "start_at",
+      header: "Giờ",
+      cell: (s) => (s.start_at ? new Date(s.start_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : "—"),
+      sortValue: (s) => s.start_at,
+    },
+    { key: "title", header: "Tiêu đề", cell: (s) => s.title, sortValue: (s) => s.title },
+    { key: "location", header: "Địa điểm", cell: (s) => s.location ?? "—" },
+    { key: "audience", header: "Đối tượng", cell: (s) => audienceLabel(s) },
+    {
+      key: "is_published",
+      header: "Trạng thái",
+      cell: (s) =>
+        isPublished ? (
+          <ConfirmDialog
+            trigger={
+              <Button variant="ghost" size="sm" disabled={togglePublishMutation.isPending}>
+                <Badge variant={s.is_published ? "default" : "secondary"}>{s.is_published ? "Đã hiện" : "Ẩn"}</Badge>
+              </Button>
+            }
+            title="Đổi trạng thái hiển thị mục lịch trình?"
+            description="Sự kiện đã công bố — thay đổi này sẽ gửi email cập nhật lịch trình cho toàn bộ người tham gia."
+            confirmLabel="Đổi & gửi email"
+            onConfirm={() => togglePublishMutation.mutate(s)}
+          />
+        ) : (
+          <Button variant="ghost" size="sm" onClick={() => togglePublishMutation.mutate(s)} disabled={togglePublishMutation.isPending}>
+            <Badge variant={s.is_published ? "default" : "secondary"}>{s.is_published ? "Đã hiện" : "Ẩn"}</Badge>
+          </Button>
+        ),
+    },
+    {
+      key: "actions",
+      header: "",
+      cell: (s) => (
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" onClick={() => openEditSchedule(s)}>
+            Sửa
+          </Button>
+          <ConfirmDialog
+            trigger={<Button size="sm" variant="ghost">Xoá</Button>}
+            title="Xoá mục lịch trình này?"
+            description={`"${s.title}" sẽ bị xoá khỏi lịch trình.`}
+            confirmLabel="Xoá"
+            destructive
+            onConfirm={() => deleteScheduleMutation.mutate(s.id)}
+          />
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="grid gap-6 sm:grid-cols-2">
@@ -101,117 +284,123 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium">Lịch trình</p>
           <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
-            <DialogTrigger className={buttonVariants({ size: "sm", variant: "outline" }) + " ml-auto"}>
+            <DialogTrigger className={buttonVariants({ size: "sm", variant: "outline", className: "ml-auto" })} onClick={openCreateSchedule}>
               Thêm
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Thêm mục lịch trình</DialogTitle>
+                <DialogTitle>{editingSchedule ? "Sửa mục lịch trình" : "Thêm mục lịch trình"}</DialogTitle>
               </DialogHeader>
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="sched-title">Tiêu đề</Label>
-                  <Input
-                    id="sched-title"
-                    value={scheduleTitle}
-                    onChange={(e) => setScheduleTitle(e.target.value)}
-                  />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <Label>Tiêu đề</Label>
+                  <Input value={scheduleForm.title} onChange={(e) => setScheduleForm({ ...scheduleForm, title: e.target.value })} />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="sched-location">Địa điểm</Label>
-                  <Input
-                    id="sched-location"
-                    value={scheduleLocation}
-                    onChange={(e) => setScheduleLocation(e.target.value)}
-                  />
+                <div className="flex flex-col gap-1.5">
+                  <Label>Ngày</Label>
+                  <Input type="date" value={scheduleForm.day_date} onChange={(e) => setScheduleForm({ ...scheduleForm, day_date: e.target.value })} />
                 </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Địa điểm</Label>
+                  <Input value={scheduleForm.location} onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Bắt đầu</Label>
+                  <Input type="datetime-local" value={scheduleForm.start_at} onChange={(e) => setScheduleForm({ ...scheduleForm, start_at: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Kết thúc</Label>
+                  <Input type="datetime-local" value={scheduleForm.end_at} onChange={(e) => setScheduleForm({ ...scheduleForm, end_at: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <Label>Mô tả</Label>
+                  <Textarea value={scheduleForm.description} onChange={(e) => setScheduleForm({ ...scheduleForm, description: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Đối tượng</Label>
+                  <Select value={scheduleForm.audience} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience: (v ?? "all") as typeof scheduleForm.audience, audience_ref_id: "" })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tất cả</SelectItem>
+                      <SelectItem value="shift">Theo Ca</SelectItem>
+                      <SelectItem value="team">Theo Team</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {scheduleForm.audience !== "all" && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>{scheduleForm.audience === "shift" ? "Chọn Ca" : "Chọn Team"}</Label>
+                    <Select value={scheduleForm.audience_ref_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience_ref_id: v ?? "" })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(scheduleForm.audience === "shift" ? shifts : teams)?.map((o) => (
+                          <SelectItem key={o.id} value={String(o.id)}>
+                            {o.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
               <DialogFooter>
-                <Button
-                  disabled={!scheduleTitle || createScheduleMutation.isPending}
-                  onClick={() => createScheduleMutation.mutate()}
-                >
-                  Lưu
-                </Button>
+                {isPublished ? (
+                  <ConfirmDialog
+                    trigger={<Button disabled={!scheduleForm.title || saveScheduleMutation.isPending}>Lưu</Button>}
+                    title="Lưu lịch trình?"
+                    description="Sự kiện đã công bố — lưu thay đổi này sẽ gửi email cập nhật lịch trình cho toàn bộ người tham gia."
+                    confirmLabel="Lưu & gửi email"
+                    onConfirm={() => saveScheduleMutation.mutate()}
+                  />
+                ) : (
+                  <Button disabled={!scheduleForm.title || saveScheduleMutation.isPending} onClick={() => saveScheduleMutation.mutate()}>
+                    Lưu
+                  </Button>
+                )}
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Tiêu đề</TableHead>
-              <TableHead>Địa điểm</TableHead>
-              <TableHead>Trạng thái</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {schedule?.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell>{s.title}</TableCell>
-                <TableCell>{s.location ?? "—"}</TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => togglePublishMutation.mutate(s)}
-                    disabled={togglePublishMutation.isPending}
-                  >
-                    <Badge variant={s.is_published ? "default" : "secondary"}>
-                      {s.is_published ? "Đã hiện" : "Ẩn"}
-                    </Badge>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {(!schedule || schedule.length === 0) && (
-              <TableRow>
-                <TableCell colSpan={3} className="text-center text-muted-foreground">
-                  Chưa có lịch trình
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+        <DataTable columns={scheduleColumns} rows={schedule ?? []} rowKey={(s) => s.id} emptyMessage="Chưa có lịch trình" />
       </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium">Thông báo</p>
           <Dialog open={announcementOpen} onOpenChange={setAnnouncementOpen}>
-            <DialogTrigger className={buttonVariants({ size: "sm", variant: "outline" }) + " ml-auto"}>
+            <DialogTrigger className={buttonVariants({ size: "sm", variant: "outline", className: "ml-auto" })} onClick={openCreateAnnouncement}>
               Đăng thông báo
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Thông báo mới</DialogTitle>
+                <DialogTitle>{editingAnnouncement ? "Sửa thông báo" : "Thông báo mới"}</DialogTitle>
               </DialogHeader>
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="ann-title">Tiêu đề</Label>
-                  <Input
-                    id="ann-title"
-                    value={announcementTitle}
-                    onChange={(e) => setAnnouncementTitle(e.target.value)}
-                  />
+                  <Input id="ann-title" value={announcementForm.title} onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="ann-body">Nội dung</Label>
-                  <Textarea
-                    id="ann-body"
-                    value={announcementBody}
-                    onChange={(e) => setAnnouncementBody(e.target.value)}
-                  />
+                  <Label htmlFor="ann-body">Nội dung (hỗ trợ **đậm**, *nghiêng*, [link](url))</Label>
+                  <Textarea id="ann-body" value={announcementForm.body_md} onChange={(e) => setAnnouncementForm({ ...announcementForm, body_md: e.target.value })} />
                 </div>
+                {announcementForm.body_md && (
+                  <div className="rounded-md border bg-muted/40 p-2 text-sm">
+                    <p className="mb-1 text-xs text-muted-foreground">Xem trước:</p>
+                    <LiteMarkdown text={announcementForm.body_md} />
+                  </div>
+                )}
               </div>
               <DialogFooter>
                 <Button
-                  disabled={
-                    !announcementTitle || !announcementBody || createAnnouncementMutation.isPending
-                  }
-                  onClick={() => createAnnouncementMutation.mutate()}
+                  disabled={!announcementForm.title || !announcementForm.body_md || saveAnnouncementMutation.isPending}
+                  onClick={() => saveAnnouncementMutation.mutate()}
                 >
-                  Đăng
+                  {editingAnnouncement ? "Lưu" : "Đăng"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -220,8 +409,33 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
         <div className="flex flex-col gap-2">
           {announcements?.map((a) => (
             <div key={a.id} className="rounded-md border p-2 text-sm">
-              <p className="font-medium">{a.title}</p>
-              <p className="text-muted-foreground">{a.body_md}</p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-medium">
+                  {a.is_pinned && (
+                    <Badge variant="secondary" className="mr-1">
+                      Ghim
+                    </Badge>
+                  )}
+                  {a.title}
+                </p>
+                <div className="flex shrink-0 gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => togglePinMutation.mutate(a)}>
+                    {a.is_pinned ? "Bỏ ghim" : "Ghim"}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => openEditAnnouncement(a)}>
+                    Sửa
+                  </Button>
+                  <ConfirmDialog
+                    trigger={<Button size="sm" variant="ghost">Xoá</Button>}
+                    title="Xoá thông báo này?"
+                    description={`"${a.title}" sẽ bị xoá.`}
+                    confirmLabel="Xoá"
+                    destructive
+                    onConfirm={() => deleteAnnouncementMutation.mutate(a.id)}
+                  />
+                </div>
+              </div>
+              <LiteMarkdown text={a.body_md} className="text-muted-foreground" />
             </div>
           ))}
           {(!announcements || announcements.length === 0) && (

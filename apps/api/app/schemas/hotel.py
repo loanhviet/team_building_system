@@ -37,6 +37,12 @@ class RoomTypeCreate(BaseModel):
     quantity: int = 0
 
 
+class RoomTypeUpdate(BaseModel):
+    name: str | None = None
+    capacity: int | None = None
+    quantity: int | None = None
+
+
 class RoomTypeOut(BaseModel):
     id: int
     hotel_id: int

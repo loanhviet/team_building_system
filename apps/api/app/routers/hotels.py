@@ -18,6 +18,7 @@ from app.schemas.hotel import (
     RoomOut,
     RoomTypeCreate,
     RoomTypeOut,
+    RoomTypeUpdate,
     RoomUpdate,
 )
 from app.services import master_data
@@ -95,6 +96,53 @@ async def create_room_type(
     return room_type
 
 
+@router.patch("/hotels/{hotel_id}/room-types/{room_type_id}", response_model=RoomTypeOut)
+async def update_room_type(
+    event_id: int,
+    hotel_id: int,
+    room_type_id: int,
+    payload: RoomTypeUpdate,
+    db: DbSession,
+    user: AdminUser,
+) -> RoomType:
+    await _get_hotel_or_404(db, event_id, hotel_id)
+    room_type = await master_data.get_or_404(db, RoomType, room_type_id)
+    if room_type.hotel_id != hotel_id:
+        raise AppError("not_found", "RoomType not found", status.HTTP_404_NOT_FOUND)
+    before = RoomTypeOut.model_validate(room_type).model_dump(mode="json")
+    await master_data.update(db, room_type, payload.model_dump(exclude_unset=True))
+    await record_audit(
+        db, actor_user_id=user.id, action="update", entity_type="room_type", entity_id=room_type_id,
+        before=before, after=RoomTypeOut.model_validate(room_type).model_dump(mode="json"),
+        event_id=event_id,
+    )
+    await db.commit()
+    await db.refresh(room_type)
+    return room_type
+
+
+@router.delete("/hotels/{hotel_id}/room-types/{room_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_room_type(
+    event_id: int, hotel_id: int, room_type_id: int, db: DbSession, user: AdminUser
+) -> None:
+    await _get_hotel_or_404(db, event_id, hotel_id)
+    room_type = await master_data.get_or_404(db, RoomType, room_type_id)
+    if room_type.hotel_id != hotel_id:
+        raise AppError("not_found", "RoomType not found", status.HTTP_404_NOT_FOUND)
+    result = await db.execute(select(Room.id).where(Room.room_type_id == room_type_id))
+    if result.first() is not None:
+        raise AppError(
+            "room_type_in_use", "Không thể xoá: còn phòng đang dùng loại phòng này",
+            status.HTTP_409_CONFLICT,
+        )
+    await db.delete(room_type)
+    await record_audit(
+        db, actor_user_id=user.id, action="deactivate", entity_type="room_type", entity_id=room_type_id,
+        event_id=event_id,
+    )
+    await db.commit()
+
+
 @router.get("/hotels/{hotel_id}/rooms", response_model=list[RoomOut])
 async def list_rooms(event_id: int, hotel_id: int, db: DbSession, _user: AdminUser) -> list[RoomOut]:
     await _get_hotel_or_404(db, event_id, hotel_id)
@@ -160,6 +208,25 @@ async def update_room(
         id=room.id, hotel_id=room.hotel_id, room_number=room.room_number,
         room_type_id=room.room_type_id, capacity=room.capacity, note=room.note, occupied=occupied,
     )
+
+
+@router.delete("/hotels/{hotel_id}/rooms/{room_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_room(event_id: int, hotel_id: int, room_id: int, db: DbSession, user: AdminUser) -> None:
+    await _get_hotel_or_404(db, event_id, hotel_id)
+    room = await master_data.get_or_404(db, Room, room_id)
+    if room.hotel_id != hotel_id:
+        raise AppError("not_found", "Room not found", status.HTTP_404_NOT_FOUND)
+    result = await db.execute(select(RoomAssignment.id).where(RoomAssignment.room_id == room_id))
+    if result.first() is not None:
+        raise AppError(
+            "room_in_use", "Không thể xoá: còn người đang ở phòng này", status.HTTP_409_CONFLICT
+        )
+    await db.delete(room)
+    await record_audit(
+        db, actor_user_id=user.id, action="deactivate", entity_type="room", entity_id=room_id,
+        event_id=event_id,
+    )
+    await db.commit()
 
 
 @router.post("/hotels/{hotel_id}/rooms/import", response_model=ImportResultOut)

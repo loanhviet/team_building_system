@@ -91,6 +91,26 @@ async def update_schedule_item(
     return item
 
 
+@router.delete("/schedule-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_schedule_item(
+    event_id: int,
+    item_id: int,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> None:
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
+    item = await master_data.get_or_404(db, ScheduleItem, item_id, event_id=event_id)
+    await db.delete(item)
+    await record_audit(
+        db, actor_user_id=user.id, action="deactivate", entity_type="schedule_item", entity_id=item_id,
+        event_id=event_id,
+    )
+    await enqueue_schedule_changed(queue, event, item_id)
+    await db.commit()
+
+
 @router.get("/announcements", response_model=list[AnnouncementOut])
 async def list_announcements(event_id: int, db: DbSession, user: CurrentUser) -> list[Announcement]:
     result = await master_data.list_all(db, Announcement, event_id=event_id)
@@ -131,3 +151,16 @@ async def update_announcement(
     await db.commit()
     await db.refresh(announcement)
     return announcement
+
+
+@router.delete("/announcements/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_announcement(
+    event_id: int, announcement_id: int, db: DbSession, user: AdminUser
+) -> None:
+    announcement = await master_data.get_or_404(db, Announcement, announcement_id, event_id=event_id)
+    await db.delete(announcement)
+    await record_audit(
+        db, actor_user_id=user.id, action="deactivate", entity_type="announcement",
+        entity_id=announcement_id, event_id=event_id,
+    )
+    await db.commit()

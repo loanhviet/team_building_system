@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { EventStatusBadge } from "@/components/domain/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,7 +20,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS } from "@/lib/event-status";
 import { cn } from "@/lib/utils";
-import type { Event, EventStatus } from "@/types/api";
+import type { Dashboard, Event, EventStatus } from "@/types/api";
 
 const TABS = [
   { href: "", label: "Tổng quan" },
@@ -46,6 +47,14 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
     queryFn: () => apiFetch<Event>(`/api/events/${eventId}`),
   });
 
+  // only fetched for the confirmation copy — a stale read is fine here, the
+  // backend re-validates nothing extra on transition itself
+  const { data: dashboard } = useQuery({
+    queryKey: ["events", eventId, "dashboard"],
+    queryFn: () => apiFetch<Dashboard>(`/api/events/${eventId}/dashboard`),
+    enabled: !!event,
+  });
+
   const transitionMutation = useMutation({
     mutationFn: (status: EventStatus) =>
       apiFetch<Event>(`/api/events/${eventId}/transition`, {
@@ -68,8 +77,39 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
   const nextStatuses = EVENT_FORWARD_TRANSITIONS[event.status];
   const isSuperAdmin = user?.role === "super_admin";
 
+  const transitionWarning = (status: EventStatus): ReactNode => {
+    if (status !== "information_published" || !dashboard) return undefined;
+    const roomsMissing = dashboard.participating_count - dashboard.rooms_assigned;
+    const checks = [
+      { ok: dashboard.flights_flagged_count === 0, text: `${dashboard.flights_flagged_count} ca bay đang bị flag` },
+      { ok: dashboard.buses_flagged_count === 0, text: `${dashboard.buses_flagged_count} ca xe đang bị flag` },
+      { ok: dashboard.buses_without_leader_count === 0, text: `${dashboard.buses_without_leader_count} xe chưa có Trưởng xe` },
+      { ok: roomsMissing <= 0, text: `${Math.max(roomsMissing, 0)} người tham gia chưa có phòng` },
+    ];
+    const problems = checks.filter((c) => !c.ok);
+    return (
+      <div className="flex flex-col gap-1 pt-1 text-left">
+        <p>
+          Sẽ gửi email công bố hành trình cho <b>{dashboard.participating_count}</b> người tham gia.
+        </p>
+        {problems.length > 0 ? (
+          <ul className="list-inside list-disc text-destructive">
+            {problems.map((p) => (
+              <li key={p.text}>{p.text}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-emerald-600">Không có cảnh báo — dữ liệu đã đầy đủ.</p>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-5">
+      <Link href="/admin/events" className="text-sm text-muted-foreground hover:text-foreground">
+        ← Sự kiện
+      </Link>
       <div className="ticket">
         <div className="ticket-spine" />
         <div className="ticket-body">
@@ -84,19 +124,21 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            Trạng thái: <Badge variant="outline">{EVENT_STATUS_LABELS[event.status]}</Badge>
+            Trạng thái: <EventStatusBadge status={event.status} />
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
           {nextStatuses.map((status) => (
-            <Button
+            <ConfirmDialog
               key={status}
-              size="sm"
-              onClick={() => transitionMutation.mutate(status)}
-              disabled={transitionMutation.isPending}
-            >
-              Chuyển sang: {EVENT_STATUS_LABELS[status]}
-            </Button>
+              trigger={<Button size="sm" disabled={transitionMutation.isPending}>Chuyển sang: {EVENT_STATUS_LABELS[status]}</Button>}
+              title={`Chuyển sang "${EVENT_STATUS_LABELS[status]}"?`}
+              description={
+                transitionWarning(status) ?? `Sự kiện sẽ chuyển từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[status]}".`
+              }
+              confirmLabel="Chuyển trạng thái"
+              onConfirm={() => transitionMutation.mutate(status)}
+            />
           ))}
           {nextStatuses.length === 0 && (
             <p className="text-sm text-muted-foreground">Không còn bước tiếp theo trong luồng chuẩn.</p>
@@ -115,14 +157,24 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!forceStatus || transitionMutation.isPending}
-                onClick={() => forceStatus && transitionMutation.mutate(forceStatus)}
-              >
-                Ghi đè
-              </Button>
+              <ConfirmDialog
+                trigger={
+                  <Button variant="outline" size="sm" disabled={!forceStatus || transitionMutation.isPending}>
+                    Ghi đè
+                  </Button>
+                }
+                title="Ghi đè trạng thái sự kiện?"
+                description={
+                  forceStatus
+                    ? `Bỏ qua luồng chuẩn, ép trạng thái từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[forceStatus]}". Chỉ Super Admin mới làm được — dùng khi có sự cố cần sửa tay.`
+                    : undefined
+                }
+                confirmLabel="Ghi đè"
+                destructive
+                onConfirm={() => {
+                  if (forceStatus) transitionMutation.mutate(forceStatus);
+                }}
+              />
             </div>
           )}
         </CardContent>

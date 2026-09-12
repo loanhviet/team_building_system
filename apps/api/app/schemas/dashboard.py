@@ -18,6 +18,12 @@ class FlightSlotStatus(BaseModel):
     assigned: int
 
 
+class BusLegStatus(BaseModel):
+    leg_name: str
+    needed: int
+    assigned: int
+
+
 class DashboardOut(BaseModel):
     total_employees: int
     registered_count: int
@@ -27,6 +33,9 @@ class DashboardOut(BaseModel):
     by_shift: list[ShiftCount]
     transport_need_by_leg: list[LegTransportCount]
     flight_slots: list[FlightSlotStatus]
+    flights_flagged_count: int
     rooms_assigned: int
     rooms_total_capacity: int
-    buses_assigned: int
+    buses_by_leg: list[BusLegStatus]
+    buses_flagged_count: int
+    buses_without_leader_count: int

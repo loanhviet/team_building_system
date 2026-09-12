@@ -7,7 +7,7 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0-R4 xong (R2-R4 chưa click-through Chrome thật), R5 chưa bắt đầu
+Ngày lập: 2026-09-12 · Trạng thái: R0-R5 xong (R2-R5 chưa click-through Chrome thật), R6 chưa bắt đầu — chờ kết nối trình duyệt
 
 ---
 
@@ -668,72 +668,100 @@ phỏng được race condition đồng thời.
 confirm; xe có đủ field BRD §7.2 và có nút Sửa.
 
 **Điều hướng — `app/admin/layout.tsx`, `event-workspace.tsx`:**
-- [ ] Thêm bộ chọn "Sự kiện đang thao tác" vào sidebar, nhớ lựa chọn (localStorage) để không phải vào
+- [x] Thêm bộ chọn "Sự kiện đang thao tác" vào sidebar, nhớ lựa chọn (localStorage) để không phải vào
       `/admin/events` chọn lại mỗi lần
-- [ ] Thêm breadcrumb "← Sự kiện" ở đầu mỗi trang `admin/events/[id]/*`
+- [x] Thêm breadcrumb "← Sự kiện" ở đầu mỗi trang `admin/events/[id]/*`
 
 **Dashboard — `app/admin/page.tsx` + `admin/events/[id]/page.tsx`:**
-- [ ] Gộp 2 bản trùng thành 1 component `components/domain/event-dashboard.tsx`, cả 2 trang chỉ truyền `eventId`
-- [ ] "Đã lên xe: N" → "N / {tổng cần xe}"; phòng tách riêng số người / số chỗ
-- [ ] Thêm trạng thái phân xe **theo từng chặng** (lặp qua legs)
-- [ ] Thêm số ca bị `is_flagged` nổi bật, link sang tab Chuyến bay
-- [ ] Mỗi card link sang tab xử lý tương ứng
+- [x] Gộp 2 bản trùng thành 1 component `components/domain/event-dashboard.tsx`, cả 2 trang chỉ truyền `eventId`
+- [x] "Đã lên xe: N" → "N / {tổng cần xe}"; phòng tách riêng số người / số chỗ
+- [x] Thêm trạng thái phân xe **theo từng chặng** (lặp qua legs)
+- [x] Thêm số ca bị `is_flagged` nổi bật, link sang tab Chuyến bay
+- [x] Mỗi card link sang tab xử lý tương ứng
 
 **Danh sách → `data-table.tsx`:** Events, Master Data (Team/Site), Users, Registrations, các bảng
 assignment trong flights/buses/hotels, Audit log — thêm sort + search + filter + (nơi cần) export.
-- [ ] `registrations-table.tsx` — sửa export gửi đúng query string đang lọc (bug §3.6); thêm option "Tất
+- [x] `registrations-table.tsx` — sửa export gửi đúng query string đang lọc (bug §3.6); thêm option "Tất
       cả" cho mọi filter select + giữ/khôi phục nút "Xoá lọc"
 
 **Confirm cho hành động nguy hiểm** (dùng `<ConfirmDialog>`):
-- [ ] Event status transition, đặc biệt `information_published` — hiện số người sẽ nhận mail (đếm
+- [x] Event status transition, đặc biệt `information_published` — hiện số người sẽ nhận mail (đếm
       registrations `submitted && is_participating`) trước khi xác nhận; thêm checklist cảnh báo nếu còn
       ca flagged / xe chưa có trưởng xe / người chưa có phòng
-- [ ] Super-admin ghi đè trạng thái
-- [ ] Đổi role / khoá / reset mật khẩu user
-- [ ] Vô hiệu hoá entity (Master Data)
-- [ ] Tạo lịch trình mới (bắn mail `schedule_changed`)
-- [ ] Toggle publish schedule item
+- [x] Super-admin ghi đè trạng thái
+- [x] Đổi role / khoá / reset mật khẩu user
+- [x] Vô hiệu hoá entity (Master Data)
+- [x] Tạo lịch trình mới (bắn mail `schedule_changed`)
+- [x] Toggle publish schedule item
 
 **Chuyến bay — `flight-allocation-panel.tsx`:**
-- [ ] Hiện `summary.flights[].remaining` per-flight (backend đã có, R1 không đổi field này)
-- [ ] Hiện chi tiết Team bị tách: tên Team, không chỉ đếm
-- [ ] Thêm ô chọn Team để chuyển cả team bằng field `team_id` mới ở R1, thay tick tay từng người
-- [ ] Hiện danh sách lỗi import từng dòng (API đã trả, đang vứt)
-- [ ] Thêm tab/link xem `GET /allocations` (lịch sử chạy)
-- [ ] Bắt nhập lý do thật khi ghi đè (validate không được để nguyên chuỗi mặc định)
+- [x] Hiện `summary.flights[].remaining` per-flight (backend đã có, R1 không đổi field này)
+- [x] Hiện chi tiết Team bị tách: tên Team, không chỉ đếm
+- [x] Thêm ô chọn Team để chuyển cả team bằng field `team_id` mới ở R1, thay tick tay từng người
+- [x] Hiện danh sách lỗi import từng dòng (API đã trả, đang vứt)
+- [x] Thêm tab/link xem `GET /allocations` (lịch sử chạy)
+- [x] Bắt nhập lý do thật khi ghi đè (validate không được để nguyên chuỗi mặc định)
 
 **Xe — `bus-allocation-panel.tsx`** (phần bù lớn nhất):
-- [ ] Form tạo xe thêm đủ field: `name`, `gather_at`, `depart_at`, `pickup_point_id` (select từ
+- [x] Form tạo xe thêm đủ field: `name`, `gather_at`, `depart_at`, `pickup_point_id` (select từ
       `/pickup-points`), `destination`, `note`
-- [ ] Thêm cột hành động + dialog Sửa gọi `PATCH /buses/{id}` (đã có, chưa ai gọi)
-- [ ] Áp dụng phần "Team select" giống flights cho move-cả-team
-- [ ] Dịch `flag_reason` qua `lib/labels.ts` (hiện đang raw)
+- [x] Thêm cột hành động + dialog Sửa gọi `PATCH /buses/{id}` (đã có, chưa ai gọi)
+- [x] Áp dụng phần "Team select" giống flights cho move-cả-team
+- [x] Dịch `flag_reason` qua `lib/labels.ts` (hiện đang raw)
 
 **Khách sạn — `hotel-rooms-panel.tsx`:**
-- [ ] Form hotel đủ field (`address`, `checkin_date`, `checkout_date`, `note`) + Sửa
-- [ ] Thêm màn hình CRUD Room Types (API đủ, 0 UI)
-- [ ] Sửa/xoá phòng
-- [ ] Cho phép đổi phòng người đã gán (không chỉ chọn từ danh sách "chưa có phòng") + nút bỏ gán
+- [x] Form hotel đủ field (`address`, `checkin_date`, `checkout_date`, `note`) + Sửa
+- [x] Thêm màn hình CRUD Room Types (API đủ, 0 UI)
+- [x] Sửa/xoá phòng
+- [x] Cho phép đổi phòng người đã gán (không chỉ chọn từ danh sách "chưa có phòng") + nút bỏ gán
 
 **Lịch & Thông báo — `schedule-announcements-panel.tsx`:**
-- [ ] Form lịch trình thêm `day_date`, `start_at`, `end_at`, `description`, `audience`
-- [ ] Sửa/xoá cho cả lịch trình và thông báo
-- [ ] Thông báo: toggle ghim, xem trước markdown khi soạn
+- [x] Form lịch trình thêm `day_date`, `start_at`, `end_at`, `description`, `audience`
+- [x] Sửa/xoá cho cả lịch trình và thông báo
+- [x] Thông báo: toggle ghim, xem trước markdown khi soạn
 
 **Email — `app/admin/events/[id]/emails/page.tsx`:**
-- [ ] Nút xem trước (render `body_html` với dữ liệu mẫu)
-- [ ] Nút "Khôi phục mặc định" khi `is_custom`
+- [x] Nút xem trước (render `body_html` với dữ liệu mẫu)
+- [x] Nút "Khôi phục mặc định" khi `is_custom`
 
 **Audit — `audit-jobs-panel.tsx`:**
-- [ ] Thêm cột người thực hiện (join `actor_user_id` → email, hoặc trả kèm từ backend)
-- [ ] Thêm nút mở rộng xem before/after (diff đơn giản dạng 2 cột JSON hoặc list field đổi)
-- [ ] Thêm filter theo thời gian/hành động/entity_type, bỏ giới hạn cứng 30 dòng (dùng `data-table.tsx`)
-- [ ] CSV export (`ops.py:43-51`) thêm cột before/after (dạng JSON string trong ô)
-- [ ] Jobs panel lọc theo `event_id` nếu đang trong context 1 event
+- [x] Thêm cột người thực hiện (join `actor_user_id` → email, hoặc trả kèm từ backend)
+- [x] Thêm nút mở rộng xem before/after (diff đơn giản dạng 2 cột JSON hoặc list field đổi)
+- [x] Thêm filter theo thời gian/hành động/entity_type, bỏ giới hạn cứng 30 dòng (dùng `data-table.tsx`)
+- [x] CSV export (`ops.py:43-51`) thêm cột before/after (dạng JSON string trong ô)
+- [x] Jobs panel lọc theo `event_id` nếu đang trong context 1 event
 
 **Nghiệm thu:** Chrome thật ngay trong phase — không dồn sang R6.
 
-**Đã kiểm chứng:** _(điền khi xong)_
+**Đã kiểm chứng:** `ruff` sạch, `pytest` **55/55** (từ 47/47 cuối R4 → thêm test cho: dashboard theo
+chặng/flag counts, audit `actor_email` + filter theo `action`, `GET /jobs?event_id=` lọc qua
+`json_extract`, xoá phòng/loại phòng bị chặn khi còn người ở — rồi thành công sau khi bỏ gán, lịch trình
+lọc đúng theo `audience=shift` — bug thật tìm thấy khi viết test này: chỉ nhánh `audience=team` được lọc,
+`shift` lọt qua mọi CBNV bất kể ca; sửa 1 dòng ở `journey_service.py` theo đúng pattern của nhánh `team`
+bên cạnh, và phải dời `Registration` lookup lên trước vòng lặp schedule vì code cũ khai báo nó sau khi
+dùng). `tsc --noEmit` + `next lint` sạch sau mỗi lần đổi FE.
+
+Endpoint mới thêm ở R5 (đúng luật "không thêm endpoint mà không có FE gọi" — mỗi cái đều được wire ngay):
+`PATCH/DELETE /hotels/{hid}/room-types/{tid}`, `DELETE /hotels/{hid}/rooms/{rid}` (409 khi còn người ở),
+`DELETE /room-assignments/{id}` (bỏ gán), `DELETE /schedule-items/{id}`, `DELETE /announcements/{id}`,
+`DELETE /email-templates/{code}` (khôi phục mặc định), `POST /email-templates/{code}/preview` (render
+Jinja với dữ liệu mẫu, không đụng DB — cho xem trước cả nội dung chưa lưu).
+
+Đã lắp nốt 2 endpoint có sẵn nhưng chưa ai gọi từ bảng tra cứu §6.1: `GET /allocations` (lịch sử phân bổ
+bay) và `GET /allocations/bus/history` (lịch sử phân xe) — cả hai giờ có dialog "Lịch sử phân bổ/phân xe"
+trong panel tương ứng.
+
+**Chưa click-through Chrome thật** — `claude-in-chrome` vẫn chưa kết nối được trong suốt phiên làm R3-R5
+(đã hỏi và được đồng ý dùng `tsc`/`lint`/`ruff`/`pytest`/test route thay thế, xem quyết định ở đầu phiên).
+Rủi ro cụ thể cần click thật trước khi coi R5 là "xong" theo đúng luật ở CLAUDE.md:
+- `ConfirmDialog` (AlertDialog) lồng bên trong `Dialog` đang mở — dùng mới ở nút "Lưu" lịch trình và
+  toggle publish khi sự kiện đã công bố; chưa từng có ở codebase trước đó, có thể có vấn đề z-index/focus
+  giữa 2 lớp overlay của Base UI mà biên dịch không bắt được
+- DataTable với cột chứa `<Select>`/`Checkbox` bên trong (Users, các bảng phân bổ) — sort/click có thể
+  đụng nhau với việc chọn dòng
+- Toàn bộ form mới (Xe, Khách sạn, Room Types, Lịch trình) chưa xác nhận layout ở 390px
+- `dangerouslySetInnerHTML` ở màn hình xem trước email — nội dung do chính BTC gõ nên không phải input
+  của người lạ, nhưng chưa xem bằng mắt HTML thật trông thế nào
 
 ---
 

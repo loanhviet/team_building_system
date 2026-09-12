@@ -3,14 +3,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { use, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { EmptyState } from "@/components/domain/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { EmailTemplate } from "@/types/api";
+
+type Preview = { subject: string; body_html: string };
 
 export default function EmailTemplatesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -19,6 +28,7 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
   const [selected, setSelected] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [preview, setPreview] = useState<Preview | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["events", eventId, "email-templates"],
@@ -36,6 +46,30 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "email-templates"] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không lưu được"),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<EmailTemplate>(`/api/events/${eventId}/email-templates/${selected}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (tpl) => {
+      toast.success("Đã khôi phục mẫu mặc định");
+      setSubject(tpl.subject);
+      setBody(tpl.body_html);
+      queryClient.invalidateQueries({ queryKey: ["events", eventId, "email-templates"] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không khôi phục được"),
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<Preview>(`/api/events/${eventId}/email-templates/${selected}/preview`, {
+        method: "POST",
+        body: JSON.stringify({ subject, body_html: body }),
+      }),
+    onSuccess: setPreview,
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không xem trước được"),
   });
 
   const open = (tpl: EmailTemplate) => {
@@ -89,18 +123,59 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
               <Label>Nội dung HTML</Label>
               <Textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} className="font-mono text-xs" />
             </div>
-            <Button
-              className="self-start"
-              disabled={!subject || !body || saveMutation.isPending}
-              onClick={() => saveMutation.mutate()}
-            >
-              Lưu mẫu
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                disabled={!subject || !body || saveMutation.isPending}
+                onClick={() => saveMutation.mutate()}
+              >
+                Lưu mẫu
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!subject || !body || previewMutation.isPending}
+                onClick={() => previewMutation.mutate()}
+              >
+                Xem trước
+              </Button>
+              {current.is_custom && (
+                <ConfirmDialog
+                  trigger={<Button variant="outline">Khôi phục mặc định</Button>}
+                  title="Khôi phục mẫu mặc định?"
+                  description="Nội dung đã chỉnh cho sự kiện này sẽ bị xoá, dùng lại mẫu gốc của hệ thống."
+                  confirmLabel="Khôi phục"
+                  destructive
+                  onConfirm={() => restoreMutation.mutate()}
+                />
+              )}
+            </div>
           </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">Chọn một mẫu bên trái để sửa.</p>
       )}
+
+      <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Xem trước email</DialogTitle>
+          </DialogHeader>
+          {preview && (
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Tiêu đề</p>
+                <p className="font-medium">{preview.subject}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">Nội dung</p>
+                <div
+                  className="max-h-96 overflow-y-auto rounded-md border p-3 text-sm"
+                  dangerouslySetInnerHTML={{ __html: preview.body_html }}
+                />
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

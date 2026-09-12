@@ -275,6 +275,14 @@ export type Room = {
   occupied: number;
 };
 
+export type RoomType = {
+  id: number;
+  hotel_id: number;
+  name: string;
+  capacity: number;
+  quantity: number;
+};
+
 export type RoomAssignment = {
   id: number;
   room_id: number;
@@ -309,14 +317,18 @@ export type Dashboard = {
   by_shift: { shift_name: string; count: number }[];
   transport_need_by_leg: { leg_name: string; count: number }[];
   flight_slots: { flight_code: string; direction: string; capacity: number; assigned: number }[];
+  flights_flagged_count: number;
   rooms_assigned: number;
   rooms_total_capacity: number;
-  buses_assigned: number;
+  buses_by_leg: { leg_name: string; needed: number; assigned: number }[];
+  buses_flagged_count: number;
+  buses_without_leader_count: number;
 };
 
 export type AuditLogEntry = {
   id: number;
   actor_user_id: number | null;
+  actor_email: string | null;
   action: string;
   entity_type: string;
   entity_id: string;
@@ -496,6 +508,7 @@ export type Job = {
   error: string | null;
   created_at: string;
   finished_at: string | null;
+  event_id: number | null;
 };
 
 export type ImportBatch = {
@@ -513,4 +526,28 @@ export type ImportBatch = {
 export type ImportEnqueued = {
   job_id: number;
   batch_id: number;
+};
+
+export type ScheduleItem = {
+  id: number;
+  event_id: number;
+  day_date: string | null;
+  start_at: string | null;
+  end_at: string | null;
+  title: string;
+  description: string | null;
+  location: string | null;
+  audience: "all" | "shift" | "team";
+  audience_ref_id: number | null;
+  sort_order: number;
+  is_published: boolean;
+};
+
+export type Announcement = {
+  id: number;
+  event_id: number;
+  title: string;
+  body_md: string;
+  is_pinned: boolean;
+  published_at: string | null;
 };

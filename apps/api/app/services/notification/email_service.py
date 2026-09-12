@@ -195,6 +195,44 @@ async def upsert_event_template(
     }
 
 
+async def restore_default_template(db: AsyncSession, event_id: int, code: str) -> dict:
+    if code not in DEFAULT_TEMPLATES:
+        raise AppError("unknown_template", f"Không có mẫu email '{code}'", http_status.HTTP_400_BAD_REQUEST)
+    result = await db.execute(
+        select(EmailTemplate).where(EmailTemplate.code == code, EmailTemplate.event_id == event_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is not None:
+        await db.delete(row)
+        await db.flush()
+    default = DEFAULT_TEMPLATES[code]
+    return {
+        "code": code,
+        "subject": default["subject"],
+        "body_html": default["body_html"],
+        "description": TEMPLATE_DESCRIPTIONS.get(code),
+        "is_custom": False,
+    }
+
+
+PREVIEW_CONTEXT = {
+    "full_name": "Nguyễn Văn A",
+    "event_name": "Team Building 2026",
+    "team_name": "Engineering",
+    "participating_label": "Có tham gia",
+    "shift_name": "Ca 1",
+    "transport_summary": "2 chặng",
+    "app_url": "https://teambuilding.example.com",
+}
+
+
+def preview_template(subject: str, body_html: str) -> tuple[str, str]:
+    """Renders arbitrary (possibly unsaved) subject/body against sample data —
+    lets BTC see the effect of an edit before saving it, unlike rendering the
+    persisted template which would ignore whatever they just typed."""
+    return Template(subject).render(**PREVIEW_CONTEXT), Template(body_html).render(**PREVIEW_CONTEXT)
+
+
 async def enqueue_schedule_changed(queue, event, item_id: int) -> None:
     if event.status.value not in PUBLISHED_STATUSES:
         return

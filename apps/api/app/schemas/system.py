@@ -13,6 +13,7 @@ class JobOut(BaseModel):
     error: str | None
     created_at: datetime
     finished_at: datetime | None
+    event_id: int | None
 
     model_config = {"from_attributes": True}
 

@@ -3,8 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EventDashboard } from "@/components/domain/event-dashboard";
 import {
   Select,
   SelectContent,
@@ -13,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
-import type { Dashboard, Event } from "@/types/api";
+import type { Event } from "@/types/api";
 
 const SECTIONS = [
   { href: "/admin/events", title: "Sự kiện", description: "Tạo kỳ, cấu hình, chuyển trạng thái." },
@@ -21,28 +20,22 @@ const SECTIONS = [
   { href: "/admin/employees", title: "CBNV", description: "Danh sách nhân viên, import Excel." },
 ];
 
-function BoardCell({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="board-cell">
-      <p className="board-n">{value}</p>
-      <p className="mt-1 text-xs text-white/55">{label}</p>
-    </div>
-  );
-}
-
 export default function AdminHomePage() {
   const { data: events } = useQuery({
     queryKey: ["events"],
     queryFn: () => apiFetch<Event[]>("/api/events"),
   });
-  const [eventId, setEventId] = useState<number | null>(null);
-  const currentEventId = eventId ?? events?.[events.length - 1]?.id ?? null;
-
-  const { data: dashboard } = useQuery({
-    queryKey: ["events", currentEventId, "dashboard"],
-    queryFn: () => apiFetch<Dashboard>(`/api/events/${currentEventId}/dashboard`),
-    enabled: currentEventId != null,
+  // The event actually open for registration is what BTC almost always
+  // wants to see first — falling back to "highest id" (the old default)
+  // meant landing on a draft/completed event whenever a newer one existed
+  // but wasn't yet open.
+  const { data: currentEvent } = useQuery({
+    queryKey: ["events", "current"],
+    queryFn: () => apiFetch<Event | null>("/api/events/current"),
   });
+  const [manualEventId, setManualEventId] = useState<number | null>(null);
+  const currentEventId =
+    manualEventId ?? currentEvent?.id ?? events?.[events.length - 1]?.id ?? null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -54,7 +47,7 @@ export default function AdminHomePage() {
         {events && events.length > 0 && (
           <Select
             value={currentEventId ? String(currentEventId) : undefined}
-            onValueChange={(v) => setEventId(Number(v))}
+            onValueChange={(v) => setManualEventId(Number(v))}
           >
             <SelectTrigger className="w-56">
               <SelectValue placeholder="Chọn sự kiện" />
@@ -70,78 +63,7 @@ export default function AdminHomePage() {
         )}
       </div>
 
-      {dashboard && (
-        <div className="flex flex-col gap-4">
-          <div className="board grid-cols-2 sm:grid-cols-4">
-            <BoardCell label="Tổng CBNV" value={dashboard.total_employees} />
-            <BoardCell label="Đã đăng ký" value={dashboard.registered_count} />
-            <BoardCell label="Chưa đăng ký" value={dashboard.not_registered_count} />
-            <BoardCell label="Tham gia" value={dashboard.participating_count} />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Theo ca</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {dashboard.by_shift.map((s) => (
-                  <Badge key={s.shift_name} variant="outline">
-                    {s.shift_name}: {s.count}
-                  </Badge>
-                ))}
-                {dashboard.by_shift.length === 0 && (
-                  <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Nhu cầu xe theo chặng</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {dashboard.transport_need_by_leg.map((l) => (
-                  <Badge key={l.leg_name} variant="outline">
-                    {l.leg_name}: {l.count}
-                  </Badge>
-                ))}
-                {dashboard.transport_need_by_leg.length === 0 && (
-                  <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Tình trạng slot chuyến bay</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {dashboard.flight_slots.map((f) => (
-                  <Badge key={f.flight_code} variant={f.assigned >= f.capacity ? "secondary" : "outline"}>
-                    {f.flight_code} ({f.direction}): {f.assigned}/{f.capacity}
-                  </Badge>
-                ))}
-                {dashboard.flight_slots.length === 0 && (
-                  <p className="text-sm text-muted-foreground">Chưa có chuyến bay</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Phân xe / phòng</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Badge variant="outline">Đã lên xe: {dashboard.buses_assigned}</Badge>
-                <Badge variant="outline">
-                  Phòng: {dashboard.rooms_assigned}/{dashboard.rooms_total_capacity} chỗ
-                </Badge>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      )}
+      {currentEventId != null && <EventDashboard eventId={currentEventId} />}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {SECTIONS.map((s) => (

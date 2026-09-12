@@ -135,6 +135,13 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
             tables_out = list(by_table.values())
         gala = JourneyGala(status=gala_config.status, name=gala_config.name, tables=tables_out)
 
+    result = await db.execute(
+        select(Registration).where(
+            Registration.event_id == event.id, Registration.employee_id == employee.id
+        )
+    )
+    registration = result.scalar_one_or_none()
+
     schedule: list[JourneyScheduleItem] = []
     result = await db.execute(
         select(ScheduleItem)
@@ -143,6 +150,10 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
     )
     for item in result.scalars().all():
         if item.audience == "team" and item.audience_ref_id != employee.team_id:
+            continue
+        if item.audience == "shift" and (
+            registration is None or item.audience_ref_id != registration.shift_id
+        ):
             continue
         schedule.append(
             JourneyScheduleItem(
@@ -165,13 +176,6 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
                 title=a.title, body_md=a.body_md, is_pinned=a.is_pinned, published_at=a.published_at
             )
         )
-
-    result = await db.execute(
-        select(Registration).where(
-            Registration.event_id == event.id, Registration.employee_id == employee.id
-        )
-    )
-    registration = result.scalar_one_or_none()
 
     return JourneyOut(
         event_id=event.id,

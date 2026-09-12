@@ -11,6 +11,33 @@ def test_every_default_template_has_description():
     assert set(DEFAULT_TEMPLATES) == set(TEMPLATE_DESCRIPTIONS)
 
 
+def test_preview_template_renders_sample_context():
+    from app.services.notification.email_service import preview_template
+
+    subject, body = preview_template("Hello {{ full_name }}", "<p>{{ event_name }}</p>")
+    assert subject == "Hello Nguyễn Văn A"
+    assert "Team Building 2026" in body
+
+
+async def test_restore_default_template_drops_event_override(client, world, auth_headers):
+    resp = await client.put(
+        f"/api/events/{world.event.id}/email-templates/registration_confirmed",
+        headers=auth_headers(world.organizer_user),
+        json={"subject": "Custom subject", "body_html": "<p>custom</p>"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_custom"] is True
+
+    resp = await client.delete(
+        f"/api/events/{world.event.id}/email-templates/registration_confirmed",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_custom"] is False
+    assert body["subject"] != "Custom subject"
+
+
 def test_upsert_rejects_unknown_code():
     import asyncio
 

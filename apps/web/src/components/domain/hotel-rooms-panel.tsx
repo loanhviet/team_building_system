@@ -3,8 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -22,19 +24,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buttonVariants } from "@/components/ui/button";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import type { Hotel, ImportResult, Room, RoomAssignment, UnassignedEmployee } from "@/types/api";
+import type { Hotel, ImportResult, Room, RoomAssignment, RoomType, UnassignedEmployee } from "@/types/api";
+
+const EMPTY_HOTEL = { name: "", address: "", checkin_date: "", checkout_date: "", note: "" };
+const EMPTY_ROOM_TYPE = { name: "", capacity: "2", quantity: "0" };
+const EMPTY_ROOM = { room_number: "", room_type_id: "", capacity: "2", note: "" };
 
 export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const [hotelDialogOpen, setHotelDialogOpen] = useState(false);
-  const [hotelName, setHotelName] = useState("");
+  const [editingHotel, setEditingHotel] = useState<Hotel | null>(null);
+  const [hotelForm, setHotelForm] = useState(EMPTY_HOTEL);
   const [selectedHotelId, setSelectedHotelId] = useState<number | null>(null);
+
+  const [typeDialogOpen, setTypeDialogOpen] = useState(false);
+  const [editingType, setEditingType] = useState<RoomType | null>(null);
+  const [typeForm, setTypeForm] = useState(EMPTY_ROOM_TYPE);
+
   const [roomDialogOpen, setRoomDialogOpen] = useState(false);
-  const [roomNumber, setRoomNumber] = useState("");
-  const [roomCapacity, setRoomCapacity] = useState("2");
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [roomForm, setRoomForm] = useState(EMPTY_ROOM);
+
   const [assignEmployeeId, setAssignEmployeeId] = useState("");
   const [assignRoomId, setAssignRoomId] = useState("");
   const roomImportRef = useRef<HTMLInputElement>(null);
@@ -46,6 +57,13 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   });
 
   const hotelId = selectedHotelId ?? hotels?.[0]?.id ?? null;
+  const currentHotel = hotels?.find((h) => h.id === hotelId) ?? null;
+
+  const { data: roomTypes } = useQuery({
+    queryKey: ["events", eventId, "hotels", hotelId, "room-types"],
+    queryFn: () => apiFetch<RoomType[]>(`/api/events/${eventId}/hotels/${hotelId}/room-types`),
+    enabled: !!hotelId,
+  });
 
   const { data: rooms } = useQuery({
     queryKey: ["events", eventId, "hotels", hotelId, "rooms"],
@@ -68,34 +86,149 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
     queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels"] });
     queryClient.invalidateQueries({ queryKey: ["events", eventId, "room-assignments"] });
   };
+  const invalidateRooms = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "rooms"] });
+  const invalidateTypes = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "room-types"] });
 
-  const createHotelMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<Hotel>(`/api/events/${eventId}/hotels`, {
-        method: "POST",
-        body: JSON.stringify({ name: hotelName }),
-      }),
+  const openCreateHotel = () => {
+    setEditingHotel(null);
+    setHotelForm(EMPTY_HOTEL);
+    setHotelDialogOpen(true);
+  };
+  const openEditHotel = (hotel: Hotel) => {
+    setEditingHotel(hotel);
+    setHotelForm({
+      name: hotel.name,
+      address: hotel.address ?? "",
+      checkin_date: hotel.checkin_date ?? "",
+      checkout_date: hotel.checkout_date ?? "",
+      note: hotel.note ?? "",
+    });
+    setHotelDialogOpen(true);
+  };
+
+  const saveHotelMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
+        name: hotelForm.name,
+        address: hotelForm.address || null,
+        checkin_date: hotelForm.checkin_date || null,
+        checkout_date: hotelForm.checkout_date || null,
+        note: hotelForm.note || null,
+      };
+      return editingHotel
+        ? apiFetch<Hotel>(`/api/events/${eventId}/hotels/${editingHotel.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : apiFetch<Hotel>(`/api/events/${eventId}/hotels`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+    },
     onSuccess: () => {
-      toast.success("Đã thêm khách sạn");
+      toast.success(editingHotel ? "Đã cập nhật khách sạn" : "Đã thêm khách sạn");
       setHotelDialogOpen(false);
-      setHotelName("");
       invalidateAll();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
-  const createRoomMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<Room>(`/api/events/${eventId}/hotels/${hotelId}/rooms`, {
-        method: "POST",
-        body: JSON.stringify({ room_number: roomNumber, capacity: Number(roomCapacity) }),
-      }),
+  const openCreateType = () => {
+    setEditingType(null);
+    setTypeForm(EMPTY_ROOM_TYPE);
+    setTypeDialogOpen(true);
+  };
+  const openEditType = (t: RoomType) => {
+    setEditingType(t);
+    setTypeForm({ name: t.name, capacity: String(t.capacity), quantity: String(t.quantity) });
+    setTypeDialogOpen(true);
+  };
+
+  const saveTypeMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
+        name: typeForm.name,
+        capacity: Number(typeForm.capacity),
+        quantity: Number(typeForm.quantity),
+      };
+      return editingType
+        ? apiFetch<RoomType>(`/api/events/${eventId}/hotels/${hotelId}/room-types/${editingType.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : apiFetch<RoomType>(`/api/events/${eventId}/hotels/${hotelId}/room-types`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+    },
     onSuccess: () => {
-      toast.success("Đã thêm phòng");
+      toast.success(editingType ? "Đã cập nhật loại phòng" : "Đã thêm loại phòng");
+      setTypeDialogOpen(false);
+      invalidateTypes();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const deleteTypeMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/events/${eventId}/hotels/${hotelId}/room-types/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Đã xoá loại phòng");
+      invalidateTypes();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const openCreateRoom = () => {
+    setEditingRoom(null);
+    setRoomForm(EMPTY_ROOM);
+    setRoomDialogOpen(true);
+  };
+  const openEditRoom = (r: Room) => {
+    setEditingRoom(r);
+    setRoomForm({
+      room_number: r.room_number,
+      room_type_id: r.room_type_id ? String(r.room_type_id) : "",
+      capacity: String(r.capacity),
+      note: r.note ?? "",
+    });
+    setRoomDialogOpen(true);
+  };
+
+  const saveRoomMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
+        room_number: roomForm.room_number,
+        room_type_id: roomForm.room_type_id ? Number(roomForm.room_type_id) : null,
+        capacity: Number(roomForm.capacity),
+        note: roomForm.note || null,
+      };
+      return editingRoom
+        ? apiFetch<Room>(`/api/events/${eventId}/hotels/${hotelId}/rooms/${editingRoom.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : apiFetch<Room>(`/api/events/${eventId}/hotels/${hotelId}/rooms`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+    },
+    onSuccess: () => {
+      toast.success(editingRoom ? "Đã cập nhật phòng" : "Đã thêm phòng");
       setRoomDialogOpen(false);
-      setRoomNumber("");
-      setRoomCapacity("2");
-      queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "rooms"] });
+      invalidateRooms();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const deleteRoomMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/events/${eventId}/hotels/${hotelId}/rooms/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Đã xoá phòng");
+      invalidateRooms();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -105,23 +238,34 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
       apiUpload<ImportResult>(`/api/events/${eventId}/hotels/${hotelId}/rooms/import`, file),
     onSuccess: (result) => {
       toast.success(`Import xong: ${result.ok_rows} OK, ${result.error_rows} lỗi`);
-      queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "rooms"] });
+      invalidateRooms();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Import thất bại"),
   });
 
   const assignMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (vars: { employeeId: number; roomId: number }) =>
       apiFetch(`/api/events/${eventId}/room-assignments/assign`, {
         method: "POST",
-        body: JSON.stringify({ employee_id: Number(assignEmployeeId), room_id: Number(assignRoomId) }),
+        body: JSON.stringify({ employee_id: vars.employeeId, room_id: vars.roomId }),
       }),
     onSuccess: () => {
       toast.success("Đã gán phòng");
       setAssignEmployeeId("");
       setAssignRoomId("");
       invalidateAll();
-      queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "rooms"] });
+      invalidateRooms();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: (assignmentId: number) =>
+      apiFetch(`/api/events/${eventId}/room-assignments/${assignmentId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Đã bỏ gán phòng");
+      invalidateAll();
+      invalidateRooms();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -137,10 +281,125 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   });
 
   const allRooms = rooms ?? [];
+  const allAssignments = assignments ?? [];
+
+  // Anyone eligible to (re)assign: registered participants with no room yet,
+  // plus everyone already assigned somewhere (so a wrong room can be fixed
+  // without dropping them first) — union of the two lists the backend gives us.
+  const assignableEmployees = [
+    ...(unassigned ?? []).map((e) => ({ employee_id: e.employee_id, employee_code: e.employee_code, full_name: e.full_name })),
+    ...allAssignments.map((a) => ({ employee_id: a.employee_id, employee_code: a.employee_code, full_name: a.full_name })),
+  ];
+
+  const typeColumns: DataTableColumn<RoomType>[] = [
+    { key: "name", header: "Tên loại", cell: (t) => t.name },
+    { key: "capacity", header: "Sức chứa/phòng", cell: (t) => t.capacity },
+    { key: "quantity", header: "Số phòng dự kiến", cell: (t) => t.quantity },
+    {
+      key: "actions",
+      header: "",
+      cell: (t) => (
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" onClick={() => openEditType(t)}>
+            Sửa
+          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button size="sm" variant="ghost">
+                Xoá
+              </Button>
+            }
+            title="Xoá loại phòng này?"
+            description="Chỉ xoá được khi không còn phòng nào dùng loại này."
+            confirmLabel="Xoá"
+            destructive
+            onConfirm={() => deleteTypeMutation.mutate(t.id)}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const roomColumns: DataTableColumn<Room>[] = [
+    { key: "room_number", header: "Số phòng", cell: (r) => r.room_number, sortValue: (r) => r.room_number },
+    {
+      key: "room_type",
+      header: "Loại phòng",
+      cell: (r) => roomTypes?.find((t) => t.id === r.room_type_id)?.name ?? "—",
+    },
+    { key: "capacity", header: "Sức chứa", cell: (r) => r.capacity, sortValue: (r) => r.capacity },
+    {
+      key: "occupied",
+      header: "Đã ở",
+      cell: (r) => <Badge variant={r.occupied >= r.capacity ? "secondary" : "outline"}>{r.occupied}/{r.capacity}</Badge>,
+      sortValue: (r) => r.occupied,
+    },
+    {
+      key: "occupants",
+      header: "Người ở",
+      cell: (r) => {
+        const names = allAssignments.filter((a) => a.room_id === r.id).map((a) => a.full_name);
+        return names.length ? (
+          <span className="text-xs text-muted-foreground">{names.join(", ")}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      cell: (r) => (
+        <div className="flex gap-1">
+          <Button size="sm" variant="ghost" onClick={() => openEditRoom(r)}>
+            Sửa
+          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button size="sm" variant="ghost">
+                Xoá
+              </Button>
+            }
+            title="Xoá phòng này?"
+            description="Chỉ xoá được khi không còn ai đang ở phòng này."
+            confirmLabel="Xoá"
+            destructive
+            onConfirm={() => deleteRoomMutation.mutate(r.id)}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const assignmentColumns: DataTableColumn<RoomAssignment>[] = [
+    { key: "employee_code", header: "Mã NV", cell: (a) => a.employee_code ?? "—", className: "font-mono" },
+    { key: "full_name", header: "Họ tên", cell: (a) => a.full_name, sortValue: (a) => a.full_name },
+    { key: "team_name", header: "Team", cell: (a) => a.team_name ?? "—", sortValue: (a) => a.team_name },
+    { key: "hotel_name", header: "Khách sạn", cell: (a) => a.hotel_name },
+    { key: "room_number", header: "Phòng", cell: (a) => a.room_number },
+    {
+      key: "actions",
+      header: "",
+      cell: (a) => (
+        <ConfirmDialog
+          trigger={
+            <Button size="sm" variant="ghost">
+              Bỏ gán
+            </Button>
+          }
+          title="Bỏ gán phòng?"
+          description={`${a.full_name} sẽ trở lại danh sách chưa có phòng.`}
+          confirmLabel="Bỏ gán"
+          destructive
+          onConfirm={() => unassignMutation.mutate(a.id)}
+        />
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Select
           value={hotelId ? String(hotelId) : undefined}
           onValueChange={(v) => setSelectedHotelId(Number(v))}
@@ -156,23 +415,45 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
             ))}
           </SelectContent>
         </Select>
+        {currentHotel && (
+          <Button variant="ghost" size="sm" onClick={() => openEditHotel(currentHotel)}>
+            Sửa khách sạn
+          </Button>
+        )}
         <Dialog open={hotelDialogOpen} onOpenChange={setHotelDialogOpen}>
-          <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })} onClick={openCreateHotel}>
             Thêm khách sạn
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Thêm khách sạn</DialogTitle>
+              <DialogTitle>{editingHotel ? "Sửa khách sạn" : "Thêm khách sạn"}</DialogTitle>
             </DialogHeader>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="hotel-name">Tên khách sạn</Label>
-              <Input id="hotel-name" value={hotelName} onChange={(e) => setHotelName(e.target.value)} />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Tên khách sạn</Label>
+                <Input value={hotelForm.name} onChange={(e) => setHotelForm({ ...hotelForm, name: e.target.value })} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Địa chỉ</Label>
+                <Input value={hotelForm.address} onChange={(e) => setHotelForm({ ...hotelForm, address: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label>Nhận phòng</Label>
+                  <Input type="date" value={hotelForm.checkin_date} onChange={(e) => setHotelForm({ ...hotelForm, checkin_date: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Trả phòng</Label>
+                  <Input type="date" value={hotelForm.checkout_date} onChange={(e) => setHotelForm({ ...hotelForm, checkout_date: e.target.value })} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Ghi chú</Label>
+                <Input value={hotelForm.note} onChange={(e) => setHotelForm({ ...hotelForm, note: e.target.value })} />
+              </div>
             </div>
             <DialogFooter>
-              <Button
-                disabled={!hotelName || createHotelMutation.isPending}
-                onClick={() => createHotelMutation.mutate()}
-              >
+              <Button disabled={!hotelForm.name || saveHotelMutation.isPending} onClick={() => saveHotelMutation.mutate()}>
                 Lưu
               </Button>
             </DialogFooter>
@@ -181,103 +462,122 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
       </div>
 
       {hotelId && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium">Phòng</p>
-            <div className="ml-auto flex gap-2">
-              <input
-                ref={roomImportRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) importRoomsMutation.mutate(file);
-                  e.target.value = "";
-                }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  apiDownload(
-                    `/api/events/${eventId}/hotels/${hotelId}/rooms/import-template`,
-                    `rooms_template_hotel_${hotelId}.xlsx`,
-                  ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
-                }
-              >
-                File mẫu phòng
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => roomImportRef.current?.click()}>
-                Import phòng
-              </Button>
-              <Dialog open={roomDialogOpen} onOpenChange={setRoomDialogOpen}>
-                <DialogTrigger className={buttonVariants({ size: "sm" })}>Thêm phòng</DialogTrigger>
+        <>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium">Loại phòng</p>
+              <Dialog open={typeDialogOpen} onOpenChange={setTypeDialogOpen}>
+                <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm", className: "ml-auto" })} onClick={openCreateType}>
+                  Thêm loại phòng
+                </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Thêm phòng</DialogTitle>
+                    <DialogTitle>{editingType ? "Sửa loại phòng" : "Thêm loại phòng"}</DialogTitle>
                   </DialogHeader>
-                  <div className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="room-number">Số phòng</Label>
-                      <Input
-                        id="room-number"
-                        value={roomNumber}
-                        onChange={(e) => setRoomNumber(e.target.value)}
-                      />
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Tên loại</Label>
+                      <Input value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} />
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="room-capacity">Sức chứa</Label>
-                      <Input
-                        id="room-capacity"
-                        type="number"
-                        value={roomCapacity}
-                        onChange={(e) => setRoomCapacity(e.target.value)}
-                      />
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Sức chứa/phòng</Label>
+                      <Input type="number" value={typeForm.capacity} onChange={(e) => setTypeForm({ ...typeForm, capacity: e.target.value })} />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Số phòng dự kiến</Label>
+                      <Input type="number" value={typeForm.quantity} onChange={(e) => setTypeForm({ ...typeForm, quantity: e.target.value })} />
                     </div>
                   </div>
                   <DialogFooter>
-                    <Button
-                      disabled={!roomNumber || createRoomMutation.isPending}
-                      onClick={() => createRoomMutation.mutate()}
-                    >
+                    <Button disabled={!typeForm.name || saveTypeMutation.isPending} onClick={() => saveTypeMutation.mutate()}>
                       Lưu
                     </Button>
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
             </div>
+            <DataTable columns={typeColumns} rows={roomTypes ?? []} rowKey={(t) => t.id} emptyMessage="Chưa có loại phòng" />
           </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Số phòng</TableHead>
-                <TableHead>Sức chứa</TableHead>
-                <TableHead>Đã ở</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {allRooms.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>{r.room_number}</TableCell>
-                  <TableCell>{r.capacity}</TableCell>
-                  <TableCell>
-                    <Badge variant={r.occupied >= r.capacity ? "secondary" : "outline"}>
-                      {r.occupied}/{r.capacity}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {allRooms.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    Chưa có phòng
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium">Phòng</p>
+              <div className="ml-auto flex gap-2">
+                <input
+                  ref={roomImportRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) importRoomsMutation.mutate(file);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    apiDownload(
+                      `/api/events/${eventId}/hotels/${hotelId}/rooms/import-template`,
+                      `rooms_template_hotel_${hotelId}.xlsx`,
+                    ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+                  }
+                >
+                  File mẫu phòng
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => roomImportRef.current?.click()}>
+                  Import phòng
+                </Button>
+                <Dialog open={roomDialogOpen} onOpenChange={setRoomDialogOpen}>
+                  <DialogTrigger className={buttonVariants({ size: "sm" })} onClick={openCreateRoom}>
+                    Thêm phòng
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{editingRoom ? "Sửa phòng" : "Thêm phòng"}</DialogTitle>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-2">
+                        <Label>Số phòng</Label>
+                        <Input value={roomForm.room_number} onChange={(e) => setRoomForm({ ...roomForm, room_number: e.target.value })} />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Loại phòng</Label>
+                        <Select value={roomForm.room_type_id} onValueChange={(v) => setRoomForm({ ...roomForm, room_type_id: v ?? "" })}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Chọn loại phòng" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {roomTypes?.map((t) => (
+                              <SelectItem key={t.id} value={String(t.id)}>
+                                {t.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Sức chứa</Label>
+                        <Input type="number" value={roomForm.capacity} onChange={(e) => setRoomForm({ ...roomForm, capacity: e.target.value })} />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Ghi chú</Label>
+                        <Input value={roomForm.note} onChange={(e) => setRoomForm({ ...roomForm, note: e.target.value })} />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button disabled={!roomForm.room_number || saveRoomMutation.isPending} onClick={() => saveRoomMutation.mutate()}>
+                        Lưu
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+            <DataTable columns={roomColumns} rows={allRooms} rowKey={(r) => r.id} emptyMessage="Chưa có phòng" />
+          </div>
+        </>
       )}
 
       <div className="flex flex-col gap-2">
@@ -302,7 +602,9 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                 apiDownload(
                   `/api/events/${eventId}/room-assignments/import-template`,
                   `room_assignments_template_event_${eventId}.xlsx`,
-                ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+                ).catch((err) =>
+                  toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"),
+                )
               }
             >
               File mẫu phân phòng
@@ -329,11 +631,11 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
 
         <div className="flex items-center gap-2">
           <Select value={assignEmployeeId} onValueChange={(v) => setAssignEmployeeId(v ?? "")}>
-            <SelectTrigger className="w-56">
-              <SelectValue placeholder="Chọn CBNV chưa có phòng" />
+            <SelectTrigger className="w-64">
+              <SelectValue placeholder="Chọn CBNV (gán hoặc đổi phòng)" />
             </SelectTrigger>
             <SelectContent>
-              {unassigned?.map((e) => (
+              {assignableEmployees.map((e) => (
                 <SelectItem key={e.employee_id} value={String(e.employee_id)}>
                   {e.employee_code} — {e.full_name}
                 </SelectItem>
@@ -355,41 +657,20 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
           <Button
             size="sm"
             disabled={!assignEmployeeId || !assignRoomId || assignMutation.isPending}
-            onClick={() => assignMutation.mutate()}
+            onClick={() =>
+              assignMutation.mutate({ employeeId: Number(assignEmployeeId), roomId: Number(assignRoomId) })
+            }
           >
-            Gán phòng
+            Gán / đổi phòng
           </Button>
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Mã NV</TableHead>
-              <TableHead>Họ tên</TableHead>
-              <TableHead>Team</TableHead>
-              <TableHead>Khách sạn</TableHead>
-              <TableHead>Phòng</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {assignments?.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell className="font-mono">{a.employee_code ?? "—"}</TableCell>
-                <TableCell>{a.full_name}</TableCell>
-                <TableCell>{a.team_name ?? "—"}</TableCell>
-                <TableCell>{a.hotel_name}</TableCell>
-                <TableCell>{a.room_number}</TableCell>
-              </TableRow>
-            ))}
-            {(!assignments || assignments.length === 0) && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  Chưa gán phòng cho ai
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+        <DataTable
+          columns={assignmentColumns}
+          rows={allAssignments}
+          rowKey={(a) => a.id}
+          emptyMessage="Chưa gán phòng cho ai"
+        />
       </div>
     </div>
   );

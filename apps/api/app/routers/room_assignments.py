@@ -144,6 +144,19 @@ async def assign_room(
     return _assignment_out(assignment, room, hotel)
 
 
+@router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unassign_room(event_id: int, assignment_id: int, db: DbSession, user: AdminUser) -> None:
+    assignment = await db.get(RoomAssignment, assignment_id)
+    if assignment is None or assignment.event_id != event_id:
+        raise AppError("not_found", "Room assignment not found", status.HTTP_404_NOT_FOUND)
+    await record_audit(
+        db, actor_user_id=user.id, action="cancel", entity_type="room_assignment",
+        entity_id=assignment.employee_id, before={"room_id": assignment.room_id}, event_id=event_id,
+    )
+    await db.delete(assignment)
+    await db.commit()
+
+
 @router.get("/import-template")
 async def download_room_assignment_template(event_id: int, _user: AdminUser) -> object:
     return xlsx_file(
