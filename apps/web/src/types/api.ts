@@ -215,6 +215,26 @@ export type ImportResult = {
   errors: { row: number; error: string }[];
 };
 
+export type ChatSession = {
+  id: number;
+  event_id: number;
+  title: string | null;
+  created_at: string;
+};
+
+export type Citation = {
+  title: string;
+  source_type: string;
+};
+
+export type ChatMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  citations_json: Citation[] | null;
+  created_at: string;
+};
+
 export type GalaConfig = {
   id: number;
   event_id: number;

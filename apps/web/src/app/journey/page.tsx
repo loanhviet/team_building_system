@@ -49,11 +49,16 @@ export default function JourneyPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{journey.event_name}</h1>
-        <p className="text-sm text-zinc-500">
-          {journey.full_name} — {journey.team_name ?? "—"}
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold">{journey.event_name}</h1>
+          <p className="text-sm text-zinc-500">
+            {journey.full_name} — {journey.team_name ?? "—"}
+          </p>
+        </div>
+        <Link href="/chat" className="text-sm text-blue-600 underline">
+          Hỏi đáp
+        </Link>
       </div>
 
       {journey.announcements.length > 0 && (

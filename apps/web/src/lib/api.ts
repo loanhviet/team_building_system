@@ -85,6 +85,45 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   URL.revokeObjectURL(url);
 }
 
+export async function apiChatStream(
+  path: string,
+  body: unknown,
+  onEvent: (data: { delta?: string; done?: boolean; citations?: unknown; error?: string }) => void,
+): Promise<void> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    throw new ApiError(res.status, "chat_failed", "Không gửi được tin nhắn");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      try {
+        onEvent(JSON.parse(line.slice(5).trim()));
+      } catch {
+        // ignore malformed chunk
+      }
+    }
+  }
+}
+
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const formData = new FormData();
   formData.append("file", file);
