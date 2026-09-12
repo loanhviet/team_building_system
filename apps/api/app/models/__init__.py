@@ -3,6 +3,7 @@ from app.models.auth import RefreshToken, User
 from app.models.bus import Bus, BusAssignment
 from app.models.event import Event, EventSetting, PickupPoint, Shift, TransportLeg
 from app.models.flight import Flight, FlightAssignment
+from app.models.gala import GalaConfig, GalaSeat, GalaTable, GalaTurn
 from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
 from app.models.notification import EmailOutbox, EmailTemplate
 from app.models.organization import Employee, Site, Team
@@ -23,6 +24,10 @@ __all__ = [
     "EventSetting",
     "Flight",
     "FlightAssignment",
+    "GalaConfig",
+    "GalaSeat",
+    "GalaTable",
+    "GalaTurn",
     "Hotel",
     "ImportBatch",
     "Job",

@@ -16,6 +16,7 @@ from app.core.errors import (
 )
 from app.core.logging import setup_logging
 from app.core.queue import init_arq_pool
+from app.core.ws_manager import gala_manager
 from app.routers import (
     auth,
     buses,
@@ -23,6 +24,7 @@ from app.routers import (
     event_config,
     events,
     flights,
+    gala,
     health,
     hotels,
     jobs,
@@ -42,7 +44,9 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.arq_pool = await init_arq_pool()
+    await gala_manager.start_redis_listener(app.state.arq_pool)
     yield
+    await gala_manager.stop_redis_listener()
     await app.state.arq_pool.close()
 
 
@@ -76,3 +80,4 @@ app.include_router(room_assignments.router, prefix="/api")
 app.include_router(buses.router, prefix="/api")
 app.include_router(schedule.router, prefix="/api")
 app.include_router(journey.router, prefix="/api")
+app.include_router(gala.router, prefix="/api")
