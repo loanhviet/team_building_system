@@ -1,10 +1,32 @@
 # Thiết kế lại ChatRAG — Trợ lý hành trình (không phải RAG tài liệu generic)
 
-> **Nguồn sự thật cho module hỏi đáp.** R0–R6 không đụng chat; đợt này làm trên branch `feat/chatrag-concierge` (tách từ `rebuild/r6-browser-acceptance` @ `c92dcc8`). Quay về trạng thái trước ChatRAG: `git checkout rebuild/r6-browser-acceptance`.
+> **Nguồn sự thật cho module hỏi đáp.** Đã triển khai trên branch `feat/chatrag-concierge` (1 commit `feat: ChatRAG concierge for trip Q&A`, tách từ `rebuild/r6-browser-acceptance` @ `c92dcc8`). Quay về trước ChatRAG: `git checkout rebuild/r6-browser-acceptance`.
 >
 > Phạm vi: hỏi đáp thông tin chuyến đi trên portal Team Building.  
-> Đối chiếu: code cũ `apps/api/app/services/rag/*` + `apps/web/src/app/(employee)/chat/page.tsx` với repo học `/home/viet/apal_tech/tu_hoc/rag_flow` (RAGFlow v0.26.4).  
-> Quyết định cốt lõi: **không nhúng RAGFlow như sản phẩm thứ hai**, **không copy nguyên pipeline document RAG**. Port đúng vài cơ chế, viết lại cho stack FastAPI + SQLite + Qdrant + ARQ sẵn có.
+> Đối chiếu lúc thiết kế: pipeline Phase 8 cũ + repo học `/home/viet/apal_tech/tu_hoc/rag_flow` (RAGFlow v0.26.4).  
+> Quyết định cốt lõi: **không nhúng RAGFlow như sản phẩm thứ hai**. Port hybrid / rewrite / empty_response / retrieval-as-tool / citation — viết lại cho FastAPI + SQLite + Qdrant + ARQ.
+
+## Trạng thái triển khai (đọc cái này trước khi sửa chat)
+
+**Đã ship.** Không còn "embed hành trình cá nhân → cosine top-5". Concierge đang chạy.
+
+| Lớp | Cách chạy |
+|---|---|
+| Sự thật vận hành (bay/xe/phòng/Gala/form **của người đang login**) | SQL tools, `employee_id` từ JWT — `services/rag/tools.py` |
+| Quy định / FAQ / thông báo / lịch mô tả | Hybrid FTS5 + Qdrant trên văn bản **đã publish** |
+| Corpus demo | `apps/api/app/db/knowledge_pack.py` → `seed_knowledge()` ghi vào DB. Chat **không** đọc file Python lúc hỏi |
+| UI CBNV | `/chat` — gợi ý theo `event.status` |
+| UI BTC | `/admin/events/{id}/knowledge` — CRUD markdown, confirm khi đăng, nút reindex |
+
+Sau `make seed`, terms v2 + 17 FAQ nằm trong SQLite. Sửa kỳ thật trên admin, rồi reindex. Gọi `seed_knowledge` lần nữa sẽ **đè** FAQ trùng tiêu đề và unpublish FAQ extra.
+
+Qdrant: `docker compose --profile rag up -d qdrant`. Không có Qdrant thì tool SQL vẫn trả lời được; FAQ dựa FTS5. Reindex khi Qdrant down rồi bật sau: phải force re-embed (checksum skip).
+
+Test: `docker compose exec api pytest tests/test_rag_*.py tests/test_knowledge_pack.py`. Live: `nv010@teambuilding.vn` / `NV010` (phòng 102), `nv011` / `NV011` (phòng 103), `btc@teambuilding.vn` / `btc123`.
+
+---
+
+Phần dưới là thiết kế gốc (audit Phase 8, vì sao không RAG thường, lấy gì từ RAGFlow). Code đã theo kiến trúc đó — đừng implement lại pipeline cũ.
 
 ---
 

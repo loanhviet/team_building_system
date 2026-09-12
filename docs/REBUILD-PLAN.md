@@ -209,7 +209,7 @@ Sửa 1 dòng, hết cho tất cả caller.
 | Hạng mục | Quyết định |
 |---|---|
 | UI/UX | **Thiết kế lại toàn bộ** — design system, component, luồng màn hình CBNV + Admin |
-| Chat RAG (`/chat`) | **Giữ nguyên trong R0–R6.** Thiết kế lại nằm ngoài đợt rebuild: xem [`docs/CHAT-RAG.md`](CHAT-RAG.md), triển khai trên branch `feat/chatrag-concierge`. |
+| Chat RAG (`/chat`) | **Ngoài R0–R6.** Đã làm lại trên `feat/chatrag-concierge` — xem [`docs/CHAT-RAG.md`](CHAT-RAG.md). Đợt rebuild này không đụng chat. |
 | Dữ liệu demo | **Seed đầy đủ, nhiều kịch bản** |
 | Cách triển khai | **Chia phase, commit từng phase** |
 | Import/Export | **XLSX**, không làm CSV (BRD §10 để ngỏ "Excel/CSV"). Export audit log giữ CSV vì là log, không phải bảng nghiệp vụ |
@@ -862,7 +862,7 @@ trên thiết bị di động thật / DevTools device toolbar thủ công).
 | `GET /events/{id}/allocations` | `routers/flights.py:270` | dùng ở R5 (lịch sử phân bổ) |
 | `GET /events/{id}/allocations/bus/history` | `routers/buses.py:144` | dùng ở R5 |
 | `PATCH /events/{id}/announcements/{aid}` | `routers/schedule.py:101` | dùng ở R5 (sửa/ghim thông báo) |
-| `POST /events/{id}/rag/reindex` | `routers/rag.py:17` | ngoài phạm vi đợt này (chat RAG giữ nguyên) |
+| `POST /events/{id}/rag/reindex` | `routers/rag.py` | ChatRAG: nút "Đánh chỉ mục lại" trên `/admin/events/{id}/knowledge` |
 | `DELETE /employees/{id}` | `routers/employees.py:246` | quyết định: có cần UI xoá CBNV không — mặc định KHÔNG thêm (soft-delete qua `is_active` đã đủ), nếu BTC cần thì bổ sung |
 | `GET /journey/me?event_id&employee_id` (admin preview) | `routers/journey.py:23-29` | có thể hữu ích cho R5 (BTC xem trước journey của 1 người) — tuỳ chọn, không bắt buộc |
 
@@ -871,7 +871,7 @@ trên thiết bị di động thật / DevTools device toolbar thủ công).
 | Gì | File | Xử lý |
 |---|---|---|
 | `get_seat_lock_owner` | `services/gala/seat_lock.py:27` | không gọi ở đâu — xoá hoặc giữ nếu R4 cần debug |
-| `answer()` (non-stream) | `services/rag/chat_service.py:32` | chỉ `answer_stream` dùng — ngoài phạm vi (chat RAG giữ nguyên) |
+| `answer()` (non-stream) | `services/rag/chat_service.py` | ChatRAG: stream + tools; không còn `answer()` đồng bộ |
 | `AllocationStrategy` Protocol | `services/allocation/base.py:44` | 1 implementation duy nhất, không cần xoá, không cần dùng thêm |
 | `worker/tasks/system.py:6 ping` | | giữ — ARQ cần ≥1 hàm đăng ký để khởi động (ghi rõ trong CLAUDE.md) |
 | `ImportBatch.event_id` | `models/system.py:57` | không set — set khi implement import cho flights/buses ở R1/R5 nếu tiện, không bắt buộc |

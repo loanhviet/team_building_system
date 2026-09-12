@@ -15,15 +15,16 @@ Tailwind, TanStack Query) · SQLite (WAL) · Redis + ARQ (queue nền + khoá gh
 Yêu cầu: Docker + Docker Compose.
 
 ```bash
-cp .env.example .env        # chỉnh JWT_SECRET và các key LLM nếu cần dùng chat RAG (Phase 8)
+cp .env.example .env        # chỉnh JWT_SECRET; DASHSCOPE_API_KEY nếu dùng hỏi đáp
 make up                      # dựng toàn bộ stack, hot-reload cho dev
-make seed                     # tạo dữ liệu mẫu: 1 super_admin, 1 organizer, 120 CBNV, 1 event
+make seed                     # tạo dữ liệu mẫu: 1 super_admin, 1 organizer, 120 CBNV, 2 event + FAQ pack
 ```
 
 - Web: http://localhost:3000 — CBNV vào `/register`, `/journey`, `/gala/{id}`, `/chat`, `/team` (trưởng nhóm), `/account`
 - API docs (Swagger): http://localhost:8000/docs
 - MailHog (bắt email dev): http://localhost:8025
-- Qdrant (chỉ cần cho chat RAG — Phase 8): `docker compose --profile rag up -d qdrant`
+- Qdrant (hybrid vector cho FAQ; FTS5 vẫn chạy không cần): `docker compose --profile rag up -d qdrant`
+- ChatRAG: thiết kế + cách chạy [`docs/CHAT-RAG.md`](docs/CHAT-RAG.md). BTC soạn FAQ tại `/admin/events/{id}/knowledge`. Corpus demo trong `apps/api/app/db/knowledge_pack.py` chỉ là seed, không phải nguồn lúc hỏi.
 
 CBNV import từ Excel lần đầu có `must_change_password` — hệ thống ép vào `/account` trước khi dùng portal.
 
