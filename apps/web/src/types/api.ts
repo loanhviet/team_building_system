@@ -176,6 +176,37 @@ export type ImportResult = {
   errors: { row: number; error: string }[];
 };
 
+export type Bus = {
+  id: number;
+  event_id: number;
+  leg_id: number;
+  code: string;
+  name: string | null;
+  capacity: number;
+  gather_at: string | null;
+  depart_at: string | null;
+  pickup_point_id: number | null;
+  destination: string | null;
+  leader_employee_id: number | null;
+  leader_name: string | null;
+  leader_phone: string | null;
+  note: string | null;
+};
+
+export type BusAssignment = {
+  id: number;
+  bus_id: number | null;
+  employee_id: number;
+  leg_id: number;
+  source: "auto" | "manual" | "import";
+  is_locked: boolean;
+  is_flagged: boolean;
+  flag_reason: string | null;
+  employee_code: string | null;
+  full_name: string;
+  team_name: string | null;
+};
+
 export type Flight = {
   id: number;
   event_id: number;
