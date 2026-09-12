@@ -13,6 +13,7 @@ from app.worker.tasks.email import send_email
 from app.worker.tasks.gala import expire_gala_holds_task
 from app.worker.tasks.imports import import_employees_task
 from app.worker.tasks.notifications import send_bulk_emails_task
+from app.worker.tasks.rag import reindex_rag_task
 from app.worker.tasks.system import ping
 
 settings = get_settings()
@@ -37,6 +38,7 @@ class WorkerSettings:
         run_flight_allocation_task,
         run_bus_allocation_task,
         send_bulk_emails_task,
+        reindex_rag_task,
         arq_func(send_email, max_tries=3),
     ]
     cron_jobs: ClassVar[list] = [

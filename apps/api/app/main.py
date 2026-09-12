@@ -20,6 +20,7 @@ from app.core.ws_manager import gala_manager
 from app.routers import (
     auth,
     buses,
+    chat,
     employees,
     event_config,
     events,
@@ -29,6 +30,7 @@ from app.routers import (
     hotels,
     jobs,
     journey,
+    rag,
     registrations,
     room_assignments,
     schedule,
@@ -81,3 +83,5 @@ app.include_router(buses.router, prefix="/api")
 app.include_router(schedule.router, prefix="/api")
 app.include_router(journey.router, prefix="/api")
 app.include_router(gala.router, prefix="/api")
+app.include_router(rag.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")

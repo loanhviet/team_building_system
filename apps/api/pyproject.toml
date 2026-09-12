@@ -19,6 +19,9 @@ dependencies = [
     "jinja2>=3.1",
     "aiosmtplib>=3.0",
     "python-json-logger>=2.0",
+    "qdrant-client>=1.12",
+    "fastembed>=0.4",
+    "anthropic>=0.40",
 ]
 
 [project.optional-dependencies]
