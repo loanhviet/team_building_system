@@ -124,7 +124,14 @@ export async function apiDownload(path: string, filename: string): Promise<void>
 export async function apiChatStream(
   path: string,
   body: unknown,
-  onEvent: (data: { delta?: string; done?: boolean; citations?: unknown; error?: string }) => void,
+  onEvent: (data: {
+    delta?: string;
+    done?: boolean;
+    citations?: unknown;
+    error?: string;
+    tool?: string;
+    rewrite?: string;
+  }) => void,
 ): Promise<void> {
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",

@@ -3,6 +3,8 @@ from functools import lru_cache
 from app.core.config import get_settings
 from app.services.rag.providers.anthropic_llm import AnthropicLLMProvider
 from app.services.rag.providers.base import EmbeddingProvider, LLMProvider
+from app.services.rag.providers.base import LLMResponse as LLMResponse
+from app.services.rag.providers.base import ToolCall as ToolCall
 from app.services.rag.providers.dashscope_llm import DashScopeLLMProvider
 from app.services.rag.providers.local_embedding import LocalEmbeddingProvider
 

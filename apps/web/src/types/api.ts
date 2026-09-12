@@ -348,6 +348,7 @@ export type ChatSession = {
 export type Citation = {
   title: string;
   source_type: string;
+  href?: string;
 };
 
 export type ChatMessage = {
@@ -355,7 +356,19 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   citations_json: Citation[] | null;
+  tool_trace_json?: { name: string; arguments?: unknown; ok?: boolean }[] | null;
   created_at: string;
+};
+
+export type KnowledgeDocument = {
+  id: number;
+  event_id: number;
+  title: string;
+  body_md: string;
+  is_published: boolean;
+  updated_by: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type GalaConfig = {

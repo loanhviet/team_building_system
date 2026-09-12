@@ -26,6 +26,7 @@ class ChatMessageOut(BaseModel):
     role: str
     content: str
     citations_json: list[dict] | None
+    tool_trace_json: list[dict] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

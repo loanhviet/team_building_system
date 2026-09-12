@@ -6,15 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.time import utcnow
+from app.db.knowledge_pack import TERMS_TEXT, TERMS_VERSION
 from app.models.enums import EventStatus, UserRole
 from app.models.event import Event, EventSetting
 from app.services.allocation.base import DEFAULT_WEIGHTS
 
-DEFAULT_TERMS_TEXT = (
-    "Tôi xác nhận đã đọc và đồng ý với quy định chương trình Team Building, "
-    "bao gồm chính sách/phí phạt trong trường hợp huỷ đăng ký không đúng quy định."
-)
-DEFAULT_TERMS_VERSION = "v1"
+DEFAULT_TERMS_TEXT = TERMS_TEXT
+DEFAULT_TERMS_VERSION = TERMS_VERSION
 
 ALLOCATION_ALLOWED_STATUSES = {EventStatus.registration_closed, EventStatus.allocation_processing}
 

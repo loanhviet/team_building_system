@@ -209,7 +209,7 @@ Sửa 1 dòng, hết cho tất cả caller.
 | Hạng mục | Quyết định |
 |---|---|
 | UI/UX | **Thiết kế lại toàn bộ** — design system, component, luồng màn hình CBNV + Admin |
-| Chat RAG (`/chat`) | **Giữ nguyên, không đầu tư.** Không có trong BRD gốc. Sẽ thiết kế lại sau khi tham khảo repo ragflow. Đợt này chỉ chuẩn hoá màu/nhãn cho khỏi lạc lõng |
+| Chat RAG (`/chat`) | **Giữ nguyên trong R0–R6.** Thiết kế lại nằm ngoài đợt rebuild: xem [`docs/CHAT-RAG.md`](CHAT-RAG.md), triển khai trên branch `feat/chatrag-concierge`. |
 | Dữ liệu demo | **Seed đầy đủ, nhiều kịch bản** |
 | Cách triển khai | **Chia phase, commit từng phase** |
 | Import/Export | **XLSX**, không làm CSV (BRD §10 để ngỏ "Excel/CSV"). Export audit log giữ CSV vì là log, không phải bảng nghiệp vụ |

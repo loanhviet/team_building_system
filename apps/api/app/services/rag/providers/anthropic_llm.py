@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator
 
 from anthropic import AsyncAnthropic
 
+from app.services.rag.providers.base import LLMResponse
+
 DEFAULT_MODEL = "claude-sonnet-5"
 
 
@@ -22,3 +24,13 @@ class AnthropicLLMProvider:
         ) as stream:
             async for text in stream.text_stream:
                 yield text
+
+    async def complete(
+        self, system: str, messages: list[dict], tools: list[dict] | None = None
+    ) -> LLMResponse:
+        # Tool-calling is implemented on the OpenAI-compatible DashScope path
+        # (the provider actually used in this project). Anthropic stays a
+        # generate-only fallback so the Protocol stays complete.
+        text = await self.generate(system, messages)
+        return LLMResponse(content=text, tool_calls=[])
+

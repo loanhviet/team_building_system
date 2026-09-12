@@ -31,6 +31,7 @@ const TABS = [
   { href: "/hotels", label: "Khách sạn" },
   { href: "/gala", label: "Gala" },
   { href: "/schedule", label: "Lịch & TB" },
+  { href: "/knowledge", label: "Hỏi đáp" },
   { href: "/emails", label: "Email" },
   { href: "/audit", label: "Audit" },
 ];

@@ -22,6 +22,7 @@ from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_event_not_completed
 from app.services.notification.email_service import enqueue_schedule_changed
+from app.services.rag.enqueue import enqueue_reindex_fire_and_forget
 
 router = APIRouter(prefix="/events/{event_id}", tags=["schedule"])
 
@@ -62,6 +63,7 @@ async def create_schedule_item(
     )
     await enqueue_schedule_changed(queue, event, item.id)
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)
     await db.refresh(item)
     return item
 
@@ -87,6 +89,7 @@ async def update_schedule_item(
     )
     await enqueue_schedule_changed(queue, event, item.id)
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)
     await db.refresh(item)
     return item
 
@@ -109,6 +112,7 @@ async def delete_schedule_item(
     )
     await enqueue_schedule_changed(queue, event, item_id)
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)
 
 
 @router.get("/announcements", response_model=list[AnnouncementOut])
@@ -121,7 +125,11 @@ async def list_announcements(event_id: int, db: DbSession, user: CurrentUser) ->
 
 @router.post("/announcements", response_model=AnnouncementOut, status_code=status.HTTP_201_CREATED)
 async def create_announcement(
-    event_id: int, payload: AnnouncementCreate, db: DbSession, user: AdminUser
+    event_id: int,
+    payload: AnnouncementCreate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> Announcement:
     data = payload.model_dump()
     data["published_at"] = utcnow()
@@ -132,13 +140,19 @@ async def create_announcement(
         entity_id=announcement.id, after=payload.model_dump(mode="json"), event_id=event_id,
     )
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)
     await db.refresh(announcement)
     return announcement
 
 
 @router.patch("/announcements/{announcement_id}", response_model=AnnouncementOut)
 async def update_announcement(
-    event_id: int, announcement_id: int, payload: AnnouncementUpdate, db: DbSession, user: AdminUser
+    event_id: int,
+    announcement_id: int,
+    payload: AnnouncementUpdate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> Announcement:
     announcement = await master_data.get_or_404(db, Announcement, announcement_id, event_id=event_id)
     before = AnnouncementOut.model_validate(announcement).model_dump(mode="json")
@@ -149,13 +163,18 @@ async def update_announcement(
         after=AnnouncementOut.model_validate(announcement).model_dump(mode="json"), event_id=event_id,
     )
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)
     await db.refresh(announcement)
     return announcement
 
 
 @router.delete("/announcements/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_announcement(
-    event_id: int, announcement_id: int, db: DbSession, user: AdminUser
+    event_id: int,
+    announcement_id: int,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> None:
     announcement = await master_data.get_or_404(db, Announcement, announcement_id, event_id=event_id)
     await db.delete(announcement)
@@ -164,3 +183,4 @@ async def delete_announcement(
         entity_id=announcement_id, event_id=event_id,
     )
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)

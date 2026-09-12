@@ -78,11 +78,11 @@ smoke-test data — see `docs/REBUILD-PLAN.md` §R0 before relying on its output
 everything to dev mode (bind-mounted source, `uvicorn --reload`, `next dev` with Turbopack, `arq --watch`,
 plus a MailHog container on `:8025` that catches all outgoing email instead of sending it).
 
-Qdrant (for the RAG chat feature, Phase 8) is gated behind the `rag` compose profile and is not started by
-plain `make up`: `docker compose --profile rag up -d`. **The chat/RAG feature is intentionally frozen** —
-it isn't in the original BRD, and the plan is to redesign it later against the ragflow project rather than
-extend it now. Don't invest UI/UX effort there during the R0–R6 rebuild; small label/color consistency
-fixes are fine.
+Qdrant (for the RAG chat feature) is gated behind the `rag` compose profile and is not started by
+plain `make up`: `docker compose --profile rag up -d`. **Chat was frozen during R0–R6.** The redesign
+is specified in `docs/CHAT-RAG.md` (concierge = live SQL tools + RAG only over published text) and
+implemented on `feat/chatrag-concierge`. Don't treat Phase 8's "embed personal journeys" pipeline as
+the target design.
 
 **Gotcha:** Compose merges `profiles:` lists as a union, not an override — a service's `profiles` key
 cannot be cleared from the override file. This is why MailHog is defined as a whole separate service block
