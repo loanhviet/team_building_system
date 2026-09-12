@@ -38,6 +38,9 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [moveTarget, setMoveTarget] = useState("");
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustReason, setAdjustReason] = useState("Điều chỉnh thủ công từ Admin");
+  const [overCapacityMsg, setOverCapacityMsg] = useState<string | null>(null);
 
   const { data: legs } = useQuery({
     queryKey: ["events", eventId, "transport-legs"],
@@ -113,23 +116,31 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   });
 
   const adjustMutation = useMutation({
-    mutationFn: (busId: number) =>
+    mutationFn: ({ busId, force }: { busId: number; force: boolean }) =>
       apiFetch(`/api/events/${eventId}/bus-assignments/adjust`, {
         method: "POST",
         body: JSON.stringify({
           employee_ids: Array.from(selected),
           bus_id: busId,
-          reason: "Điều chỉnh thủ công từ Admin",
-          force: true,
+          reason: adjustReason,
+          force,
         }),
       }),
     onSuccess: () => {
       toast.success("Đã chuyển xe");
       setSelected(new Set());
       setMoveTarget("");
+      setAdjustOpen(false);
+      setOverCapacityMsg(null);
       refetchAssignments();
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === "over_capacity") {
+        setOverCapacityMsg(err.message);
+        return;
+      }
+      toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra");
+    },
   });
 
   const summary = job?.result_json as
@@ -299,8 +310,11 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
               </Select>
               <Button
                 size="sm"
-                disabled={!moveTarget || adjustMutation.isPending}
-                onClick={() => moveTarget && adjustMutation.mutate(Number(moveTarget))}
+                disabled={!moveTarget}
+                onClick={() => {
+                  setOverCapacityMsg(null);
+                  setAdjustOpen(true);
+                }}
               >
                 Chuyển
               </Button>
@@ -364,6 +378,42 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Điều chỉnh xe</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-zinc-500">
+              Chuyển {selected.size} người sang xe đã chọn. Cần ghi lý do (audit log).
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label>Lý do</Label>
+              <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
+            </div>
+            {overCapacityMsg && <p className="text-sm text-red-600">{overCapacityMsg}</p>}
+          </div>
+          <DialogFooter>
+            {!overCapacityMsg ? (
+              <Button
+                disabled={!adjustReason.trim() || adjustMutation.isPending}
+                onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget), force: false })}
+              >
+                Xác nhận
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={!adjustReason.trim() || adjustMutation.isPending}
+                onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget), force: true })}
+              >
+                Vẫn ghi đè sức chứa
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

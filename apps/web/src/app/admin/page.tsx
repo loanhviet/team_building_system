@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -21,14 +21,12 @@ const SECTIONS = [
   { href: "/admin/employees", title: "CBNV", description: "Danh sách nhân viên, import Excel." },
 ];
 
-function StatCard({ label, value }: { label: string; value: string | number }) {
+function BoardCell({ label, value }: { label: string; value: string | number }) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="text-2xl font-semibold">{value}</p>
-        <p className="text-xs text-zinc-500">{label}</p>
-      </CardContent>
-    </Card>
+    <div className="board-cell">
+      <p className="board-n">{value}</p>
+      <p className="mt-1 text-xs text-white/55">{label}</p>
+    </div>
   );
 }
 
@@ -50,8 +48,8 @@ export default function AdminHomePage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold">Tổng quan</h1>
-          <p className="text-sm text-zinc-500">Khu vực quản trị hệ thống Team Building.</p>
+          <p className="ticket-kicker">Bàn điều hành</p>
+          <h1 className="font-display text-3xl font-semibold">Tổng quan</h1>
         </div>
         {events && events.length > 0 && (
           <Select
@@ -74,11 +72,11 @@ export default function AdminHomePage() {
 
       {dashboard && (
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Tổng CBNV" value={dashboard.total_employees} />
-            <StatCard label="Đã đăng ký" value={dashboard.registered_count} />
-            <StatCard label="Chưa đăng ký" value={dashboard.not_registered_count} />
-            <StatCard label="Tham gia" value={dashboard.participating_count} />
+          <div className="board grid-cols-2 sm:grid-cols-4">
+            <BoardCell label="Tổng CBNV" value={dashboard.total_employees} />
+            <BoardCell label="Đã đăng ký" value={dashboard.registered_count} />
+            <BoardCell label="Chưa đăng ký" value={dashboard.not_registered_count} />
+            <BoardCell label="Tham gia" value={dashboard.participating_count} />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -93,7 +91,7 @@ export default function AdminHomePage() {
                   </Badge>
                 ))}
                 {dashboard.by_shift.length === 0 && (
-                  <p className="text-sm text-zinc-500">Chưa có dữ liệu</p>
+                  <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
                 )}
               </CardContent>
             </Card>
@@ -109,7 +107,7 @@ export default function AdminHomePage() {
                   </Badge>
                 ))}
                 {dashboard.transport_need_by_leg.length === 0 && (
-                  <p className="text-sm text-zinc-500">Chưa có dữ liệu</p>
+                  <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
                 )}
               </CardContent>
             </Card>
@@ -125,7 +123,7 @@ export default function AdminHomePage() {
                   </Badge>
                 ))}
                 {dashboard.flight_slots.length === 0 && (
-                  <p className="text-sm text-zinc-500">Chưa có chuyến bay</p>
+                  <p className="text-sm text-muted-foreground">Chưa có chuyến bay</p>
                 )}
               </CardContent>
             </Card>
@@ -147,13 +145,14 @@ export default function AdminHomePage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {SECTIONS.map((s) => (
-          <Link key={s.href} href={s.href}>
-            <Card className="h-full transition-colors hover:border-zinc-400">
-              <CardHeader>
-                <CardTitle>{s.title}</CardTitle>
-                <CardDescription>{s.description}</CardDescription>
-              </CardHeader>
-            </Card>
+          <Link key={s.href} href={s.href} className="block">
+            <div className="ticket h-full hover:border-[var(--lagoon)]">
+              <div className="ticket-spine" />
+              <div className="ticket-body">
+                <h2 className="font-display text-xl">{s.title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{s.description}</p>
+              </div>
+            </div>
           </Link>
         ))}
       </div>

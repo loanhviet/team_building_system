@@ -22,6 +22,7 @@ from app.routers import (
     buses,
     chat,
     dashboard,
+    email_templates,
     employees,
     event_config,
     events,
@@ -38,6 +39,7 @@ from app.routers import (
     schedule,
     sites,
     teams,
+    users,
 )
 
 setup_logging()
@@ -76,6 +78,7 @@ app.include_router(sites.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(event_config.router, prefix="/api")
 app.include_router(employees.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(registrations.router, prefix="/api")
 app.include_router(flights.router, prefix="/api")
@@ -83,6 +86,7 @@ app.include_router(hotels.router, prefix="/api")
 app.include_router(room_assignments.router, prefix="/api")
 app.include_router(buses.router, prefix="/api")
 app.include_router(schedule.router, prefix="/api")
+app.include_router(email_templates.router, prefix="/api")
 app.include_router(journey.router, prefix="/api")
 app.include_router(gala.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")

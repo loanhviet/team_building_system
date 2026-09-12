@@ -20,10 +20,12 @@ make up                      # dựng toàn bộ stack, hot-reload cho dev
 make seed                     # tạo dữ liệu mẫu: 1 super_admin, 1 organizer, 120 CBNV, 1 event
 ```
 
-- Web: http://localhost:3000
+- Web: http://localhost:3000 — CBNV vào `/register`, `/journey`, `/gala/{id}`, `/chat`, `/team` (trưởng nhóm), `/account`
 - API docs (Swagger): http://localhost:8000/docs
 - MailHog (bắt email dev): http://localhost:8025
 - Qdrant (chỉ cần cho chat RAG — Phase 8): `docker compose --profile rag up -d qdrant`
+
+CBNV import từ Excel lần đầu có `must_change_password` — hệ thống ép vào `/account` trước khi dùng portal.
 
 Tài khoản đăng nhập sau khi `make seed` (in ra ở cuối log seed):
 

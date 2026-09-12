@@ -19,6 +19,7 @@ class FlightCreate(BaseModel):
 class FlightUpdate(BaseModel):
     flight_code: str | None = None
     airline: str | None = None
+    direction: str | None = None
     shift_id: int | None = None
     depart_at: datetime | None = None
     arrive_at: datetime | None = None

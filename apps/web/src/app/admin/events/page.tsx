@@ -57,8 +57,8 @@ export default function EventsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Sự kiện</h1>
-          <p className="text-sm text-zinc-500">Các kỳ Team Building trong hệ thống.</p>
+          <p className="ticket-kicker">Kỳ chương trình</p>
+          <h1 className="font-display text-3xl font-semibold">Sự kiện</h1>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger className={buttonVariants()}>Tạo sự kiện</DialogTrigger>
@@ -110,6 +110,13 @@ export default function EventsPage() {
             <TableRow>
               <TableCell colSpan={4} className="text-center text-zinc-500">
                 Đang tải...
+              </TableCell>
+            </TableRow>
+          )}
+          {!isLoading && data?.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4} className="text-center text-muted-foreground">
+                Chưa có sự kiện. Tạo kỳ Team Building đầu tiên để bắt đầu.
               </TableCell>
             </TableRow>
           )}

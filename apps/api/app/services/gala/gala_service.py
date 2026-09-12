@@ -15,6 +15,10 @@ from app.models.registration import Registration
 from app.services.gala.seat_lock import acquire_seat_lock, release_seat_lock
 
 
+def auto_table_position(index: int) -> tuple[int, int]:
+    return 40 + (index % 3) * 220, 28 + (index // 3) * 200
+
+
 async def compute_team_quota(db: AsyncSession, event_id: int, team_id: int, config: GalaConfig) -> int:
     if config.seat_quota_rule == "fixed":
         return config.fixed_quota or 0
@@ -32,6 +36,13 @@ async def compute_team_quota(db: AsyncSession, event_id: int, team_id: int, conf
 
 
 async def draw_turns(db: AsyncSession, event_id: int, config: GalaConfig, team_ids: list[int]) -> None:
+    existing = await db.execute(select(GalaTurn.id).where(GalaTurn.event_id == event_id).limit(1))
+    if existing.scalar_one_or_none() is not None:
+        raise AppError(
+            "already_drawn",
+            "Đã bốc thăm rồi. Không thể bốc lại khi đã có thứ tự Team.",
+            status.HTTP_409_CONFLICT,
+        )
     seed = random.randint(0, 2**31 - 1)
     rng = random.Random(seed)
     order = list(team_ids)
@@ -47,13 +58,8 @@ async def draw_turns(db: AsyncSession, event_id: int, config: GalaConfig, team_i
         )
 
     config.draw_seed = seed
-    config.status = "in_progress"
+    config.status = "drawing"
     await db.flush()
-
-    result = await db.execute(
-        select(GalaTurn).where(GalaTurn.event_id == event_id, GalaTurn.order_no == 1)
-    )
-    await _activate_turn(db, config, result.scalar_one())
 
 
 async def _activate_turn(db: AsyncSession, config: GalaConfig, turn: GalaTurn) -> None:
@@ -69,25 +75,119 @@ async def get_active_turn(db: AsyncSession, event_id: int) -> GalaTurn | None:
     return result.scalar_one_or_none()
 
 
-async def advance_turn(db: AsyncSession, event_id: int, config: GalaConfig) -> GalaTurn | None:
-    """Marks the current active turn done/expired and activates the next order_no, if any."""
-    active = await get_active_turn(db, event_id)
-    if active is not None and active.status == "active":
-        active.status = "done"
-
+async def _next_waiting_turn(db: AsyncSession, event_id: int) -> GalaTurn | None:
     result = await db.execute(
         select(GalaTurn)
         .where(GalaTurn.event_id == event_id, GalaTurn.status == "waiting")
         .order_by(GalaTurn.order_no)
         .limit(1)
     )
-    next_turn = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def _activate_next_waiting(db: AsyncSession, event_id: int, config: GalaConfig) -> GalaTurn | None:
+    next_turn = await _next_waiting_turn(db, event_id)
     if next_turn is not None:
         await _activate_turn(db, config, next_turn)
+        config.status = "in_progress"
     else:
         config.status = "finished"
     await db.flush()
     return next_turn
+
+
+async def advance_turn(db: AsyncSession, event_id: int, config: GalaConfig) -> GalaTurn | None:
+    """Marks the current active turn done and activates the next waiting turn, if any."""
+    active = await get_active_turn(db, event_id)
+    if active is not None and active.status == "active":
+        active.status = "done"
+    return await _activate_next_waiting(db, event_id, config)
+
+
+async def start_turn(db: AsyncSession, event_id: int, config: GalaConfig) -> GalaTurn:
+    if await get_active_turn(db, event_id) is not None:
+        raise AppError("turn_active", "Đã có lượt đang chạy", status.HTTP_409_CONFLICT)
+    waiting = await _next_waiting_turn(db, event_id)
+    if waiting is None:
+        raise AppError(
+            "no_waiting_turn",
+            "Không còn lượt chờ. Hãy bốc thăm trước.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    await _activate_turn(db, config, waiting)
+    config.status = "in_progress"
+    await db.flush()
+    return waiting
+
+
+async def skip_turn(
+    db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig
+) -> GalaTurn | None:
+    active = await get_active_turn(db, event_id)
+    if active is None:
+        raise AppError("no_active_turn", "Không có lượt đang chạy để bỏ qua", status.HTTP_400_BAD_REQUEST)
+    active.status = "skipped"
+
+    result = await db.execute(
+        select(GalaSeat).where(GalaSeat.status == "held", GalaSeat.held_by_team_id == active.team_id)
+    )
+    for seat in result.scalars().all():
+        table = await db.get(GalaTable, seat.table_id)
+        if table is None or table.event_id != event_id:
+            continue
+        await release_seat_lock(redis, seat.id, active.team_id)
+        seat.status = "available"
+        seat.held_by_team_id = None
+        seat.hold_expires_at = None
+        seat.version += 1
+        await publish_gala_event(
+            redis, event_id, {"type": "seat_update", "seat_id": seat.id, "status": "available"}
+        )
+
+    next_turn = await _activate_next_waiting(db, event_id, config)
+    await publish_gala_event(
+        redis,
+        event_id,
+        {
+            "type": "turn_update",
+            "team_id": next_turn.team_id if next_turn else None,
+            "expires_at": next_turn.expires_at.isoformat() if next_turn else None,
+            "finished": next_turn is None,
+        },
+    )
+    return next_turn
+
+
+async def set_seat_blocked(
+    db: AsyncSession, redis: Redis, event_id: int, seat_id: int, blocked: bool
+) -> GalaSeat:
+    seat = await db.get(GalaSeat, seat_id)
+    if seat is None:
+        raise AppError("not_found", "Ghế không tồn tại", status.HTTP_404_NOT_FOUND)
+    table = await db.get(GalaTable, seat.table_id)
+    if table is None or table.event_id != event_id:
+        raise AppError("not_found", "Ghế không thuộc event này", status.HTTP_404_NOT_FOUND)
+
+    if blocked:
+        if seat.status not in ("available", "blocked"):
+            raise AppError(
+                "seat_busy",
+                "Chỉ khoá được ghế đang trống",
+                status.HTTP_409_CONFLICT,
+            )
+        seat.status = "blocked"
+        seat.held_by_team_id = None
+        seat.hold_expires_at = None
+    else:
+        if seat.status != "blocked":
+            raise AppError("not_blocked", "Ghế này không bị khoá", status.HTTP_400_BAD_REQUEST)
+        seat.status = "available"
+    seat.version += 1
+    await db.flush()
+    await publish_gala_event(
+        redis, event_id, {"type": "seat_update", "seat_id": seat.id, "status": seat.status}
+    )
+    return seat
 
 
 async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig) -> None:

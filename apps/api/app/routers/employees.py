@@ -1,17 +1,29 @@
+import io
 import uuid
 from pathlib import Path
 from typing import Annotated
 
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, UploadFile, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from sqlalchemy import func, or_, select
 
 from app.core.deps import CurrentUser, DbSession, require_admin
+from app.core.errors import AppError
 from app.core.queue import get_queue
+from app.core.security import hash_password
 from app.models.auth import User
-from app.models.enums import ImportBatchStatus, JobStatus
+from app.models.enums import ImportBatchStatus, JobStatus, UserRole
 from app.models.organization import Employee
 from app.models.system import ImportBatch, Job
-from app.schemas.organization import EmployeeCreate, EmployeeOut, EmployeeUpdate
+from app.schemas.organization import (
+    EmployeeCreate,
+    EmployeeListOut,
+    EmployeeOut,
+    EmployeePhoneUpdate,
+    EmployeeUpdate,
+)
 from app.schemas.system import ImportBatchOut, ImportEnqueuedOut
 from app.services import master_data
 from app.services.audit_service import record_audit
@@ -53,34 +65,159 @@ def _batch_out(batch: ImportBatch) -> ImportBatchOut:
     )
 
 
-@router.get("", response_model=list[EmployeeOut])
+def _employee_filters(search: str | None, team_id: int | None, site_id: int | None):
+    clauses = []
+    if search:
+        needle = f"%{search.strip()}%"
+        clauses.append(
+            or_(
+                Employee.full_name.ilike(needle),
+                Employee.email.ilike(needle),
+                Employee.employee_code.ilike(needle),
+            )
+        )
+    if team_id is not None:
+        clauses.append(Employee.team_id == team_id)
+    if site_id is not None:
+        clauses.append(Employee.site_id == site_id)
+    return clauses
+
+
+@router.get("", response_model=EmployeeListOut)
 async def list_employees(
     db: DbSession,
     _user: CurrentUser,
     search: str | None = None,
     team_id: int | None = None,
     site_id: int | None = None,
-) -> list[EmployeeOut]:
-    employees = await master_data.list_all(db, Employee)
-    if search:
-        needle = search.strip().lower()
-        employees = [
-            e
-            for e in employees
-            if needle in e.full_name.lower()
-            or needle in e.email.lower()
-            or (e.employee_code and needle in e.employee_code.lower())
-        ]
-    if team_id is not None:
-        employees = [e for e in employees if e.team_id == team_id]
-    if site_id is not None:
-        employees = [e for e in employees if e.site_id == site_id]
-    return [_employee_out(e) for e in employees]
+    limit: int = 50,
+    offset: int = 0,
+) -> EmployeeListOut:
+    limit = min(max(limit, 1), 200)
+    offset = max(offset, 0)
+    clauses = _employee_filters(search, team_id, site_id)
+    count_stmt = select(func.count(Employee.id))
+    stmt = select(Employee).order_by(Employee.full_name, Employee.id)
+    for clause in clauses:
+        count_stmt = count_stmt.where(clause)
+        stmt = stmt.where(clause)
+    total = (await db.execute(count_stmt)).scalar_one()
+    result = await db.execute(stmt.offset(offset).limit(limit))
+    return EmployeeListOut(
+        items=[_employee_out(e) for e in result.scalars().all()],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/export")
+async def export_employees(
+    db: DbSession,
+    _user: AdminUser,
+    search: str | None = None,
+    team_id: int | None = None,
+    site_id: int | None = None,
+) -> StreamingResponse:
+    clauses = _employee_filters(search, team_id, site_id)
+    stmt = select(Employee).order_by(Employee.full_name, Employee.id)
+    for clause in clauses:
+        stmt = stmt.where(clause)
+    result = await db.execute(stmt)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "CBNV"
+    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone"])
+    for emp in result.scalars().all():
+        ws.append([
+            emp.employee_code or "",
+            emp.full_name,
+            emp.email,
+            emp.team.code if emp.team else "",
+            emp.site.code if emp.site else "",
+            emp.phone or "",
+        ])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=employees.xlsx"},
+    )
+
+
+@router.get("/import-template")
+async def download_employee_template(_user: AdminUser) -> StreamingResponse:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "CBNV"
+    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone"])
+    ws.append(["NV999", "Nguyen Van A", "nva@company.vn", "MKT", "HN", "0901234567"])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=employees_template.xlsx"},
+    )
+
+
+@router.get("/me", response_model=EmployeeOut)
+async def get_my_profile(db: DbSession, user: CurrentUser) -> EmployeeOut:
+    if user.employee_id is None:
+        raise AppError(
+            "no_employee_record",
+            "Tài khoản này không gắn với hồ sơ nhân viên",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    employee = await master_data.get_or_404(db, Employee, user.employee_id)
+    return _employee_out(employee)
+
+
+@router.patch("/me", response_model=EmployeeOut)
+async def update_my_phone(
+    payload: EmployeePhoneUpdate, db: DbSession, user: CurrentUser
+) -> EmployeeOut:
+    if user.employee_id is None:
+        raise AppError(
+            "no_employee_record",
+            "Tài khoản này không gắn với hồ sơ nhân viên",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    employee = await master_data.get_or_404(db, Employee, user.employee_id)
+    before = {"phone": employee.phone}
+    employee.phone = payload.phone
+    await record_audit(
+        db,
+        actor_user_id=user.id,
+        action="update_phone",
+        entity_type="employee",
+        entity_id=employee.id,
+        before=before,
+        after={"phone": employee.phone},
+    )
+    await db.commit()
+    await db.refresh(employee)
+    return _employee_out(employee)
 
 
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
 async def create_employee(payload: EmployeeCreate, db: DbSession, user: AdminUser) -> EmployeeOut:
-    employee = await master_data.create(db, Employee, payload.model_dump())
+    data = payload.model_dump()
+    data["email"] = data["email"].lower()
+    employee = await master_data.create(db, Employee, data)
+    initial = employee.employee_code or "ChangeMe1"
+    db.add(
+        User(
+            employee_id=employee.id,
+            email=employee.email,
+            password_hash=hash_password(initial),
+            role=UserRole.employee,
+            must_change_password=True,
+        )
+    )
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="employee", entity_id=employee.id,
         after=payload.model_dump(mode="json"),

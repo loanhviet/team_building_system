@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -38,7 +39,7 @@ class EventSetting(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
     key: Mapped[str] = mapped_column(String(100))
-    value_json: Mapped[dict] = mapped_column(JSON)
+    value_json: Mapped[Any] = mapped_column(JSON)
 
 
 class Shift(Base):

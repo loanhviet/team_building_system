@@ -38,13 +38,18 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 
 def _user_out(user: User) -> UserOut:
+    emp = user.employee
     return UserOut(
         id=user.id,
         email=user.email,
         role=user.role.value,
         must_change_password=user.must_change_password,
         employee_id=user.employee_id,
-        full_name=user.employee.full_name if user.employee else None,
+        full_name=emp.full_name if emp else None,
+        employee_code=emp.employee_code if emp else None,
+        phone=emp.phone if emp else None,
+        team_name=emp.team.name if emp and emp.team else None,
+        site_name=emp.site.name if emp and emp.site else None,
     )
 
 

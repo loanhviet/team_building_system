@@ -4,8 +4,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { BrandMark } from "@/components/domain/brand-mark";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-context";
@@ -31,6 +31,10 @@ export default function LoginPage() {
   const onSubmit = async (values: FormValues) => {
     try {
       const user = await login(values.email, values.password);
+      if (user.must_change_password) {
+        router.push("/account");
+        return;
+      }
       if (user.role === "organizer" || user.role === "super_admin") {
         router.push("/admin");
       } else {
@@ -43,20 +47,43 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 p-4 dark:bg-black">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Đăng nhập</CardTitle>
-          <CardDescription>Hệ thống Quản lý Team Building</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+    <div className="grid min-h-svh flex-1 lg:grid-cols-[1.05fr_0.95fr]">
+      <aside className="pass-hero relative hidden flex-col justify-between p-10 lg:flex">
+        <BrandMark light />
+        <div className="max-w-md">
+          <p className="font-display text-4xl leading-tight font-semibold">
+            Một cổng cho cả hành trình
+          </p>
+          <p className="mt-4 text-sm leading-relaxed text-white/70">
+            Đăng ký, chuyến bay, xe đưa đón, phòng khách sạn, ghế Gala — xem trên cùng một thẻ, không
+            còn hỏi BTC từng tin nhắn.
+          </p>
+        </div>
+        <div className="pass-stack" aria-hidden>
+          <span />
+          <span />
+          <span />
+        </div>
+      </aside>
+
+      <main className="flex items-center justify-center bg-[var(--foam)] p-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="ticket w-full max-w-md">
+          <div className="ticket-spine" />
+          <div className="ticket-body flex flex-col gap-5 py-7">
+            <div className="lg:hidden">
+              <BrandMark />
+            </div>
+            <div>
+              <p className="ticket-kicker">Cổng nội bộ</p>
+              <h1 className="font-display text-2xl font-semibold">Đăng nhập</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Dùng email công ty BTC đã cấp tài khoản.
+              </p>
+            </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" type="email" autoComplete="email" {...register("email")} />
-              {errors.email && (
-                <p className="text-sm text-red-500">{errors.email.message}</p>
-              )}
+              {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Mật khẩu</Label>
@@ -67,15 +94,15 @@ export default function LoginPage() {
                 {...register("password")}
               />
               {errors.password && (
-                <p className="text-sm text-red-500">{errors.password.message}</p>
+                <p className="text-sm text-destructive">{errors.password.message}</p>
               )}
             </div>
-            <Button type="submit" disabled={isSubmitting} className="mt-2">
-              {isSubmitting ? "Đang đăng nhập..." : "Đăng nhập"}
+            <Button type="submit" disabled={isSubmitting} className="self-start px-5">
+              {isSubmitting ? "Đang đăng nhập..." : "Vào cổng"}
             </Button>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+        </form>
+      </main>
     </div>
   );
 }

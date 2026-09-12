@@ -67,6 +67,10 @@ class EmployeeUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class EmployeePhoneUpdate(BaseModel):
+    phone: str | None = None
+
+
 class EmployeeOut(BaseModel):
     id: int
     employee_code: str | None
@@ -82,3 +86,28 @@ class EmployeeOut(BaseModel):
     site_name: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class EmployeeListOut(BaseModel):
+    items: list[EmployeeOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class TeamRosterMember(BaseModel):
+    employee_id: int
+    employee_code: str | None
+    full_name: str
+    email: str
+    phone: str | None
+    registration_status: str | None
+    is_participating: bool | None
+    shift_name: str | None
+
+
+class TeamRosterOut(BaseModel):
+    event_id: int
+    team_id: int
+    team_name: str
+    members: list[TeamRosterMember]

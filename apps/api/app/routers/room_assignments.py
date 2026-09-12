@@ -17,6 +17,7 @@ from app.models.organization import Employee
 from app.models.registration import Registration
 from app.schemas.hotel import ImportResultOut, RoomAssignmentCreate, RoomAssignmentOut
 from app.services.audit_service import record_audit
+from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}/room-assignments", tags=["room-assignments"])
 
@@ -127,6 +128,16 @@ async def assign_room(
     )
     assignment = result.scalar_one()
     return _assignment_out(assignment, room, hotel)
+
+
+@router.get("/import-template")
+async def download_room_assignment_template(event_id: int, _user: AdminUser) -> object:
+    return xlsx_file(
+        "Phan phong",
+        ["employee_code", "email", "room_number"],
+        [["NV001", "nv001@company.vn", "101"]],
+        f"room_assignments_template_event_{event_id}.xlsx",
+    )
 
 
 @router.post("/import", response_model=ImportResultOut)

@@ -1,10 +1,13 @@
 from typing import Annotated
 
+from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 
 from app.core.deps import CurrentUser, DbSession, require_admin
+from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
+from app.models.event import Event
 from app.models.schedule import Announcement, ScheduleItem
 from app.schemas.schedule import (
     AnnouncementCreate,
@@ -16,6 +19,7 @@ from app.schemas.schedule import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.notification.email_service import enqueue_schedule_changed
 
 router = APIRouter(prefix="/events/{event_id}", tags=["schedule"])
 
@@ -29,13 +33,19 @@ async def list_schedule_items(event_id: int, db: DbSession, _user: CurrentUser) 
 
 @router.post("/schedule-items", response_model=ScheduleItemOut, status_code=status.HTTP_201_CREATED)
 async def create_schedule_item(
-    event_id: int, payload: ScheduleItemCreate, db: DbSession, user: AdminUser
+    event_id: int,
+    payload: ScheduleItemCreate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> ScheduleItem:
+    event = await master_data.get_or_404(db, Event, event_id)
     item = await master_data.create(db, ScheduleItem, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="schedule_item", entity_id=item.id,
         after=payload.model_dump(mode="json"), event_id=event_id,
     )
+    await enqueue_schedule_changed(queue, event, item.id)
     await db.commit()
     await db.refresh(item)
     return item
@@ -43,8 +53,14 @@ async def create_schedule_item(
 
 @router.patch("/schedule-items/{item_id}", response_model=ScheduleItemOut)
 async def update_schedule_item(
-    event_id: int, item_id: int, payload: ScheduleItemUpdate, db: DbSession, user: AdminUser
+    event_id: int,
+    item_id: int,
+    payload: ScheduleItemUpdate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> ScheduleItem:
+    event = await master_data.get_or_404(db, Event, event_id)
     item = await master_data.get_or_404(db, ScheduleItem, item_id, event_id=event_id)
     before = ScheduleItemOut.model_validate(item).model_dump(mode="json")
     await master_data.update(db, item, payload.model_dump(exclude_unset=True))
@@ -53,6 +69,7 @@ async def update_schedule_item(
         before=before, after=ScheduleItemOut.model_validate(item).model_dump(mode="json"),
         event_id=event_id,
     )
+    await enqueue_schedule_changed(queue, event, item.id)
     await db.commit()
     await db.refresh(item)
     return item

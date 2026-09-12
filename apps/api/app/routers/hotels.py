@@ -22,6 +22,7 @@ from app.schemas.hotel import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["hotels"])
 
@@ -209,3 +210,16 @@ async def import_rooms(
     )
     await db.commit()
     return ImportResultOut(ok_rows=ok_rows, error_rows=len(errors), errors=errors)
+
+
+@router.get("/hotels/{hotel_id}/rooms/import-template")
+async def download_rooms_template(
+    event_id: int, hotel_id: int, db: DbSession, _user: AdminUser
+) -> object:
+    await _get_hotel_or_404(db, event_id, hotel_id)
+    return xlsx_file(
+        "Phong",
+        ["room_number", "capacity", "note"],
+        [["101", 2, "view bien"]],
+        f"rooms_template_hotel_{hotel_id}.xlsx",
+    )

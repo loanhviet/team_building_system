@@ -72,6 +72,10 @@ class GalaSeatOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class GalaSeatBlockIn(BaseModel):
+    blocked: bool
+
+
 class GalaTurnOut(BaseModel):
     id: int
     team_id: int

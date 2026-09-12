@@ -12,10 +12,8 @@ export default function MasterDataPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold">Master Data</h1>
-        <p className="text-sm text-zinc-500">
-          Danh sách Team và Địa điểm làm việc dùng chung cho mọi sự kiện.
-        </p>
+        <p className="ticket-kicker">Dùng chung mọi kỳ</p>
+        <h1 className="font-display text-3xl font-semibold">Master Data</h1>
       </div>
       <Tabs defaultValue="teams">
         <TabsList>

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
-from app.core.ws_manager import gala_manager
+from app.core.ws_manager import gala_manager, publish_gala_event
 from app.models.auth import User
 from app.models.enums import UserRole
 from app.models.event import Event
@@ -17,6 +17,7 @@ from app.models.registration import Registration
 from app.schemas.gala import (
     GalaConfigIn,
     GalaConfigOut,
+    GalaSeatBlockIn,
     GalaSeatOut,
     GalaStateOut,
     GalaTableCreate,
@@ -25,7 +26,16 @@ from app.schemas.gala import (
     GalaTurnOut,
 )
 from app.services import master_data
-from app.services.gala.gala_service import confirm_seat, draw_turns, hold_seat, release_seat
+from app.services.gala.gala_service import (
+    auto_table_position,
+    confirm_seat,
+    draw_turns,
+    hold_seat,
+    release_seat,
+    set_seat_blocked,
+    skip_turn,
+    start_turn,
+)
 
 router = APIRouter(prefix="/events/{event_id}/gala", tags=["gala"])
 
@@ -93,7 +103,11 @@ async def list_tables(event_id: int, db: DbSession, _user: CurrentUser) -> list[
 async def create_table(
     event_id: int, payload: GalaTableCreate, db: DbSession, _user: AdminUser
 ) -> GalaTable:
-    table = await master_data.create(db, GalaTable, payload.model_dump(), event_id=event_id)
+    data = payload.model_dump()
+    if data.get("x") == 0 and data.get("y") == 0:
+        existing = await master_data.list_all(db, GalaTable, event_id=event_id)
+        data["x"], data["y"] = auto_table_position(len(existing))
+    table = await master_data.create(db, GalaTable, data, event_id=event_id)
     await db.flush()
     for i in range(1, table.seat_count + 1):
         db.add(GalaSeat(table_id=table.id, seat_number=i, label=f"{table.code}-{i}"))
@@ -104,12 +118,22 @@ async def create_table(
 
 @router.patch("/tables/{table_id}", response_model=GalaTableOut)
 async def update_table(
-    event_id: int, table_id: int, payload: GalaTableUpdate, db: DbSession, _user: AdminUser
+    event_id: int,
+    table_id: int,
+    payload: GalaTableUpdate,
+    db: DbSession,
+    _user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaTable:
     table = await master_data.get_or_404(db, GalaTable, table_id, event_id=event_id)
     await master_data.update(db, table, payload.model_dump(exclude_unset=True))
     await db.commit()
     await db.refresh(table)
+    await publish_gala_event(
+        queue,
+        event_id,
+        {"type": "table_update", "table_id": table.id, "x": table.x, "y": table.y},
+    )
     return table
 
 
@@ -132,6 +156,43 @@ async def draw(event_id: int, db: DbSession, _user: AdminUser) -> list[GalaTurnO
         raise AppError("no_teams", "Không có Team nào để bốc thăm", status.HTTP_400_BAD_REQUEST)
 
     await draw_turns(db, event_id, config, team_ids)
+    await db.commit()
+    return await _turns_out(db, event_id)
+
+
+@router.post("/turns/start", response_model=GalaTurnOut)
+async def start_next_turn(
+    event_id: int,
+    db: DbSession,
+    _user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> GalaTurnOut:
+    config = await _get_or_create_config(db, event_id)
+    turn = await start_turn(db, event_id, config)
+    await db.commit()
+    await publish_gala_event(
+        queue,
+        event_id,
+        {
+            "type": "turn_update",
+            "team_id": turn.team_id,
+            "expires_at": turn.expires_at.isoformat() if turn.expires_at else None,
+            "finished": False,
+        },
+    )
+    turns = await _turns_out(db, event_id)
+    return next(t for t in turns if t.id == turn.id)
+
+
+@router.post("/turns/skip", response_model=list[GalaTurnOut])
+async def skip_current_turn(
+    event_id: int,
+    db: DbSession,
+    _user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> list[GalaTurnOut]:
+    config = await _get_or_create_config(db, event_id)
+    await skip_turn(db, queue, event_id, config)
     await db.commit()
     return await _turns_out(db, event_id)
 
@@ -209,6 +270,20 @@ async def confirm(
     team_id = await _my_team_id(db, user)
     config = await _get_or_create_config(db, event_id)
     seat = await confirm_seat(db, queue, event_id, config, seat_id, team_id)
+    await db.commit()
+    return seat
+
+
+@router.post("/seats/{seat_id}/block", response_model=GalaSeatOut)
+async def block_seat(
+    event_id: int,
+    seat_id: int,
+    payload: GalaSeatBlockIn,
+    db: DbSession,
+    _user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> GalaSeat:
+    seat = await set_seat_blocked(db, queue, event_id, seat_id, payload.blocked)
     await db.commit()
     return seat
 

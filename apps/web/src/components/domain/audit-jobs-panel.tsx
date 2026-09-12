@@ -1,9 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { apiFetch } from "@/lib/api";
+import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import type { AuditLogEntry, Job } from "@/types/api";
 
 export function AuditJobsPanel({ eventId }: { eventId: number }) {
@@ -20,7 +22,21 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Audit Log (30 gần nhất)</p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Audit Log (30 gần nhất)</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              apiDownload(
+                `/api/events/${eventId}/audit-logs/export`,
+                `audit_event_${eventId}.csv`,
+              ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+            }
+          >
+            Export CSV
+          </Button>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>

@@ -30,6 +30,18 @@ class EventTransition(BaseModel):
     status: EventStatus
 
 
+class EventSettingsOut(BaseModel):
+    terms_text: str
+    terms_version: str
+    flight_allocation_weights: dict[str, float]
+
+
+class EventSettingsUpdate(BaseModel):
+    terms_text: str | None = None
+    terms_version: str | None = None
+    flight_allocation_weights: dict[str, float] | None = None
+
+
 class EventOut(BaseModel):
     id: int
     code: str

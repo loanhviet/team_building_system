@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.models.bus import Bus, BusAssignment
-from app.models.event import Event, TransportLeg
+from app.models.event import Event, PickupPoint, TransportLeg
 from app.models.flight import Flight, FlightAssignment
+from app.models.gala import GalaConfig, GalaSeat, GalaTable
 from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration
@@ -14,6 +15,9 @@ from app.schemas.journey import (
     JourneyAnnouncement,
     JourneyBus,
     JourneyFlight,
+    JourneyGala,
+    JourneyGalaSeat,
+    JourneyGalaTable,
     JourneyOut,
     JourneyRoom,
     JourneyScheduleItem,
@@ -56,6 +60,7 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
         flights.append(
             JourneyFlight(
                 direction=flight.direction, flight_code=flight.flight_code,
+                airline=flight.airline,
                 depart_at=flight.depart_at, arrive_at=flight.arrive_at,
                 origin=flight.origin, destination=flight.destination,
             )
@@ -63,17 +68,22 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
 
     buses: list[JourneyBus] = []
     result = await db.execute(
-        select(BusAssignment, Bus, TransportLeg)
+        select(BusAssignment, Bus, TransportLeg, PickupPoint)
         .join(Bus, Bus.id == BusAssignment.bus_id)
         .join(TransportLeg, TransportLeg.id == BusAssignment.leg_id)
+        .outerjoin(PickupPoint, PickupPoint.id == Bus.pickup_point_id)
         .where(BusAssignment.event_id == event.id, BusAssignment.employee_id == employee.id)
     )
-    for _assignment, bus, leg in result.all():
+    for _assignment, bus, leg, pickup in result.all():
         buses.append(
             JourneyBus(
-                leg_name=leg.name, bus_code=bus.code, gather_at=bus.gather_at,
-                depart_at=bus.depart_at, destination=bus.destination,
+                leg_name=leg.name, bus_code=bus.code, bus_name=bus.name,
+                gather_at=bus.gather_at, depart_at=bus.depart_at,
+                destination=bus.destination,
+                pickup_name=pickup.name if pickup else None,
+                pickup_address=pickup.address if pickup else None,
                 leader_name=bus.leader_name, leader_phone=bus.leader_phone,
+                note=bus.note,
             )
         )
 
@@ -87,7 +97,43 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
     row = result.first()
     if row is not None:
         _assignment, room_row, hotel = row
-        room = JourneyRoom(hotel_name=hotel.name, room_number=room_row.room_number)
+        room = JourneyRoom(
+            hotel_name=hotel.name,
+            hotel_address=hotel.address,
+            room_number=room_row.room_number,
+            checkin_date=hotel.checkin_date,
+            checkout_date=hotel.checkout_date,
+        )
+
+    gala: JourneyGala | None = None
+    result = await db.execute(select(GalaConfig).where(GalaConfig.event_id == event.id))
+    gala_config = result.scalar_one_or_none()
+    if gala_config is not None:
+        tables_out: list[JourneyGalaTable] = []
+        if employee.team_id is not None:
+            result = await db.execute(
+                select(GalaSeat, GalaTable)
+                .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+                .where(
+                    GalaTable.event_id == event.id,
+                    GalaSeat.team_id == employee.team_id,
+                    GalaSeat.status == "confirmed",
+                )
+                .order_by(GalaTable.code, GalaSeat.seat_number)
+            )
+            by_table: dict[int, JourneyGalaTable] = {}
+            for seat, table in result.all():
+                entry = by_table.get(table.id)
+                if entry is None:
+                    entry = JourneyGalaTable(
+                        table_code=table.code, table_name=table.name, seats=[]
+                    )
+                    by_table[table.id] = entry
+                entry.seats.append(
+                    JourneyGalaSeat(seat_number=seat.seat_number, label=seat.label)
+                )
+            tables_out = list(by_table.values())
+        gala = JourneyGala(status=gala_config.status, name=gala_config.name, tables=tables_out)
 
     schedule: list[JourneyScheduleItem] = []
     result = await db.execute(
@@ -128,8 +174,22 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
     registration = result.scalar_one_or_none()
 
     return JourneyOut(
-        event_id=event.id, event_name=event.name, full_name=employee.full_name,
+        event_id=event.id,
+        event_name=event.name,
+        event_status=event.status.value,
+        destination=event.destination,
+        start_date=event.start_date,
+        end_date=event.end_date,
+        full_name=employee.full_name,
+        employee_code=employee.employee_code,
         team_name=employee.team.name if employee.team else None,
+        site_name=employee.site.name if employee.site else None,
+        phone=employee.phone,
         is_participating=registration.is_participating if registration else None,
-        flights=flights, buses=buses, room=room, schedule=schedule, announcements=announcements,
+        flights=flights,
+        buses=buses,
+        room=room,
+        gala=gala,
+        schedule=schedule,
+        announcements=announcements,
     )

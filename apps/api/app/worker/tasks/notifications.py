@@ -13,7 +13,9 @@ logger = logging.getLogger("worker")
 settings = get_settings()
 
 
-async def send_bulk_emails_task(ctx: dict, event_id: int, template_code: str) -> None:
+async def send_bulk_emails_task(
+    ctx: dict, event_id: int, template_code: str, dedupe_suffix: str = ""
+) -> None:
     """Fan-out: one send_email job per submitted+participating employee, each
     deduped so re-running this (e.g. a retried publish) never double-sends."""
     async with AsyncSessionLocal() as db:
@@ -41,7 +43,7 @@ async def send_bulk_emails_task(ctx: dict, event_id: int, template_code: str) ->
                     "full_name": employee.full_name, "event_name": event.name,
                     "app_url": settings.app_base_url,
                 },
-                dedupe_key=f"{template_code}:{event_id}:{employee.id}",
+                dedupe_key=f"{template_code}:{event_id}:{employee.id}:{dedupe_suffix}".rstrip(":"),
             )
         await db.commit()
         logger.info(

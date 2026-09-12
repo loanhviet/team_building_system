@@ -51,7 +51,10 @@ class RegistrationAdminOut(RegistrationOut):
     employee_code: str | None
     full_name: str
     email: str
+    team_id: int | None = None
     team_name: str | None
+    shift_name: str | None = None
+    transport_summary: str | None = None
 
 
 class EventTermsOut(BaseModel):

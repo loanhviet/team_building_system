@@ -19,7 +19,13 @@ async def run_flight_allocation(
     weights: dict[str, float] | None,
     allocation_run_id: int,
 ) -> dict:
-    effective_weights = {**DEFAULT_WEIGHTS, **(weights or {})}
+    stored_weights = weights
+    if not stored_weights:
+        from app.services.event_service import get_setting
+
+        raw = await get_setting(db, event_id, "flight_allocation_weights", {})
+        stored_weights = raw if isinstance(raw, dict) else {}
+    effective_weights = {**DEFAULT_WEIGHTS, **stored_weights}
 
     result = await db.execute(
         select(Registration.employee_id, Registration.shift_id, Employee.team_id)

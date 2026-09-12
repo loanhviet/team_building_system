@@ -1,4 +1,5 @@
 import io
+from collections import defaultdict
 from typing import Annotated
 
 from arq import ArqRedis
@@ -13,7 +14,7 @@ from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.models.auth import User
-from app.models.event import Event, Shift
+from app.models.event import Event, Shift, TransportLeg
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.schemas.registration import (
@@ -172,7 +173,14 @@ async def cancel_my_registration(
     return await _registration_out(db, reg)
 
 
-async def _admin_list_query(db: DbSession, event_id: int, search: str | None, status_filter: str | None):
+async def _admin_list_query(
+    db: DbSession,
+    event_id: int,
+    search: str | None,
+    status_filter: str | None,
+    team_id: int | None = None,
+    shift_id: int | None = None,
+):
     stmt = (
         select(Registration)
         .options(selectinload(Registration.employee).selectinload(Employee.team))
@@ -182,8 +190,12 @@ async def _admin_list_query(db: DbSession, event_id: int, search: str | None, st
     if status_filter:
         stmt = stmt.where(Registration.status == status_filter)
     if search:
-        needle = f"%{search.strip().lower()}%"
+        needle = f"%{search.strip()}%"
         stmt = stmt.where(Employee.full_name.ilike(needle) | Employee.email.ilike(needle))
+    if team_id is not None:
+        stmt = stmt.where(Employee.team_id == team_id)
+    if shift_id is not None:
+        stmt = stmt.where(Registration.shift_id == shift_id)
     result = await db.execute(stmt)
     return result.scalars().all()
 
@@ -195,8 +207,23 @@ async def list_registrations(
     _user: AdminUser,
     search: str | None = None,
     status_filter: str | None = None,
+    team_id: int | None = None,
+    shift_id: int | None = None,
 ) -> list[RegistrationAdminOut]:
-    regs = await _admin_list_query(db, event_id, search, status_filter)
+    regs = await _admin_list_query(db, event_id, search, status_filter, team_id, shift_id)
+    shifts = {s.id: s.name for s in await master_data.list_all(db, Shift, event_id=event_id)}
+    legs = {leg.id: leg.name for leg in await master_data.list_all(db, TransportLeg, event_id=event_id)}
+    needs_by_reg: dict[int, list[str]] = defaultdict(list)
+    if regs:
+        need_result = await db.execute(
+            select(RegistrationTransportNeed).where(
+                RegistrationTransportNeed.registration_id.in_([r.id for r in regs]),
+                RegistrationTransportNeed.is_needed.is_(True),
+            )
+        )
+        for need in need_result.scalars().all():
+            needs_by_reg[need.registration_id].append(legs.get(need.leg_id, f"#{need.leg_id}"))
+
     out = []
     for reg in regs:
         base = await _registration_out(db, reg)
@@ -206,7 +233,10 @@ async def list_registrations(
                 employee_code=reg.employee.employee_code,
                 full_name=reg.employee.full_name,
                 email=reg.employee.email,
+                team_id=reg.employee.team_id,
                 team_name=reg.employee.team.name if reg.employee.team else None,
+                shift_name=shifts.get(reg.shift_id) if reg.shift_id else None,
+                transport_summary=", ".join(needs_by_reg.get(reg.id, [])) or None,
             )
         )
     return out

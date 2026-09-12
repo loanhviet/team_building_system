@@ -31,6 +31,7 @@ from app.schemas.flight import (
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.notification.email_service import enqueue_email
+from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
 
@@ -144,6 +145,49 @@ async def import_flights(
     )
     await db.commit()
     return {"ok_rows": ok_rows, "error_rows": len(errors), "errors": errors}
+
+
+@router.get("/flights/import-template")
+async def download_flight_template(event_id: int, _user: AdminUser) -> object:
+    return xlsx_file(
+        "Chuyen bay",
+        ["flight_code", "direction", "capacity", "airline", "origin", "destination", "depart_at", "arrive_at", "note"],
+        [["VN123", "outbound", 180, "Vietnam Airlines", "HAN", "DAD", "2026-12-20 08:00", "2026-12-20 09:20", ""]],
+        f"flights_template_event_{event_id}.xlsx",
+    )
+
+
+@router.get("/flight-assignments/export")
+async def export_flight_assignments(
+    event_id: int, db: DbSession, _user: AdminUser, direction: str | None = None
+) -> object:
+    stmt = (
+        select(FlightAssignment, Flight)
+        .outerjoin(Flight, Flight.id == FlightAssignment.flight_id)
+        .options(selectinload(FlightAssignment.employee).selectinload(Employee.team))
+        .where(FlightAssignment.event_id == event_id)
+    )
+    if direction:
+        stmt = stmt.where(FlightAssignment.direction == direction)
+    result = await db.execute(stmt)
+    rows = []
+    for assignment, flight in result.all():
+        emp = assignment.employee
+        rows.append([
+            emp.employee_code or "",
+            emp.full_name,
+            emp.team.name if emp.team else "",
+            assignment.direction,
+            flight.flight_code if flight else "",
+            assignment.source,
+            assignment.flag_reason or "",
+        ])
+    return xlsx_file(
+        "Phan bay",
+        ["employee_code", "full_name", "team", "direction", "flight_code", "source", "flag"],
+        rows,
+        f"flight_assignments_event_{event_id}.xlsx",
+    )
 
 
 @router.get("/flight-assignments", response_model=list[FlightAssignmentOut])

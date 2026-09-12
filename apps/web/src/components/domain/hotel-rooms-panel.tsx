@@ -196,6 +196,18 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                   e.target.value = "";
                 }}
               />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  apiDownload(
+                    `/api/events/${eventId}/hotels/${hotelId}/rooms/import-template`,
+                    `rooms_template_hotel_${hotelId}.xlsx`,
+                  ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+                }
+              >
+                File mẫu phòng
+              </Button>
               <Button variant="outline" size="sm" onClick={() => roomImportRef.current?.click()}>
                 Import phòng
               </Button>
@@ -283,6 +295,18 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                 e.target.value = "";
               }}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                apiDownload(
+                  `/api/events/${eventId}/room-assignments/import-template`,
+                  `room_assignments_template_event_${eventId}.xlsx`,
+                ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+              }
+            >
+              File mẫu phân phòng
+            </Button>
             <Button variant="outline" size="sm" onClick={() => assignImportRef.current?.click()}>
               Import phân phòng
             </Button>

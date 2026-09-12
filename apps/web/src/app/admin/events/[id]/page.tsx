@@ -1,194 +1,97 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { use, useState } from "react";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import { use } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { EntityCrudTable } from "@/components/domain/entity-crud-table";
-import { FlightAllocationPanel } from "@/components/domain/flight-allocation-panel";
-import { BusAllocationPanel } from "@/components/domain/bus-allocation-panel";
-import { AuditJobsPanel } from "@/components/domain/audit-jobs-panel";
-import { GalaAdminPanel } from "@/components/domain/gala-admin-panel";
-import { HotelRoomsPanel } from "@/components/domain/hotel-rooms-panel";
-import { ScheduleAnnouncementsPanel } from "@/components/domain/schedule-announcements-panel";
-import { RegistrationsTable } from "@/components/domain/registrations-table";
-import { apiFetch, ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
-import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS } from "@/lib/event-status";
-import type { Event, EventStatus } from "@/types/api";
+import { apiFetch } from "@/lib/api";
+import type { Dashboard } from "@/types/api";
 
-export default function EventDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function BoardCell({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="board-cell">
+      <p className="board-n">{value}</p>
+      <p className="mt-1 text-xs text-white/55">{label}</p>
+    </div>
+  );
+}
+
+export default function EventOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const eventId = Number(id);
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const [forceStatus, setForceStatus] = useState<EventStatus | "">("");
 
-  const { data: event, isLoading } = useQuery({
-    queryKey: ["events", eventId],
-    queryFn: () => apiFetch<Event>(`/api/events/${eventId}`),
+  const { data: dashboard } = useQuery({
+    queryKey: ["events", eventId, "dashboard"],
+    queryFn: () => apiFetch<Dashboard>(`/api/events/${eventId}/dashboard`),
   });
 
-  const transitionMutation = useMutation({
-    mutationFn: (status: EventStatus) =>
-      apiFetch<Event>(`/api/events/${eventId}/transition`, {
-        method: "POST",
-        body: JSON.stringify({ status }),
-      }),
-    onSuccess: (updated) => {
-      toast.success(`Đã chuyển sang: ${EVENT_STATUS_LABELS[updated.status]}`);
-      queryClient.setQueryData(["events", eventId], updated);
-      queryClient.invalidateQueries({ queryKey: ["events"] });
-      setForceStatus("");
-    },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
-  });
-
-  if (isLoading || !event) {
-    return <p className="text-sm text-zinc-500">Đang tải...</p>;
+  if (!dashboard) {
+    return <p className="text-sm text-muted-foreground">Đang tải số liệu...</p>;
   }
 
-  const nextStatuses = EVENT_FORWARD_TRANSITIONS[event.status];
-  const isSuperAdmin = user?.role === "super_admin";
-
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <p className="text-sm text-zinc-500">{event.code}</p>
-        <h1 className="text-2xl font-semibold">{event.name}</h1>
+    <div className="flex flex-col gap-4">
+      <div className="board grid-cols-2 sm:grid-cols-4">
+        <BoardCell label="Tổng CBNV" value={dashboard.total_employees} />
+        <BoardCell label="Đã đăng ký" value={dashboard.registered_count} />
+        <BoardCell label="Chưa đăng ký" value={dashboard.not_registered_count} />
+        <BoardCell label="Tham gia" value={dashboard.participating_count} />
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            Trạng thái: <Badge variant="outline">{EVENT_STATUS_LABELS[event.status]}</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-3">
-          {nextStatuses.map((status) => (
-            <Button
-              key={status}
-              size="sm"
-              onClick={() => transitionMutation.mutate(status)}
-              disabled={transitionMutation.isPending}
-            >
-              Chuyển sang: {EVENT_STATUS_LABELS[status]}
-            </Button>
-          ))}
-          {nextStatuses.length === 0 && (
-            <p className="text-sm text-zinc-500">Không còn bước tiếp theo trong luồng chuẩn.</p>
-          )}
-
-          {isSuperAdmin && (
-            <div className="ml-auto flex items-center gap-2">
-              <Select value={forceStatus} onValueChange={(v) => setForceStatus(v as EventStatus)}>
-                <SelectTrigger className="w-56">
-                  <SelectValue placeholder="Ghi đè trạng thái (Super Admin)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_EVENT_STATUSES.filter((s) => s !== event.status).map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {EVENT_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!forceStatus || transitionMutation.isPending}
-                onClick={() => forceStatus && transitionMutation.mutate(forceStatus)}
-              >
-                Ghi đè
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Đăng ký</h2>
-        <RegistrationsTable eventId={eventId} />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Lịch trình &amp; Thông báo</h2>
-        <ScheduleAnnouncementsPanel eventId={eventId} />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Chuyến bay &amp; Phân bổ</h2>
-        <FlightAllocationPanel eventId={eventId} />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Xe &amp; Phân xe</h2>
-        <BusAllocationPanel eventId={eventId} />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Khách sạn &amp; Phân phòng</h2>
-        <HotelRoomsPanel eventId={eventId} />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Gala Dinner</h2>
-        <GalaAdminPanel eventId={eventId} />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Ca bay</h2>
-        <EntityCrudTable
-          queryKey={["events", String(eventId), "shifts"]}
-          label="ca bay"
-          basePath={`/api/events/${eventId}/shifts`}
-          fields={[
-            { name: "code", label: "Mã" },
-            { name: "name", label: "Tên" },
-            { name: "depart_after_time", label: "Sau giờ (HH:MM)", required: false },
-          ]}
-        />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Chặng xe</h2>
-        <EntityCrudTable
-          queryKey={["events", String(eventId), "transport-legs"]}
-          label="chặng xe"
-          basePath={`/api/events/${eventId}/transport-legs`}
-          fields={[
-            { name: "code", label: "Mã" },
-            { name: "name", label: "Tên" },
-            { name: "direction", label: "Chiều di chuyển" },
-          ]}
-        />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Điểm đón/trả</h2>
-        <EntityCrudTable
-          queryKey={["events", String(eventId), "pickup-points"]}
-          label="điểm đón"
-          basePath={`/api/events/${eventId}/pickup-points`}
-          fields={[
-            { name: "name", label: "Tên điểm" },
-            { name: "address", label: "Địa chỉ", required: false },
-          ]}
-        />
-      </div>
-
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Audit Log &amp; Jobs</h2>
-        <AuditJobsPanel eventId={eventId} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Theo ca</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {dashboard.by_shift.map((s) => (
+              <Badge key={s.shift_name} variant="outline">
+                {s.shift_name}: {s.count}
+              </Badge>
+            ))}
+            {dashboard.by_shift.length === 0 && <p className="text-sm text-zinc-500">Chưa có dữ liệu</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Nhu cầu xe theo chặng</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {dashboard.transport_need_by_leg.map((l) => (
+              <Badge key={l.leg_name} variant="outline">
+                {l.leg_name}: {l.count}
+              </Badge>
+            ))}
+            {dashboard.transport_need_by_leg.length === 0 && (
+              <p className="text-sm text-zinc-500">Chưa có dữ liệu</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Tình trạng slot chuyến bay</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {dashboard.flight_slots.map((f) => (
+              <Badge key={f.flight_code} variant={f.assigned >= f.capacity ? "secondary" : "outline"}>
+                {f.flight_code} ({f.direction}): {f.assigned}/{f.capacity}
+              </Badge>
+            ))}
+            {dashboard.flight_slots.length === 0 && (
+              <p className="text-sm text-zinc-500">Chưa có chuyến bay</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Phân xe / phòng</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Badge variant="outline">Đã lên xe: {dashboard.buses_assigned}</Badge>
+            <Badge variant="outline">
+              Phòng: {dashboard.rooms_assigned}/{dashboard.rooms_total_capacity} chỗ
+            </Badge>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

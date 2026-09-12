@@ -1,15 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiChatStream, apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { ChatMessage, ChatSession, Event, Journey } from "@/types/api";
+import { useEmployeeEvent } from "@/lib/use-employee-event";
+import type { ChatMessage, ChatSession } from "@/types/api";
 
 const SUGGESTIONS = [
   "Xe của tôi tập trung lúc mấy giờ?",
@@ -18,33 +18,13 @@ const SUGGESTIONS = [
   "Lịch trình chương trình như thế nào?",
 ];
 
-async function resolveEventId(): Promise<number | null> {
-  try {
-    const journey = await apiFetch<Journey>("/api/journey/me");
-    return journey.event_id;
-  } catch {
-    const event = await apiFetch<Event | null>("/api/events/current");
-    return event?.id ?? null;
-  }
-}
-
 export default function ChatPage() {
-  const { user, isLoading: authLoading } = useAuth();
-  const router = useRouter();
+  const { user } = useAuth();
+  const { eventId } = useEmployeeEvent();
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-
-  useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
-  }, [authLoading, user, router]);
-
-  const { data: eventId } = useQuery({
-    queryKey: ["chat", "event-id"],
-    queryFn: resolveEventId,
-    enabled: !!user,
-  });
 
   const { data: session } = useQuery({
     queryKey: ["chat", "session", eventId],
@@ -56,7 +36,7 @@ export default function ChatPage() {
         body: JSON.stringify({ event_id: eventId }),
       });
     },
-    enabled: eventId != null,
+    enabled: eventId != null && !!user,
   });
 
   const { data: messages } = useQuery({
@@ -104,25 +84,34 @@ export default function ChatPage() {
     sendMutation.mutate(text);
   };
 
-  if (authLoading || !user) return <p className="p-6 text-sm text-zinc-500">Đang tải...</p>;
   if (eventId === null) {
-    return <p className="p-6 text-sm text-zinc-500">Chưa có sự kiện nào để hỏi đáp.</p>;
+    return (
+      <div className="py-16 text-center">
+        <h1 className="font-display text-2xl">Chưa có sự kiện để hỏi đáp</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Đăng ký và chờ BTC công bố thông tin, sau đó trợ lý mới có dữ liệu của bạn.
+        </p>
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto flex h-svh w-full max-w-2xl flex-col gap-4 p-4 sm:p-6">
-      <h1 className="text-xl font-semibold">Hỏi đáp Team Building</h1>
+    <div className="flex min-h-[60vh] flex-col gap-4">
+      <div>
+        <p className="ticket-kicker">Trợ lý hành trình</p>
+        <h1 className="font-display text-3xl font-semibold">Hỏi đáp</h1>
+      </div>
 
-      <div className="flex flex-1 flex-col gap-3 overflow-auto rounded-md border p-4">
+      <div className="flex min-h-[40vh] flex-1 flex-col gap-3 overflow-auto rounded-lg border bg-card p-4">
         {messages?.length === 0 && !streamingText && (
           <div className="flex flex-col gap-2">
-            <p className="text-sm text-zinc-500">Gợi ý câu hỏi:</p>
+            <p className="text-sm text-muted-foreground">Gợi ý câu hỏi:</p>
             <div className="flex flex-wrap gap-2">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s}
                   onClick={() => handleSend(s)}
-                  className="rounded-full border px-3 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="rounded-full border px-3 py-1 text-xs hover:bg-secondary"
                 >
                   {s}
                 </button>
@@ -134,9 +123,7 @@ export default function ChatPage() {
           <div
             key={m.id}
             className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-              m.role === "user"
-                ? "ml-auto bg-blue-600 text-white"
-                : "bg-zinc-100 dark:bg-zinc-800"
+              m.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-secondary"
             }`}
           >
             <p className="whitespace-pre-wrap">{m.content}</p>
@@ -152,7 +139,7 @@ export default function ChatPage() {
           </div>
         ))}
         {isStreaming && (
-          <div className="max-w-[85%] rounded-lg bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800">
+          <div className="max-w-[85%] rounded-lg bg-secondary px-3 py-2 text-sm">
             <p className="whitespace-pre-wrap">{streamingText || "..."}</p>
           </div>
         )}

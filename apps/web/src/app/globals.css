@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-be-vietnam), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-literata), var(--font-be-vietnam), ui-serif, Georgia, serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,82 +39,84 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
+  --radius-4xl: 14px;
 }
 
+/* Night departure board + foam paper + lantern gala */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --night: #17324a;
+  --foam: #f1f4f6;
+  --lagoon: #0e7c86;
+  --lantern: #c44536;
+  --ticket: #fbf6ee;
+  --rule: #c9d4da;
+  --background: #f1f4f6;
+  --foreground: #17324a;
+  --card: #fbf6ee;
+  --card-foreground: #17324a;
+  --popover: #ffffff;
+  --popover-foreground: #17324a;
+  --primary: #0e7c86;
+  --primary-foreground: #f4fbfb;
+  --secondary: #dce8ea;
+  --secondary-foreground: #17324a;
+  --muted: #e4eaee;
+  --muted-foreground: #5b6d7a;
+  --accent: #dce8ea;
+  --accent-foreground: #17324a;
+  --destructive: #c44536;
+  --border: #c9d4da;
+  --input: #c9d4da;
+  --ring: #0e7c86;
+  --chart-1: #0e7c86;
+  --chart-2: #c44536;
+  --chart-3: #17324a;
+  --chart-4: #c9a24a;
+  --chart-5: #5b6d7a;
+  --radius: 0.35rem;
+  --sidebar: #17324a;
+  --sidebar-foreground: #e8eef2;
+  --sidebar-primary: #0e7c86;
+  --sidebar-primary-foreground: #f4fbfb;
+  --sidebar-accent: #214560;
+  --sidebar-accent-foreground: #f1f4f6;
+  --sidebar-border: #214560;
+  --sidebar-ring: #0e7c86;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #122536;
+  --foreground: #e8eef2;
+  --card: #1a3348;
+  --card-foreground: #e8eef2;
+  --popover: #1a3348;
+  --popover-foreground: #e8eef2;
+  --primary: #3aa8b2;
+  --primary-foreground: #122536;
+  --secondary: #214560;
+  --secondary-foreground: #e8eef2;
+  --muted: #214560;
+  --muted-foreground: #9aafbc;
+  --accent: #214560;
+  --accent-foreground: #e8eef2;
+  --destructive: #e06a5c;
+  --border: #2a4a62;
+  --input: #2a4a62;
+  --ring: #3aa8b2;
+  --sidebar: #0f1f2e;
+  --sidebar-foreground: #e8eef2;
+  --sidebar-primary: #3aa8b2;
+  --sidebar-primary-foreground: #122536;
+  --sidebar-accent: #1a3348;
+  --sidebar-accent-foreground: #e8eef2;
+  --sidebar-border: #1a3348;
+  --sidebar-ring: #3aa8b2;
 }
 
 @layer base {
@@ -123,8 +125,100 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-be-vietnam), ui-sans-serif, system-ui, sans-serif;
   }
   html {
     @apply font-sans;
   }
+  h1,
+  h2,
+  .font-display {
+    font-family: var(--font-literata), var(--font-be-vietnam), ui-serif, Georgia, serif;
+  }
+}
+
+.ticket {
+  display: grid;
+  grid-template-columns: 9px 1fr;
+  background: var(--ticket);
+  color: var(--night);
+  border: 1px solid var(--rule);
+}
+
+.ticket-spine {
+  background: var(--lagoon);
+}
+
+.ticket-spine-lantern {
+  background: var(--lantern);
+}
+
+.ticket-body {
+  padding: 1rem 1.1rem 1.05rem;
+  min-width: 0;
+}
+
+.ticket-kicker {
+  font-family: var(--font-literata), ui-serif, Georgia, serif;
+  font-style: italic;
+  font-size: 0.8rem;
+  color: #5b6d7a;
+  margin: 0 0 0.15rem;
+}
+
+.board {
+  display: grid;
+  background: var(--night);
+  color: #e8eef2;
+}
+
+.board-cell {
+  padding: 1rem 1.15rem;
+  border-right: 1px solid rgb(255 255 255 / 10%);
+}
+
+.board-cell:last-child {
+  border-right: none;
+}
+
+.board-n {
+  font-family: var(--font-literata), ui-serif, Georgia, serif;
+  font-size: 1.7rem;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.pass-hero {
+  background:
+    radial-gradient(900px 420px at 80% 120%, rgb(14 124 134 / 35%), transparent 55%),
+    radial-gradient(700px 300px at 0% 0%, rgb(196 69 54 / 22%), transparent 50%),
+    var(--night);
+  color: #e8eef2;
+}
+
+.pass-stack {
+  position: relative;
+  height: 220px;
+}
+
+.pass-stack span {
+  position: absolute;
+  inset: 18% 12%;
+  border: 1px dashed rgb(255 255 255 / 28%);
+  background: rgb(251 246 238 / 8%);
+}
+
+.pass-stack span:nth-child(1) {
+  transform: rotate(-9deg);
+}
+
+.pass-stack span:nth-child(2) {
+  transform: rotate(4deg);
+  inset: 26% 16%;
+}
+
+.pass-stack span:nth-child(3) {
+  transform: rotate(-2deg);
+  inset: 34% 20%;
+  background: rgb(14 124 134 / 18%);
 }

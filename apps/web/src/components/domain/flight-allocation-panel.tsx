@@ -4,7 +4,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -13,13 +23,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { EntityCrudTable } from "@/components/domain/entity-crud-table";
-import { apiFetch, apiUpload, ApiError } from "@/lib/api";
-import type { AllocationEnqueued, Flight, FlightAssignment, Job } from "@/types/api";
+import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import type { AllocationEnqueued, Flight, FlightAssignment, Job, Shift } from "@/types/api";
 
 const FLAG_LABEL: Record<string, string> = {
   no_slot: "Không còn chỗ",
   shift_mismatch: "Sai ca đăng ký",
+};
+
+const EMPTY_FLIGHT = {
+  flight_code: "",
+  airline: "",
+  direction: "outbound",
+  shift_id: "",
+  capacity: "0",
+  origin: "",
+  destination: "",
+  depart_at: "",
+  arrive_at: "",
 };
 
 export function FlightAllocationPanel({ eventId }: { eventId: number }) {
@@ -28,21 +50,28 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [moveTarget, setMoveTarget] = useState<string>("");
+  const [moveTarget, setMoveTarget] = useState("");
+  const [flagsOnly, setFlagsOnly] = useState(false);
+  const [flightOpen, setFlightOpen] = useState(false);
+  const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
+  const [flightForm, setFlightForm] = useState(EMPTY_FLIGHT);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustReason, setAdjustReason] = useState("Điều chỉnh thủ công từ Admin");
+  const [overCapacityMsg, setOverCapacityMsg] = useState<string | null>(null);
 
   const { data: flights } = useQuery({
     queryKey: ["events", eventId, "flights"],
     queryFn: () => apiFetch<Flight[]>(`/api/events/${eventId}/flights`),
   });
-
+  const { data: shifts } = useQuery({
+    queryKey: ["events", eventId, "shifts"],
+    queryFn: () => apiFetch<Shift[]>(`/api/events/${eventId}/shifts`),
+  });
   const { data: assignments, refetch: refetchAssignments } = useQuery({
     queryKey: ["events", eventId, "flight-assignments", direction],
     queryFn: () =>
-      apiFetch<FlightAssignment[]>(
-        `/api/events/${eventId}/flight-assignments?direction=${direction}`,
-      ),
+      apiFetch<FlightAssignment[]>(`/api/events/${eventId}/flight-assignments?direction=${direction}`),
   });
-
   const { data: job } = useQuery({
     queryKey: ["jobs", activeJobId],
     queryFn: () => apiFetch<Job>(`/api/jobs/${activeJobId}`),
@@ -79,24 +108,65 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
+  const saveFlight = useMutation({
+    mutationFn: () => {
+      const payload = {
+        flight_code: flightForm.flight_code,
+        airline: flightForm.airline || null,
+        direction: flightForm.direction,
+        shift_id: flightForm.shift_id ? Number(flightForm.shift_id) : null,
+        capacity: Number(flightForm.capacity),
+        origin: flightForm.origin || null,
+        destination: flightForm.destination || null,
+        depart_at: fromDatetimeLocal(flightForm.depart_at),
+        arrive_at: fromDatetimeLocal(flightForm.arrive_at),
+      };
+      if (editingFlight) {
+        return apiFetch<Flight>(`/api/events/${eventId}/flights/${editingFlight.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      }
+      return apiFetch<Flight>(`/api/events/${eventId}/flights`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    onSuccess: () => {
+      toast.success(editingFlight ? "Đã cập nhật chuyến bay" : "Đã thêm chuyến bay");
+      setFlightOpen(false);
+      setEditingFlight(null);
+      queryClient.invalidateQueries({ queryKey: ["events", eventId, "flights"] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không lưu được"),
+  });
+
   const adjustMutation = useMutation({
-    mutationFn: (flightId: number) =>
+    mutationFn: ({ flightId, force }: { flightId: number; force: boolean }) =>
       apiFetch(`/api/events/${eventId}/flight-assignments/adjust`, {
         method: "POST",
         body: JSON.stringify({
           employee_ids: Array.from(selected),
           flight_id: flightId,
-          reason: "Điều chỉnh thủ công từ Admin",
-          force: true,
+          reason: adjustReason,
+          force,
         }),
       }),
     onSuccess: () => {
       toast.success("Đã chuyển chuyến");
       setSelected(new Set());
       setMoveTarget("");
+      setAdjustOpen(false);
+      setOverCapacityMsg(null);
       refetchAssignments();
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === "over_capacity") {
+        setOverCapacityMsg(err.message);
+        return;
+      }
+      toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra");
+    },
   });
 
   useEffect(() => {
@@ -116,9 +186,32 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       }
     | undefined;
 
+  const openCreateFlight = () => {
+    setEditingFlight(null);
+    setFlightForm({ ...EMPTY_FLIGHT, direction });
+    setFlightOpen(true);
+  };
+  const openEditFlight = (flight: Flight) => {
+    setEditingFlight(flight);
+    setFlightForm({
+      flight_code: flight.flight_code,
+      airline: flight.airline ?? "",
+      direction: flight.direction,
+      shift_id: flight.shift_id ? String(flight.shift_id) : "",
+      capacity: String(flight.capacity),
+      origin: flight.origin ?? "",
+      destination: flight.destination ?? "",
+      depart_at: toDatetimeLocal(flight.depart_at),
+      arrive_at: toDatetimeLocal(flight.arrive_at),
+    });
+    setFlightOpen(true);
+  };
+
+  const visibleAssignments = flagsOnly ? assignments?.filter((a) => a.is_flagged) : assignments;
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Select value={direction} onValueChange={(v) => setDirection(v as "outbound" | "inbound")}>
           <SelectTrigger className="w-40">
             <SelectValue />
@@ -128,7 +221,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             <SelectItem value="inbound">Chiều về</SelectItem>
           </SelectContent>
         </Select>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -140,9 +233,105 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               e.target.value = "";
             }}
           />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              apiDownload(
+                `/api/events/${eventId}/flights/import-template`,
+                `flights_template_event_${eventId}.xlsx`,
+              ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+            }
+          >
+            File mẫu
+          </Button>
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             Import chuyến bay
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              apiDownload(
+                `/api/events/${eventId}/flight-assignments/export?direction=${direction}`,
+                `flight_assignments_${direction}_event_${eventId}.xlsx`,
+              ).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))
+            }
+          >
+            Export phân bổ
+          </Button>
+          <Dialog open={flightOpen} onOpenChange={setFlightOpen}>
+            <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })} onClick={openCreateFlight}>
+              Thêm chuyến
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{editingFlight ? "Sửa chuyến bay" : "Thêm chuyến bay"}</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label>Mã chuyến</Label>
+                  <Input value={flightForm.flight_code} onChange={(e) => setFlightForm({ ...flightForm, flight_code: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Hãng</Label>
+                  <Input value={flightForm.airline} onChange={(e) => setFlightForm({ ...flightForm, airline: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Chiều</Label>
+                  <Select value={flightForm.direction} onValueChange={(v) => setFlightForm({ ...flightForm, direction: v ?? "outbound" })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="outbound">outbound (đi)</SelectItem>
+                      <SelectItem value="inbound">inbound (về)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Ca</Label>
+                  <Select value={flightForm.shift_id} onValueChange={(v) => setFlightForm({ ...flightForm, shift_id: v ?? "" })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Chọn ca" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {shifts?.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Sức chứa</Label>
+                  <Input type="number" value={flightForm.capacity} onChange={(e) => setFlightForm({ ...flightForm, capacity: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Điểm đi</Label>
+                  <Input value={flightForm.origin} onChange={(e) => setFlightForm({ ...flightForm, origin: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Điểm đến</Label>
+                  <Input value={flightForm.destination} onChange={(e) => setFlightForm({ ...flightForm, destination: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Khởi hành</Label>
+                  <Input type="datetime-local" value={flightForm.depart_at} onChange={(e) => setFlightForm({ ...flightForm, depart_at: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Hạ cánh</Label>
+                  <Input type="datetime-local" value={flightForm.arrive_at} onChange={(e) => setFlightForm({ ...flightForm, arrive_at: e.target.value })} />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button disabled={!flightForm.flight_code || saveFlight.isPending} onClick={() => saveFlight.mutate()}>
+                  Lưu
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Button
             size="sm"
             onClick={() => runAllocationMutation.mutate()}
@@ -153,44 +342,58 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
         </div>
       </div>
 
-      <EntityCrudTable
-        queryKey={["events", String(eventId), "flights"]}
-        label="chuyến bay"
-        basePath={`/api/events/${eventId}/flights`}
-        fields={[
-          { name: "flight_code", label: "Mã chuyến" },
-          { name: "direction", label: "outbound/inbound" },
-          { name: "capacity", label: "Sức chứa" },
-          { name: "shift_id", label: "Shift ID", required: false },
-        ]}
-      />
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Mã</TableHead>
+            <TableHead>Chiều</TableHead>
+            <TableHead>Ca</TableHead>
+            <TableHead>Sức chứa</TableHead>
+            <TableHead>Hành trình</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {flights
+            ?.filter((f) => f.direction === direction)
+            .map((f) => (
+              <TableRow key={f.id}>
+                <TableCell className="font-mono">{f.flight_code}</TableCell>
+                <TableCell>{f.direction}</TableCell>
+                <TableCell>{shifts?.find((s) => s.id === f.shift_id)?.name ?? "—"}</TableCell>
+                <TableCell>{f.capacity}</TableCell>
+                <TableCell className="text-sm text-zinc-500">
+                  {f.origin ?? "—"} → {f.destination ?? "—"}
+                </TableCell>
+                <TableCell>
+                  <Button size="sm" variant="ghost" onClick={() => openEditFlight(f)}>
+                    Sửa
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+        </TableBody>
+      </Table>
 
       {job && (job.status === "queued" || job.status === "running") && (
         <p className="text-sm text-zinc-500">Đang chạy phân bổ...</p>
       )}
-
       {summary && (
         <div className="rounded-md border p-4 text-sm">
           <p>
             Đã xếp: <b>{summary.total_assigned}</b>/{summary.total_submitted} — Cần xử lý:{" "}
             <b>{summary.total_flagged}</b> — Team bị tách: {summary.split_team_ids.length}
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {summary.flights.map((f) => {
-              const flight = flights?.find((fl) => fl.id === f.flight_id);
-              return (
-                <Badge key={f.flight_id} variant="outline">
-                  {flight?.flight_code ?? f.flight_id}: {f.assigned}/{f.capacity}
-                </Badge>
-              );
-            })}
-          </div>
         </div>
       )}
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">Danh sách đã submit ({direction})</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium">Danh sách phân bổ ({direction})</p>
+          <label className="flex items-center gap-1 text-xs text-zinc-500">
+            <input type="checkbox" checked={flagsOnly} onChange={(e) => setFlagsOnly(e.target.checked)} />
+            Chỉ hiện flag
+          </label>
           {selected.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-xs text-zinc-500">{selected.size} đã chọn</span>
@@ -210,8 +413,11 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               </Select>
               <Button
                 size="sm"
-                disabled={!moveTarget || adjustMutation.isPending}
-                onClick={() => moveTarget && adjustMutation.mutate(Number(moveTarget))}
+                disabled={!moveTarget}
+                onClick={() => {
+                  setOverCapacityMsg(null);
+                  setAdjustOpen(true);
+                }}
               >
                 Chuyển
               </Button>
@@ -231,7 +437,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {assignments?.map((a) => (
+            {visibleAssignments?.map((a) => (
               <TableRow key={a.employee_id}>
                 <TableCell>
                   <input
@@ -261,14 +467,12 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                 <TableCell>{a.source}</TableCell>
                 <TableCell>
                   {a.is_flagged && (
-                    <Badge variant="destructive">
-                      {FLAG_LABEL[a.flag_reason ?? ""] ?? a.flag_reason}
-                    </Badge>
+                    <Badge variant="destructive">{FLAG_LABEL[a.flag_reason ?? ""] ?? a.flag_reason}</Badge>
                   )}
                 </TableCell>
               </TableRow>
             ))}
-            {(!assignments || assignments.length === 0) && (
+            {(!visibleAssignments || visibleAssignments.length === 0) && (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-zinc-500">
                   Chưa có dữ liệu — hãy chạy phân bổ hoặc chờ CBNV đăng ký
@@ -278,6 +482,42 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Điều chỉnh chuyến bay</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-zinc-500">
+              Chuyển {selected.size} người sang chuyến đã chọn. Cần ghi lý do (audit log).
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label>Lý do</Label>
+              <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
+            </div>
+            {overCapacityMsg && <p className="text-sm text-red-600">{overCapacityMsg}</p>}
+          </div>
+          <DialogFooter>
+            {!overCapacityMsg ? (
+              <Button
+                disabled={!adjustReason.trim() || adjustMutation.isPending}
+                onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), force: false })}
+              >
+                Xác nhận
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={!adjustReason.trim() || adjustMutation.isPending}
+                onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), force: true })}
+              >
+                Vẫn ghi đè sức chứa
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

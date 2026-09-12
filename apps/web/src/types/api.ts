@@ -7,6 +7,10 @@ export type User = {
   must_change_password: boolean;
   employee_id: number | null;
   full_name: string | null;
+  employee_code: string | null;
+  phone: string | null;
+  team_name: string | null;
+  site_name: string | null;
 };
 
 export type LoginResponse = {
@@ -43,6 +47,44 @@ export type Employee = {
   is_active: boolean;
   team_name: string | null;
   site_name: string | null;
+};
+
+export type EmployeeList = {
+  items: Employee[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type EventSettings = {
+  terms_text: string;
+  terms_version: string;
+  flight_allocation_weights: {
+    same_shift: number;
+    team_together: number;
+    fill_rate: number;
+    split_penalty: number;
+  } & Record<string, number>;
+};
+
+export type EmailTemplate = {
+  code: string;
+  subject: string;
+  body_html: string;
+  description: string | null;
+  is_custom: boolean;
+};
+
+export type UserAdmin = {
+  id: number;
+  email: string;
+  role: Role;
+  is_active: boolean;
+  must_change_password: boolean;
+  employee_id: number | null;
+  full_name: string | null;
+  employee_code: string | null;
+  last_login_at: string | null;
 };
 
 export type EventStatus =
@@ -123,7 +165,10 @@ export type RegistrationAdmin = Registration & {
   employee_code: string | null;
   full_name: string;
   email: string;
+  team_id: number | null;
   team_name: string | null;
+  shift_name: string | null;
+  transport_summary: string | null;
 };
 
 export type EventTerms = {
@@ -134,12 +179,20 @@ export type EventTerms = {
 export type Journey = {
   event_id: number;
   event_name: string;
+  event_status: EventStatus;
+  destination: string | null;
+  start_date: string | null;
+  end_date: string | null;
   full_name: string;
+  employee_code: string | null;
   team_name: string | null;
+  site_name: string | null;
+  phone: string | null;
   is_participating: boolean | null;
   flights: {
     direction: "outbound" | "inbound";
     flight_code: string;
+    airline: string | null;
     depart_at: string | null;
     arrive_at: string | null;
     origin: string | null;
@@ -148,13 +201,28 @@ export type Journey = {
   buses: {
     leg_name: string;
     bus_code: string;
+    bus_name: string | null;
     gather_at: string | null;
     depart_at: string | null;
     destination: string | null;
+    pickup_name: string | null;
+    pickup_address: string | null;
     leader_name: string | null;
     leader_phone: string | null;
+    note: string | null;
   }[];
-  room: { hotel_name: string; room_number: string } | null;
+  room: {
+    hotel_name: string;
+    hotel_address: string | null;
+    room_number: string;
+    checkin_date: string | null;
+    checkout_date: string | null;
+  } | null;
+  gala: {
+    status: "setup" | "drawing" | "in_progress" | "finished";
+    name: string;
+    tables: { table_code: string; table_name: string | null; seats: { seat_number: number; label: string | null }[] }[];
+  } | null;
   schedule: {
     day_date: string | null;
     start_at: string | null;
@@ -167,6 +235,22 @@ export type Journey = {
     body_md: string;
     is_pinned: boolean;
     published_at: string | null;
+  }[];
+};
+
+export type TeamRoster = {
+  event_id: number;
+  team_id: number;
+  team_name: string;
+  members: {
+    employee_id: number;
+    employee_code: string | null;
+    full_name: string;
+    email: string;
+    phone: string | null;
+    registration_status: RegistrationStatus | null;
+    is_participating: boolean | null;
+    shift_name: string | null;
   }[];
 };
 

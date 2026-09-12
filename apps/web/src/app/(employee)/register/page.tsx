@@ -1,9 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
+import { EmptyState } from "@/components/domain/empty-state";
+import { ProfileCard } from "@/components/domain/profile-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch, ApiError } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
 import type {
   Event,
@@ -28,12 +30,7 @@ import type {
 } from "@/types/api";
 
 export default function RegisterPage() {
-  const { user, isLoading: authLoading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!authLoading && !user) router.replace("/login");
-  }, [authLoading, user, router]);
+  const { user } = useAuth();
 
   const { data: event, isLoading: eventLoading } = useQuery({
     queryKey: ["events", "current"],
@@ -73,27 +70,30 @@ export default function RegisterPage() {
     enabled: !!eventId,
   });
 
-  if (authLoading || !user || eventLoading) {
-    return <p className="p-6 text-sm text-zinc-500">Đang tải...</p>;
+  if (eventLoading) {
+    return <p className="text-sm text-muted-foreground">Đang tải...</p>;
   }
 
   if (!event) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <p className="text-sm text-zinc-500">Hiện chưa có sự kiện nào đang mở đăng ký.</p>
-      </div>
+      <EmptyState
+        title="Chưa mở đăng ký"
+        description="Hiện chưa có sự kiện nào đang nhận đăng ký. Bạn sẽ nhận thông báo khi BTC mở cổng."
+      />
     );
   }
 
   if (registrationLoading || !registration) {
-    return <p className="p-6 text-sm text-zinc-500">Đang tải...</p>;
+    return <p className="text-sm text-muted-foreground">Đang tải form đăng ký...</p>;
   }
 
   if (registration.status === "cancelled") {
     return (
-      <div className="mx-auto flex max-w-xl flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-        <p className="text-lg font-medium">Đăng ký đã bị huỷ</p>
-        <p className="text-sm text-zinc-500">Vui lòng liên hệ BTC nếu bạn muốn đăng ký lại.</p>
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
+        <h1 className="font-display text-2xl">Đăng ký đã bị huỷ</h1>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          Liên hệ BTC nếu bạn muốn đăng ký lại.
+        </p>
       </div>
     );
   }
@@ -168,7 +168,7 @@ function RegistrationForm({
       });
     },
     onSuccess: () => {
-      toast.success("Đăng ký thành công! Vui lòng kiểm tra email xác nhận.");
+      toast.success("Đăng ký thành công. Kiểm tra email xác nhận.");
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "registrations", "me"] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
@@ -191,16 +191,18 @@ function RegistrationForm({
     isParticipating !== null && (!isParticipating || agreed) && !submitMutation.isPending;
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
+    <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-2xl font-semibold">{event.name}</h1>
-        <p className="text-sm text-zinc-500">Đăng ký tham gia Team Building</p>
+        <p className="ticket-kicker">Đăng ký tham gia</p>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">{event.name}</h1>
       </div>
 
+      <ProfileCard editablePhone />
+
       {registration.status === "submitted" && (
-        <div className="rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
-          Bạn đã đăng ký lúc {new Date(registration.submitted_at!).toLocaleString("vi-VN")}. Bạn có
-          thể chỉnh sửa và gửi lại trước khi đóng đăng ký.
+        <div className="rounded-lg border border-primary/30 bg-primary/8 px-3 py-2 text-sm">
+          Đã gửi lúc {formatDateTime(registration.submitted_at)}. Bạn vẫn sửa được trước khi BTC đóng
+          đăng ký.
         </div>
       )}
 
@@ -248,8 +250,8 @@ function RegistrationForm({
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-zinc-500">
-                  Đây là nguyện vọng đăng ký, BTC sẽ phân bổ theo nguồn lực thực tế.
+                <p className="text-xs text-muted-foreground">
+                  Đây là nguyện vọng. BTC phân bổ theo nguồn lực thực tế, không cam kết đáp ứng 100%.
                 </p>
               </div>
 
@@ -311,6 +313,9 @@ function RegistrationForm({
                   onChange={(e) => setWishNote(e.target.value)}
                   placeholder="Bạn có mong muốn hoặc đề xuất gì cho kỳ Team Building lần này?"
                 />
+                <p className="text-xs text-muted-foreground">
+                  BTC xem và xử lý thủ công. Hệ thống không cam kết đáp ứng.
+                </p>
               </div>
 
               {terms && (

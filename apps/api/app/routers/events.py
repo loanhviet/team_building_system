@@ -9,11 +9,27 @@ from app.core.queue import get_queue
 from app.models.auth import User
 from app.models.enums import EventStatus
 from app.models.event import Event
-from app.schemas.event import EventCreate, EventOut, EventTransition, EventUpdate
+from app.schemas.event import (
+    EventCreate,
+    EventOut,
+    EventSettingsOut,
+    EventSettingsUpdate,
+    EventTransition,
+    EventUpdate,
+)
+from app.schemas.organization import TeamRosterOut
 from app.schemas.registration import EventTermsOut
 from app.services import master_data
 from app.services.audit_service import record_audit
-from app.services.event_service import get_setting, transition_event
+from app.services.event_service import (
+    DEFAULT_TERMS_TEXT,
+    DEFAULT_TERMS_VERSION,
+    get_event_settings,
+    get_setting,
+    save_event_settings,
+    transition_event,
+)
+from app.services.team_roster_service import build_team_roster, resolve_roster_team_id
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -76,15 +92,9 @@ async def get_current_event(db: DbSession, _user: CurrentUser) -> EventOut | Non
 @router.get("/{event_id}/terms", response_model=EventTermsOut)
 async def get_event_terms(event_id: int, db: DbSession, _user: CurrentUser) -> EventTermsOut:
     await master_data.get_or_404(db, Event, event_id)
-    terms_text = await get_setting(
-        db,
-        event_id,
-        "terms_text",
-        "Tôi xác nhận đã đọc và đồng ý với quy định chương trình Team Building, "
-        "bao gồm chính sách/phí phạt trong trường hợp huỷ đăng ký không đúng quy định.",
-    )
-    terms_version = await get_setting(db, event_id, "terms_version", "v1")
-    return EventTermsOut(terms_text=terms_text, terms_version=terms_version)
+    terms_text = await get_setting(db, event_id, "terms_text", DEFAULT_TERMS_TEXT)
+    terms_version = await get_setting(db, event_id, "terms_version", DEFAULT_TERMS_VERSION)
+    return EventTermsOut(terms_text=str(terms_text), terms_version=str(terms_version))
 
 
 @router.get("/{event_id}", response_model=EventOut)
@@ -115,6 +125,40 @@ async def update_event(
     return _event_out(event)
 
 
+@router.get("/{event_id}/settings", response_model=EventSettingsOut)
+async def get_settings(event_id: int, db: DbSession, _user: AdminUser) -> EventSettingsOut:
+    await master_data.get_or_404(db, Event, event_id)
+    data = await get_event_settings(db, event_id)
+    return EventSettingsOut(**data)
+
+
+@router.put("/{event_id}/settings", response_model=EventSettingsOut)
+async def update_settings(
+    event_id: int, payload: EventSettingsUpdate, db: DbSession, user: AdminUser
+) -> EventSettingsOut:
+    await master_data.get_or_404(db, Event, event_id)
+    before = await get_event_settings(db, event_id)
+    data = await save_event_settings(
+        db,
+        event_id,
+        terms_text=payload.terms_text,
+        terms_version=payload.terms_version,
+        flight_allocation_weights=payload.flight_allocation_weights,
+    )
+    await record_audit(
+        db,
+        actor_user_id=user.id,
+        action="update",
+        entity_type="event_settings",
+        entity_id=event_id,
+        before=before,
+        after=data,
+        event_id=event_id,
+    )
+    await db.commit()
+    return EventSettingsOut(**data)
+
+
 @router.post("/{event_id}/transition", response_model=EventOut)
 async def transition_event_status(
     event_id: int,
@@ -143,3 +187,14 @@ async def transition_event_status(
         await queue.enqueue_job("send_bulk_emails_task", event_id, "info_published")
 
     return _event_out(event)
+
+
+@router.get("/{event_id}/team/roster", response_model=TeamRosterOut)
+async def get_team_roster(
+    event_id: int,
+    db: DbSession,
+    user: CurrentUser,
+    team_id: int | None = None,
+) -> TeamRosterOut:
+    resolved_team_id = resolve_roster_team_id(user, team_id)
+    return await build_team_roster(db, event_id, resolved_team_id)
