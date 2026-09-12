@@ -21,6 +21,7 @@ from app.routers import (
     auth,
     buses,
     chat,
+    dashboard,
     employees,
     event_config,
     events,
@@ -30,6 +31,7 @@ from app.routers import (
     hotels,
     jobs,
     journey,
+    ops,
     rag,
     registrations,
     room_assignments,
@@ -85,3 +87,5 @@ app.include_router(journey.router, prefix="/api")
 app.include_router(gala.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
+app.include_router(ops.router, prefix="/api")

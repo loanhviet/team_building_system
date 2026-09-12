@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 
 from app.core.deps import DbSession, require_admin
 from app.models.auth import User
@@ -25,6 +26,12 @@ def _job_out(job: Job) -> JobOut:
         created_at=job.created_at,
         finished_at=job.finished_at,
     )
+
+
+@router.get("", response_model=list[JobOut])
+async def list_jobs(db: DbSession, _user: AdminUser, limit: int = 50) -> list[JobOut]:
+    result = await db.execute(select(Job).order_by(Job.created_at.desc()).limit(min(limit, 200)))
+    return [_job_out(j) for j in result.scalars().all()]
 
 
 @router.get("/{job_id}", response_model=JobOut)
