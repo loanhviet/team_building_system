@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     embedding_provider: str = "local"
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    dashscope_api_key: str = ""
+    dashscope_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    dashscope_model: str = "qwen3-max-preview"
 
     @property
     def cors_origin_list(self) -> list[str]:
