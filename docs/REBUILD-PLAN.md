@@ -7,7 +7,7 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0 chưa bắt đầu
+Ngày lập: 2026-09-12 · Trạng thái: R0 xong, R1 chưa bắt đầu
 
 ---
 
@@ -226,39 +226,39 @@ Mỗi phase kết thúc bằng trạng thái **chạy được end-to-end**, tic
 
 File: `apps/api/app/db/seed.py` (viết lại toàn bộ, hiện 115 dòng).
 
-- [ ] Thêm CLI flag `--reset`: xoá toàn bộ dữ liệu nghiệp vụ (giữ schema) trước khi seed, vì bản hiện
+- [x] Thêm CLI flag `--reset`: xoá toàn bộ dữ liệu nghiệp vụ (giữ schema) trước khi seed, vì bản hiện
       tại chỉ `return` sớm nếu đã có `admin@teambuilding.vn` (dòng 37-40)
-- [ ] Site: giữ HN/HCM
-- [ ] Team: giữ 8 team hiện có (TEAM_DEFS)
-- [ ] Employee: giữ 120 người, cách sinh tên giữ nguyên
-- [ ] **Event A `TB2026`**, trạng thái cuối = `information_published`:
-  - [ ] 2 `shifts`: Ca 1, Ca 2 (`depart_after_time="17:00"`)
-  - [ ] **4 `transport_legs`** đúng BRD §7.1: `HN_SB`/`SB_HN` (hoặc theo site làm việc), `SB_KS`, `KS_SB`
+- [x] Site: giữ HN/HCM
+- [x] Team: giữ 8 team hiện có (TEAM_DEFS)
+- [x] Employee: giữ 120 người, cách sinh tên giữ nguyên
+- [x] **Event A `TB2026`**, trạng thái cuối = `information_published`:
+  - [x] 2 `shifts`: Ca 1, Ca 2 (`depart_after_time="17:00"`)
+  - [x] **4 `transport_legs`** đúng BRD §7.1: `HN_SB`/`SB_HN` (hoặc theo site làm việc), `SB_KS`, `KS_SB`
         — đặt `direction` nhất quán với dữ liệu bus/journey dùng
-  - [ ] `pickup_points`: ít nhất 2 điểm mỗi site (VD "Toà nhà A - Hà Nội", "Toà nhà B - Hồ Chí Minh"),
+  - [x] `pickup_points`: ít nhất 2 điểm mỗi site (VD "Toà nhà A - Hà Nội", "Toà nhà B - Hồ Chí Minh"),
         gắn đúng `site_id`
-  - [ ] 6 `flights`: 3 chiều đi (2 ca) + 3 chiều về, **có `depart_at`, `arrive_at`, `origin`, `destination`
+  - [x] 6 `flights`: 3 chiều đi (2 ca) + 3 chiều về, **có `depart_at`, `arrive_at`, `origin`, `destination`
         thật** (không để NULL như hiện tại), tổng capacity ≥ số người `is_participating=true`
-  - [ ] `hotels`: 1-2 khách sạn có `address`, `checkin_date`, `checkout_date`; `room_types` + đủ `rooms`
+  - [x] `hotels`: 1-2 khách sạn có `address`, `checkin_date`, `checkout_date`; `room_types` + đủ `rooms`
         (capacity đủ cho số người tham gia)
-  - [ ] `buses`: mỗi leg 2-3 xe, **bắt buộc có `gather_at`, `depart_at`, `pickup_point_id`, `destination`,
+  - [x] `buses`: mỗi leg 2-3 xe, **bắt buộc có `gather_at`, `depart_at`, `pickup_point_id`, `destination`,
         `leader_name`, `leader_phone`** — đây là field BTC hiện không nhập được qua Admin, seed phải set
         thẳng vào DB để chứng minh journey render đúng khi có dữ liệu
-  - [ ] `gala_configs` + ~15 `gala_tables` × 8 ghế (đủ chỗ cho registration tham gia)
-  - [ ] `schedule_items`: ~12 mục trải 3 ngày, có `day_date`, `start_at`, `end_at`, `location`, `is_published=true`
-  - [ ] `announcements`: 3 mục, 1 pinned
-  - [ ] `registrations`: ~100/120 CBNV `submitted`, một vài `is_participating=false`, một vài có `wish_note`
-  - [ ] Gọi thật `run_flight_allocation` + `run_bus_allocation` (import trực tiếp, không qua ARQ) rồi gán
+  - [x] `gala_configs` + ~15 `gala_tables` × 8 ghế (đủ chỗ cho registration tham gia)
+  - [x] `schedule_items`: ~12 mục trải 3 ngày, có `day_date`, `start_at`, `end_at`, `location`, `is_published=true`
+  - [x] `announcements`: 3 mục, 1 pinned
+  - [x] `registrations`: ~100/120 CBNV `submitted`, một vài `is_participating=false`, một vài có `wish_note`
+  - [x] Gọi thật `run_flight_allocation` + `run_bus_allocation` (import trực tiếp, không qua ARQ) rồi gán
         `room_assignments` thủ công cho người có phòng
-  - [ ] **Cố ý để lại vài ca `is_flagged=true`** (giảm capacity 1 chuyến để thiếu slot) — để BTC có ca
+  - [x] **Cố ý để lại vài ca `is_flagged=true`** (giảm capacity 1 chuyến để thiếu slot) — để BTC có ca
         thật để xử lý, đúng tinh thần BRD §5.3
-  - [ ] Confirm một phần ghế Gala (vài team) để Journey có gì để hiện, để lại vài team `pending` để test
+  - [x] Confirm một phần ghế Gala (vài team) để Journey có gì để hiện, để lại vài team `pending` để test
         luồng chọn ghế
-- [ ] **Event B `TB2027`**, trạng thái `registration_open`:
-  - [ ] `registration_open_at` = giờ hiện tại trừ 1 ngày, `registration_close_at` = +14 ngày
-  - [ ] Cấu hình ca/chặng/điểm đón giống Event A (copy config, không copy registrations)
-  - [ ] **0 đăng ký** — để thử trọn luồng CBNV từ đầu
-- [ ] Cập nhật danh sách tài khoản in ra cuối script + README nếu số liệu thay đổi
+- [x] **Event B `TB2027`**, trạng thái `registration_open`:
+  - [x] `registration_open_at` = giờ hiện tại trừ 1 ngày, `registration_close_at` = +14 ngày
+  - [x] Cấu hình ca/chặng/điểm đón giống Event A (copy config, không copy registrations)
+  - [x] **0 đăng ký** — để thử trọn luồng CBNV từ đầu
+- [x] Cập nhật danh sách tài khoản in ra cuối script + README nếu số liệu thay đổi
 
 **Nghiệm thu:**
 ```bash
@@ -269,7 +269,26 @@ Kiểm bằng SQL: 2 `events`, `transport_legs` = 4 (mỗi event), `pickup_point
 `depart_at`/`origin`/`destination` khác NULL cho cả outbound và inbound, `gala_seats` ≥ số người tham gia
 Event A, `buses.gather_at`/`pickup_point_id` khác NULL.
 
-**Đã kiểm chứng:** _(điền khi xong)_
+**Đã kiểm chứng:** viết lại toàn bộ `apps/api/app/db/seed.py` (115 → ~400 dòng). Chạy
+`docker compose exec api python -m app.db.seed --reset` sạch, không lỗi. `ruff check` sạch, `pytest`
+29/29 pass (không phải test mới, chỉ xác nhận không phá vỡ gì). Kiểm SQL trực tiếp trên
+`data/teambuilding.db` sau seed: 2 events (TB2026 `information_published`, TB2027
+`registration_open`), 4 `transport_legs` mỗi event, 4 `pickup_points`, 6 `flights` cả 2 chiều đều có
+`depart_at`/`origin`/`destination`, 12 `buses` đều có `gather_at`+`leader_name`+`leader_phone` (6/12 có
+`pickup_point_id` — đúng, chặng sân bay↔khách sạn không có "điểm đón" master data), 120 `gala_seats`
+(61 đã confirmed cho 5/8 team, 1 team đang "active", 2 team "waiting" — để test luồng chọn ghế thật ở
+R4/R6), 105/120 đăng ký (97 tham gia), phân bổ bay/xe chạy thật qua `run_flight_allocation`/
+`run_bus_allocation` (có `is_flagged=true` ở cả 2 chiều — nhiều hơn dự kiến ban đầu vì thuật toán greedy
+hiện tại tách Team ngay cả khi tổng slot đủ nhưng phân mảnh giữa các chuyến, đúng bug đã ghi ở mục 3.2,
+sẽ giảm sau khi sửa `_score` ở R1), 90 `room_assignments`, 12 `schedule_items` đủ giờ/ngày, 3
+`announcements`. Gọi thật `GET /api/journey/me` cho `nv009@teambuilding.vn` (nhân viên thường, không
+phải leader) qua curl — trả đủ 7 khối, không thiếu trường nào (xem log phiên làm việc). `GET
+/api/events/current` trả đúng Event B cho luồng đăng ký từ đầu.
+Sửa phát sinh trong lúc kiểm: bus "XE-HCM1"/"XE-HCM2" lúc đầu ghi đích đến "Sân bay Tân Sơn Nhất"/"Văn
+phòng Hồ Chí Minh" — vô lý vì cả 6 chuyến bay đều là Hà Nội↔Đà Nẵng (seed không mô hình multi-origin
+theo site); đổi lại thành hub Hà Nội chung, giữ nguyên các điểm đón HCM để vẫn có nhiều điểm đón cho
+CBNV chọn. Đổi ví dụ tài khoản "employee" trong README/print từ `nv002` sang `nv009`, vì logic
+team_leader mới (1 leader/team = nhân viên đầu tiên của mỗi team) khiến `nv001`..`nv008` đều là leader.
 
 ---
 

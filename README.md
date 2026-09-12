@@ -34,7 +34,7 @@ Tài khoản đăng nhập sau khi `make seed` (in ra ở cuối log seed):
 | super_admin | admin@teambuilding.vn | admin123 |
 | organizer (BTC) | btc@teambuilding.vn | btc123 |
 | team_leader | nv001@teambuilding.vn | NV001 |
-| employee | nv002@teambuilding.vn | NV002 |
+| employee | nv009@teambuilding.vn | NV009 |
 
 ## Lệnh thường dùng
 
