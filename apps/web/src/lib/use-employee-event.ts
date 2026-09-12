@@ -27,10 +27,12 @@ export function useEmployeeEvent() {
   const current = currentQuery.data;
   const eventId = journey?.event_id ?? current?.id ?? null;
   const eventName = journey?.event_name ?? current?.name ?? null;
+  const eventStatus = journey?.event_status ?? current?.status ?? null;
 
   return {
     eventId,
     eventName,
+    eventStatus,
     journey,
     hasJourney: !!journey,
     isLeader: user?.role === "team_leader",

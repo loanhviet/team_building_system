@@ -19,7 +19,11 @@ export default function AccountPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  const mutation = useMutation({
+  // `wasForced` (the mutation's variable) is captured at click time — see
+  // the button below — so it reflects the flag as it was *before*
+  // refreshUser() flips it; relying on a closure over `user` here instead
+  // would be fragile.
+  const mutation = useMutation<unknown, Error, boolean>({
     mutationFn: () =>
       apiFetch("/api/auth/change-password", {
         method: "POST",
@@ -28,7 +32,7 @@ export default function AccountPage() {
           new_password: newPassword,
         }),
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, wasForced) => {
       toast.success("Đã đổi mật khẩu");
       setCurrentPassword("");
       setNewPassword("");
@@ -36,6 +40,11 @@ export default function AccountPage() {
       await refreshUser();
       if (user?.role === "organizer" || user?.role === "super_admin") {
         router.push("/admin");
+      } else if (wasForced) {
+        // employees hit this page automatically on first login (forced
+        // change) — previously only admins got sent onward afterward, an
+        // employee was just left on /account with no cue where to go next
+        router.push("/");
       }
     },
     onError: (err) =>
@@ -102,7 +111,10 @@ export default function AccountPage() {
               <p className="text-xs text-red-600">Mật khẩu nhập lại chưa khớp</p>
             )}
           </div>
-          <Button disabled={!canSubmit} onClick={() => mutation.mutate()}>
+          <Button
+            disabled={!canSubmit}
+            onClick={() => mutation.mutate(user?.must_change_password ?? false)}
+          >
             Đổi mật khẩu
           </Button>
         </CardContent>

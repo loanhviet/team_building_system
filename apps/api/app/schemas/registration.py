@@ -42,6 +42,7 @@ class RegistrationOut(BaseModel):
     is_participating: bool | None
     shift_id: int | None
     wish_note: str | None
+    terms_version: str | None
     submitted_at: datetime | None
     cancelled_at: datetime | None
     transport_needs: list[TransportNeedOut]

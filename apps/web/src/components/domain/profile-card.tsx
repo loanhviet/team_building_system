@@ -11,7 +11,19 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { Employee } from "@/types/api";
 
-export function ProfileCard({ editablePhone = false }: { editablePhone?: boolean }) {
+export function ProfileCard({
+  editablePhone = false,
+  controlledPhone,
+}: {
+  editablePhone?: boolean;
+  /** When set, the phone field becomes a plain controlled input owned by the
+   * caller instead of managing its own inline Save — used on the
+   * registration form, where the phone has to be submitted together with
+   * the rest of the form. The separate "Sửa/Lưu" flow below was a silent
+   * data-loss trap there: type a number, hit "Gửi đăng ký" without hitting
+   * "Lưu" first, and the phone was never saved. */
+  controlledPhone?: { value: string; onChange: (value: string) => void };
+}) {
   const { user, refreshUser } = useAuth();
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [editing, setEditing] = useState(false);
@@ -56,7 +68,15 @@ export function ProfileCard({ editablePhone = false }: { editablePhone?: boolean
           <Label htmlFor="profile-phone" className="text-xs text-muted-foreground">
             Số điện thoại
           </Label>
-          {editablePhone && editing ? (
+          {controlledPhone ? (
+            <Input
+              id="profile-phone"
+              className="mt-1"
+              value={controlledPhone.value}
+              onChange={(e) => controlledPhone.onChange(e.target.value)}
+              placeholder="Nhập SĐT liên hệ"
+            />
+          ) : editablePhone && editing ? (
             <div className="mt-1 flex gap-2">
               <Input
                 id="profile-phone"

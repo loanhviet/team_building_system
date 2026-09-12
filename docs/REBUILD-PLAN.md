@@ -7,7 +7,7 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0-R2 xong (R2 chưa click-through Chrome thật), R3 chưa bắt đầu
+Ngày lập: 2026-09-12 · Trạng thái: R0-R3 xong (R2,R3 chưa click-through Chrome thật), R4 chưa bắt đầu
 
 ---
 
@@ -496,60 +496,93 @@ Login/Account, dùng component từ R2.
 lại được đăng ký của mình; Journey hiện đủ dữ liệu R0 đã seed, không thiếu trường nào.
 
 **`app/(employee)/register/page.tsx`:**
-- [ ] Đổi radio Có/Không, checkbox xe, checkbox điều khoản sang `<RadioGroup>`/`<Checkbox>` (R2)
-- [ ] Bắt buộc: `shiftId` khác null, SĐT không rỗng, mỗi leg tick "cần xe" phải có `pickup_point_id`
-      — cập nhật điều kiện `canSubmit` (`:190-191`)
-- [ ] Gộp SĐT vào chính state form (bỏ cơ chế "Sửa/Lưu" riêng của `ProfileCard` cho ô SĐT ở trang này —
-      submit 1 lần gồm cả PATCH SĐT + PUT registration)
-- [ ] Terms: nếu `useQuery` của `/terms` lỗi, hiện `EmptyState variant="error"` thay vì ẩn checkbox +
-      disable câm; khi `terms_version` từ server khác với version đã lưu trong registration, **không
-      tự tick `agreed`**, bắt người dùng đọc lại
-- [ ] Nhóm bus legs theo `direction` (2 nhóm: chiều đi / chiều về), thêm `EmptyState` khi `legs.length === 0`
-- [ ] Lọc `pickupPoints` theo `employee.site_id` trước khi render select
-- [ ] Thêm màn hình/khối "Đã đăng ký thành công" sau submit: tóm tắt Ca đã chọn, các chặng xe đã chọn,
-      dòng "Đã gửi email xác nhận tới {email}"
-- [ ] Hiện `event.registration_close_at` (format ngày giờ) ngay trong banner "Bạn vẫn sửa được..."
-- [ ] Khi `event` null vì đã đóng đăng ký nhưng CBNV **đã có** registration `submitted` — vẫn cho xem
-      lại (đổi nguồn dữ liệu: gọi `/registrations/me` trước, chỉ fallback `EmptyState "Chưa mở đăng ký"`
-      khi thật sự chưa từng có registration nào)
-- [ ] Thay `window.confirm` hủy đăng ký bằng `<ConfirmDialog>` có `<Textarea>` lý do, gửi `reason` lên
-      `POST .../cancel`
-- [ ] Xử lý `error` riêng khỏi `isLoading` ở dòng `:86-88` — lỗi thật hiện `EmptyState variant="error"`
+- [x] Đổi radio Có/Không, checkbox xe, checkbox điều khoản sang `<RadioGroup>`/`<Checkbox>` (R2)
+- [x] Bắt buộc: `shiftId` khác null, SĐT không rỗng, mỗi leg tick "cần xe" phải có `pickup_point_id`
+      — cập nhật điều kiện `canSubmit`
+- [x] Gộp SĐT vào chính state form — `ProfileCard` thêm prop `controlledPhone` (bỏ cơ chế "Sửa/Lưu"
+      riêng chỉ trên trang này, `account/page.tsx` vẫn giữ inline-edit cũ); submit 1 lần: PATCH SĐT
+      (chỉ nếu đổi) → PUT registration → POST submit
+- [x] Terms: `/terms` lỗi → hiện `EmptyState variant="error"` ngay dưới form thay vì ẩn checkbox câm;
+      không tự tick `agreed` nữa nếu `registration.terms_version !== terms.terms_version` — **cần thêm
+      field mới**: `RegistrationOut`/`Registration` (FE+BE) trước đó không có `terms_version` dù model
+      đã lưu, phải thêm để so sánh được
+- [x] Nhóm bus legs theo `direction` (Chiều đi / Chiều về / Chặng khác), `EmptyState` dạng text khi
+      `legs.length === 0`
+- [x] Lọc `pickupPoints` theo site — cần gọi thêm `GET /api/employees/me` (đã có sẵn, chưa ai gọi ở
+      trang này) để lấy `site_id` của CBNV
+- [x] Màn hình "Đăng ký thành công": tóm tắt Ca + các chặng xe đã chọn + "Đã gửi email xác nhận tới {email}"
+- [x] Hiện `event.registration_close_at` trong banner
+- [x] **Xem lại đăng ký sau khi đóng cổng** — cần thêm endpoint backend mới `GET /api/registrations/me`
+      (unscoped, không tự tạo draft) vì trước đó không có cách nào tìm registration khi không còn
+      `event_id` từ `/events/current`. Trang giờ dùng `readOnly` prop: còn `registration_open` → form
+      sửa được như cũ; đóng rồi → hiện đúng dữ liệu đã gửi, mọi input `disabled`, ẩn nút Gửi/Huỷ
+- [x] Thay `window.confirm` bằng `<ConfirmDialog>` có `<Textarea>` lý do (không bắt buộc), gửi `reason`
+- [x] Tách `error` khỏi `isLoading` — lỗi thật (`registrationError`) hiện `EmptyState variant="error"`
+      thay vì treo vĩnh viễn ở "Đang tải form đăng ký..."
 
 **`app/(employee)/journey/page.tsx`:**
-- [ ] Thêm dòng giờ đến (`arrive_at`) bên cạnh giờ đi cho mỗi chuyến bay
-- [ ] Hiện `bus.note`, `bus.destination` nếu có
-- [ ] Render `announcement.body_md` qua một markdown nhẹ (bold/italic/list/link tối thiểu — không cần
-      thư viện nếu regex đơn giản đủ dùng, ponytail: ưu tiên giải pháp nhỏ nhất trước khi thêm dependency)
-- [ ] Nhóm `schedule` theo `day_date`, hiện `end_at` cạnh `start_at`
-- [ ] SĐT trưởng xe bọc trong `<a href="tel:...">`
-- [ ] Thêm nút làm mới (`refetch`) + dòng "Cập nhật lúc {time}"
-- [ ] Sửa error state (`:28-41`): tách rõ "chưa có hành trình công bố" (404 `no_published_event`) khỏi
-      lỗi mạng/500 — lỗi thật dùng `EmptyState variant="error"`, không hiện `error.message` tiếng Anh thô
+- [x] Thêm giờ đến (`arrive_at`) cạnh giờ đi mỗi chuyến bay + ghi chú "chưa có chuyến về" khi chỉ có 1 chiều
+- [x] Hiện `bus.note`, `bus.destination`
+- [x] `components/domain/lite-markdown.tsx` (mới) — bold/italic/link/bullet qua regex, không thêm
+      dependency, dùng cho `announcement.body_md`
+- [x] Nhóm `schedule` theo `day_date`, hiện `end_at` cạnh `start_at`
+- [x] SĐT trưởng xe bọc `<a href="tel:...">`
+- [x] Nút làm mới (icon xoay khi `isFetching`) + "Cập nhật lúc {time}" (`dataUpdatedAt` của react-query)
+- [x] Tách lỗi 404 `no_published_event` (empty state thật, có link sang `/register`) khỏi lỗi mạng/500
+      (`EmptyState variant="error"` + nút Thử lại) — không còn hiện `error.message` tiếng Anh thô
+- [x] *Ngoài checklist, cùng gốc:* link "Xem sơ đồ Gala" trước đây chỉ hiện khi đang `drawing`/
+      `in_progress` — sau khi bốc thăm xong (`finished`) CBNV mất luôn đường vào xem chỗ ngồi của mình;
+      đổi thành hiện bất cứ khi nào `journey.gala` tồn tại
 
 **`app/(employee)/team/page.tsx`:**
-- [ ] Thêm cột Email, SĐT vào bảng roster (API đã trả, đang bỏ)
-- [ ] Thêm search theo tên/mã NV (dùng `data-table.tsx` nếu hợp, hoặc filter đơn giản tại chỗ)
-- [ ] Sửa `if (!data) return null` (`:57`) → hiện `EmptyState`
-- [ ] Ẩn nút "Chọn ghế Gala" khi `gala_configs` chưa tồn tại hoặc `status === "setup"`
+- [x] Thêm cột Email, SĐT vào bảng roster
+- [x] Search theo tên/mã NV (filter tại chỗ, feed vào `DataTable` mới của R2 — cũng đổi luôn sang
+      `DataTable` cho có sort, thay vì thêm mỗi ô tìm kiếm rời rạc)
+- [x] Sửa `if (!data) return null` → `EmptyState`
+- [x] Ẩn nút "Chọn ghế Gala" khi chưa cấu hình Gala — gọi thẳng `GET /gala/config` thay vì dựa vào
+      `useEmployeeEvent().galaStatus` (giá trị đó chỉ có sau khi `journey` được publish, tức luôn `null`
+      trong giai đoạn BTC đang tổ chức bốc thăm/chọn ghế — đúng lúc leader cần thấy nút này nhất)
 
 **`components/domain/employee-shell.tsx`:**
-- [ ] Ẩn tab "Đăng ký" khi không có event `registration_open` **và** CBNV chưa từng có registration nào
-      (còn có registration cũ thì vẫn cho vào xem — xem mục registerpage ở trên)
-- [ ] Ẩn tab "Gala" khi chưa có `gala_configs` cho event hiện tại
-- [ ] Thêm banner nhỏ dưới header hiện `StatusBadge` của event hiện tại (R2)
-- [ ] Thêm `aria-current="page"` cho link active, `aria-label` cho nav
+- [x] Ẩn tab "Đăng ký" khi không có event `registration_open` **và** CBNV chưa từng có registration nào
+      (dùng chung endpoint `/registrations/me` mới)
+- [x] Ẩn tab "Gala" khi chưa có `gala_configs` cho event hiện tại
+- [x] Banner nhỏ dưới header hiện `EventStatusBadge` (R2) — **sửa luôn 1 bug phát sinh**: variant
+      `"outline"` của Badge chỉ có viền + `text-foreground`, vô hình trên nền `--night` tối; đổi
+      `draft`/`event_completed` sang `"secondary"` (pill có nền, luôn đọc được trên mọi nền)
+- [x] `aria-current="page"` cho link active (cả desktop lẫn bottom nav mobile), `aria-label` cho cả 2 `<nav>`
 
 **Login/Account:**
-- [ ] `app/(auth)/login/page.tsx` — lỗi sai mật khẩu hiện inline dưới field thay vì chỉ toast; thêm nút
-      hiện/ẩn mật khẩu; thêm dòng "Quên mật khẩu? Liên hệ BTC" (không làm OTP, theo PLAN.md đã chốt)
-- [ ] `app/(employee)/account/page.tsx` — sau đổi mật khẩu bắt buộc thành công, employee cũng được điều
-      hướng tiếp (hiện chỉ admin được, `:37-39`)
+- [x] `app/(auth)/login/page.tsx` — lỗi hiện inline (`role="alert"`) thay vì chỉ toast; nút hiện/ẩn mật
+      khẩu; dòng "Quên mật khẩu? Liên hệ BTC"
+- [x] `app/(employee)/account/page.tsx` — employee cũng được điều hướng tiếp (`/`) sau đổi mật khẩu
+      **bắt buộc**; đổi mật khẩu tự nguyện (không bị ép) thì ở lại trang — cờ `wasForced` truyền qua
+      `mutation.mutate(wasForced)` thay vì đọc lại từ closure, để tránh phụ thuộc thời điểm re-render
+
+**Việc phát sinh ngoài checklist gốc (cùng nằm trong phạm vi R3):**
+- Thêm `GET /api/registrations/me` (BE, `routers/registrations.py` — router mới `me_router`, nối ở
+  `main.py`) + `terms_version` trong `RegistrationOut`/`Registration` (FE) — bắt buộc phải có để 2 mục
+  "xem lại sau khi đóng" và "không tự tick điều khoản cũ" chạy được, nhưng không nằm trong checklist
+  liệt kê ban đầu vì lúc viết plan chưa nhận ra thiếu 2 chỗ backend này
+- `ProfileCard` thêm `controlledPhone` (không đổi API cũ `editablePhone`, không ảnh hưởng `account/page.tsx`)
+- `EventStatusBadge` variant map sửa (ảnh hưởng bất kỳ chỗ nào dùng sau này, không riêng shell)
 
 **Nghiệm thu:** Chrome thật ngay trong phase này (không dồn sang R6) — đăng ký hết luồng bằng
 `nv0xx@teambuilding.vn` (Event B), xem Journey của 1 người đã có dữ liệu (Event A), thử ở khung 390px.
 
-**Đã kiểm chứng:** _(điền khi xong)_
+**Đã kiểm chứng:** `ruff` sạch, `pytest` 45/45 pass (thêm 2 test cho `/registrations/me`: sống sót qua
+`registration_closed`, trả `null` khi `event_completed`). `tsc --noEmit` + `next lint` sạch qua toàn bộ
+đợt sửa. Verify bằng curl thật (không phải chỉ đọc code):
+- `/registrations/me`: trả registration hiện tại; sau khi transition Event B → `registration_closed`,
+  `/events/current` về `null` nhưng `/registrations/me` **vẫn** trả đúng registration cũ (rồi transition
+  ngược lại `registration_open` để không đổi seed data) — đúng hành vi "xem lại sau khi đóng cổng"
+- Luồng đăng ký mới (nv030, Event B): `GET /employees/me` → có `site_id`; `PATCH` phone → `PUT`
+  registration → `POST` submit, cả 3 bước nối tiếp thành công; 1 email tới MailHog
+- `GET /events/1/team/roster` (nv001, leader) trả đủ `email`/`phone` mỗi thành viên (trước đây FE bỏ,
+  giờ hiển thị); `GET /events/1/gala/config` trả `status` đúng
+- 5 route CBNV (`/login /journey /register /team /account`) đều trả 200 qua curl
+**Chưa click-through Chrome thật** (extension không kết nối được trong môi trường này — xem ghi chú R2).
+Cần làm khi có điều kiện, bắt buộc trước R6. Khung 390px cũng chưa xem được bằng mắt vì lý do tương tự.
 
 ---
 

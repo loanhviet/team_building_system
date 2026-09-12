@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { EmptyState } from "@/components/domain/empty-state";
 import { ProfileCard } from "@/components/domain/profile-card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
 import type {
+  Employee,
   Event,
   EventTerms,
   PickupPoint,
@@ -34,18 +36,50 @@ import type {
 export default function RegisterPage() {
   const { user } = useAuth();
 
-  const { data: event, isLoading: eventLoading } = useQuery({
+  const { data: currentEvent, isLoading: currentLoading } = useQuery({
     queryKey: ["events", "current"],
     queryFn: () => apiFetch<Event | null>("/api/events/current"),
     enabled: !!user,
   });
 
-  const eventId = event?.id;
+  // When there's no event open for registration, fall back to whatever event
+  // the CBNV's most recent registration belongs to — without this, closing
+  // registration made an already-submitted registration permanently
+  // unviewable (the page had no event_id left to ask for it with).
+  const { data: latestReg, isLoading: latestLoading } = useQuery({
+    queryKey: ["registrations", "me", "latest"],
+    queryFn: () => apiFetch<Registration | null>("/api/registrations/me"),
+    enabled: !!user && !currentLoading && !currentEvent,
+  });
 
-  const { data: registration, isLoading: registrationLoading } = useQuery({
+  const pastEventId = !currentEvent ? latestReg?.event_id : undefined;
+  const { data: pastEvent, isLoading: pastEventLoading } = useQuery({
+    queryKey: ["events", pastEventId],
+    queryFn: () => apiFetch<Event>(`/api/events/${pastEventId}`),
+    enabled: !!pastEventId,
+  });
+
+  const event = currentEvent ?? pastEvent ?? null;
+  const eventId = event?.id;
+  const isOpenForEditing = !!currentEvent;
+
+  // The scoped endpoint auto-creates a draft row — only call it while
+  // registration is actually open. Once closed, `latestReg` (already fetched
+  // above) is the registration to show, read-only.
+  const {
+    data: registration,
+    isLoading: registrationLoading,
+    error: registrationError,
+  } = useQuery({
     queryKey: ["events", eventId, "registrations", "me"],
     queryFn: () => apiFetch<Registration>(`/api/events/${eventId}/registrations/me`),
-    enabled: !!eventId,
+    enabled: !!eventId && isOpenForEditing,
+  });
+
+  const { data: employee } = useQuery({
+    queryKey: ["employees", "me"],
+    queryFn: () => apiFetch<Employee>("/api/employees/me"),
+    enabled: !!user,
   });
 
   const { data: shifts } = useQuery({
@@ -66,13 +100,16 @@ export default function RegisterPage() {
     enabled: !!eventId,
   });
 
-  const { data: terms } = useQuery({
+  const { data: terms, error: termsError } = useQuery({
     queryKey: ["events", eventId, "terms"],
     queryFn: () => apiFetch<EventTerms>(`/api/events/${eventId}/terms`),
-    enabled: !!eventId,
+    enabled: !!eventId && isOpenForEditing,
   });
 
-  if (eventLoading) {
+  const isLoading =
+    currentLoading || (!currentEvent && (latestLoading || pastEventLoading));
+
+  if (isLoading) {
     return <p className="text-sm text-muted-foreground">Đang tải...</p>;
   }
 
@@ -85,11 +122,32 @@ export default function RegisterPage() {
     );
   }
 
-  if (registrationLoading || !registration) {
+  const effectiveRegistration = isOpenForEditing ? registration : latestReg;
+
+  if (isOpenForEditing && registrationError) {
+    return (
+      <EmptyState
+        variant="error"
+        title="Không tải được form đăng ký"
+        description={registrationError instanceof ApiError ? registrationError.message : undefined}
+      />
+    );
+  }
+
+  if (isOpenForEditing && (registrationLoading || !registration)) {
     return <p className="text-sm text-muted-foreground">Đang tải form đăng ký...</p>;
   }
 
-  if (registration.status === "cancelled") {
+  if (!effectiveRegistration) {
+    return (
+      <EmptyState
+        title="Chưa mở đăng ký"
+        description="Hiện chưa có sự kiện nào đang nhận đăng ký. Bạn sẽ nhận thông báo khi BTC mở cổng."
+      />
+    );
+  }
+
+  if (effectiveRegistration.status === "cancelled") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
         <h1 className="font-display text-2xl">Đăng ký đã bị huỷ</h1>
@@ -102,13 +160,17 @@ export default function RegisterPage() {
 
   return (
     <RegistrationForm
-      key={registration.id}
+      key={`${effectiveRegistration.id}-${isOpenForEditing}`}
       event={event}
-      registration={registration}
+      registration={effectiveRegistration}
       shifts={shifts ?? []}
       legs={legs ?? []}
       pickupPoints={pickupPoints ?? []}
       terms={terms}
+      termsError={!!termsError}
+      employeeSiteId={employee?.site_id ?? null}
+      employeePhone={employee?.phone ?? user?.phone ?? ""}
+      readOnly={!isOpenForEditing}
     />
   );
 }
@@ -120,6 +182,10 @@ function RegistrationForm({
   legs,
   pickupPoints,
   terms,
+  termsError,
+  employeeSiteId,
+  employeePhone,
+  readOnly,
 }: {
   event: Event;
   registration: Registration;
@@ -127,6 +193,10 @@ function RegistrationForm({
   legs: TransportLeg[];
   pickupPoints: PickupPoint[];
   terms: EventTerms | undefined;
+  termsError: boolean;
+  employeeSiteId: number | null;
+  employeePhone: string;
+  readOnly: boolean;
 }) {
   const queryClient = useQueryClient();
   const eventId = event.id;
@@ -135,18 +205,46 @@ function RegistrationForm({
     registration.is_participating,
   );
   const [shiftId, setShiftId] = useState<number | null>(registration.shift_id);
+  const [phone, setPhone] = useState(employeePhone);
   const [wishNote, setWishNote] = useState(registration.wish_note ?? "");
   const [needs, setNeeds] = useState<Record<number, TransportNeed>>(() => {
     const byLeg: Record<number, TransportNeed> = {};
     for (const n of registration.transport_needs) byLeg[n.leg_id] = n;
     return byLeg;
   });
+  // Never auto-tick agreement across a terms_version the CBNV hasn't actually
+  // seen and accepted — only pre-check when they submitted under the exact
+  // version currently in force.
   const [agreed, setAgreed] = useState(
-    registration.status === "submitted" && registration.is_participating === true,
+    registration.status === "submitted" &&
+      registration.is_participating === true &&
+      !!terms &&
+      registration.terms_version === terms.terms_version,
   );
+  const [justSubmitted, setJustSubmitted] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const { user } = useAuth();
+
+  const outboundLegs = legs.filter((l) => l.direction === "outbound");
+  const inboundLegs = legs.filter((l) => l.direction === "inbound");
+  const otherLegs = legs.filter((l) => l.direction !== "outbound" && l.direction !== "inbound");
+  const sitePickupPoints = employeeSiteId
+    ? pickupPoints.filter((p) => p.site_id === employeeSiteId)
+    : pickupPoints;
+
+  const needsSelectionValid = legs.every((leg) => {
+    const need = needs[leg.id];
+    return !need?.is_needed || !!need.pickup_point_id;
+  });
 
   const submitMutation = useMutation({
     mutationFn: async () => {
+      if (phone.trim() && phone.trim() !== employeePhone) {
+        await apiFetch("/api/employees/me", {
+          method: "PATCH",
+          body: JSON.stringify({ phone: phone.trim() }),
+        });
+      }
       await apiFetch(`/api/events/${eventId}/registrations/me`, {
         method: "PUT",
         body: JSON.stringify({
@@ -170,27 +268,75 @@ function RegistrationForm({
       });
     },
     onSuccess: () => {
-      toast.success("Đăng ký thành công. Kiểm tra email xác nhận.");
+      setJustSubmitted(true);
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "registrations", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["registrations", "me", "latest"] });
+      queryClient.invalidateQueries({ queryKey: ["employees", "me"] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
   const cancelMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (reason: string) =>
       apiFetch(`/api/events/${eventId}/registrations/me/cancel`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ reason: reason || null }),
       }),
     onSuccess: () => {
       toast.success("Đã huỷ đăng ký");
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "registrations", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["registrations", "me", "latest"] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
   const canSubmit =
-    isParticipating !== null && (!isParticipating || agreed) && !submitMutation.isPending;
+    !readOnly &&
+    isParticipating !== null &&
+    (!isParticipating ||
+      (agreed && shiftId !== null && phone.trim() !== "" && needsSelectionValid)) &&
+    !submitMutation.isPending;
+
+  if (justSubmitted) {
+    const chosenShift = shifts.find((s) => s.id === shiftId);
+    const chosenLegs = legs.filter((l) => needs[l.id]?.is_needed);
+    return (
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col items-center gap-2 py-8 text-center">
+          <h1 className="font-display text-3xl font-semibold">Đăng ký thành công!</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Đã gửi email xác nhận tới {user?.email ?? "email công ty của bạn"}.
+          </p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Tóm tắt đăng ký</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            <p>
+              <span className="text-muted-foreground">Tham gia:</span>{" "}
+              {isParticipating ? "Có tham gia" : "Không tham gia"}
+            </p>
+            {isParticipating && (
+              <>
+                <p>
+                  <span className="text-muted-foreground">Ca đăng ký:</span>{" "}
+                  {chosenShift?.name ?? "—"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Nhu cầu xe:</span>{" "}
+                  {chosenLegs.length > 0 ? chosenLegs.map((l) => l.name).join(", ") : "Không có"}
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+        <Button variant="outline" onClick={() => setJustSubmitted(false)}>
+          Xem lại / chỉnh sửa
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -199,12 +345,24 @@ function RegistrationForm({
         <h1 className="font-display text-3xl font-semibold tracking-tight">{event.name}</h1>
       </div>
 
-      <ProfileCard editablePhone />
+      {readOnly && (
+        <div className="rounded-lg border border-muted-foreground/30 bg-muted px-3 py-2 text-sm">
+          BTC đã đóng đăng ký. Đây là thông tin bạn đã gửi — liên hệ BTC nếu cần thay đổi.
+        </div>
+      )}
 
-      {registration.status === "submitted" && (
+      <ProfileCard
+        controlledPhone={readOnly ? undefined : { value: phone, onChange: setPhone }}
+      />
+
+      {registration.status === "submitted" && !readOnly && (
         <div className="rounded-lg border border-primary/30 bg-primary/8 px-3 py-2 text-sm">
-          Đã gửi lúc {formatDateTime(registration.submitted_at)}. Bạn vẫn sửa được trước khi BTC đóng
-          đăng ký.
+          Đã gửi lúc {formatDateTime(registration.submitted_at)}.
+          {event.registration_close_at ? (
+            <> Bạn có thể sửa đến {formatDateTime(event.registration_close_at)}.</>
+          ) : (
+            <> Bạn vẫn sửa được trước khi BTC đóng đăng ký.</>
+          )}
         </div>
       )}
 
@@ -219,11 +377,11 @@ function RegistrationForm({
             className="flex flex-row gap-4"
           >
             <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="true" />
+              <RadioGroupItem value="true" disabled={readOnly} />
               Có tham gia
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="false" />
+              <RadioGroupItem value="false" disabled={readOnly} />
               Không tham gia
             </label>
           </RadioGroup>
@@ -231,10 +389,13 @@ function RegistrationForm({
           {isParticipating && (
             <>
               <div className="flex flex-col gap-2">
-                <Label>Ca đăng ký</Label>
+                <Label>
+                  Ca đăng ký <span className="text-destructive">*</span>
+                </Label>
                 <Select
                   value={shiftId ? String(shiftId) : undefined}
                   onValueChange={(v) => setShiftId(Number(v))}
+                  disabled={readOnly}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Chọn ca" />
@@ -253,54 +414,41 @@ function RegistrationForm({
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3">
-                <Label>Nhu cầu xe đưa đón</Label>
-                {legs.map((leg) => {
-                  const need = needs[leg.id];
-                  return (
-                    <div key={leg.id} className="flex flex-wrap items-center gap-3 text-sm">
-                      <label className="flex items-center gap-2">
-                        <Checkbox
-                          checked={need?.is_needed ?? false}
-                          onCheckedChange={(checked) =>
-                            setNeeds((prev) => ({
-                              ...prev,
-                              [leg.id]: {
-                                leg_id: leg.id,
-                                is_needed: checked === true,
-                                pickup_point_id: prev[leg.id]?.pickup_point_id ?? null,
-                              },
-                            }))
-                          }
-                        />
-                        {leg.name}
-                      </label>
-                      {need?.is_needed && pickupPoints.length > 0 && (
-                        <Select
-                          value={need.pickup_point_id ? String(need.pickup_point_id) : undefined}
-                          onValueChange={(v) =>
-                            setNeeds((prev) => ({
-                              ...prev,
-                              [leg.id]: { ...prev[leg.id], pickup_point_id: Number(v) },
-                            }))
-                          }
-                        >
-                          <SelectTrigger className="w-48">
-                            <SelectValue placeholder="Điểm đón/trả" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {pickupPoints.map((p) => (
-                              <SelectItem key={p.id} value={String(p.id)}>
-                                {p.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              {outboundLegs.length > 0 && (
+                <TransportLegGroup
+                  title="Chiều đi"
+                  legs={outboundLegs}
+                  needs={needs}
+                  setNeeds={setNeeds}
+                  pickupPoints={sitePickupPoints}
+                  disabled={readOnly}
+                />
+              )}
+              {inboundLegs.length > 0 && (
+                <TransportLegGroup
+                  title="Chiều về"
+                  legs={inboundLegs}
+                  needs={needs}
+                  setNeeds={setNeeds}
+                  pickupPoints={sitePickupPoints}
+                  disabled={readOnly}
+                />
+              )}
+              {otherLegs.length > 0 && (
+                <TransportLegGroup
+                  title="Chặng khác"
+                  legs={otherLegs}
+                  needs={needs}
+                  setNeeds={setNeeds}
+                  pickupPoints={sitePickupPoints}
+                  disabled={readOnly}
+                />
+              )}
+              {legs.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  BTC chưa cấu hình chặng xe cho sự kiện này.
+                </p>
+              )}
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="wish-note">Mong muốn/đề xuất</Label>
@@ -309,13 +457,14 @@ function RegistrationForm({
                   value={wishNote}
                   onChange={(e) => setWishNote(e.target.value)}
                   placeholder="Bạn có mong muốn hoặc đề xuất gì cho kỳ Team Building lần này?"
+                  disabled={readOnly}
                 />
                 <p className="text-xs text-muted-foreground">
                   BTC xem và xử lý thủ công. Hệ thống không cam kết đáp ứng.
                 </p>
               </div>
 
-              {terms && (
+              {!readOnly && terms && (
                 <label className="flex items-start gap-2 text-sm">
                   <Checkbox
                     className="mt-1"
@@ -325,27 +474,130 @@ function RegistrationForm({
                   <span>{terms.terms_text}</span>
                 </label>
               )}
+              {!readOnly && !terms && termsError && (
+                <EmptyState
+                  variant="error"
+                  title="Không tải được quy định chương trình"
+                  description="Vui lòng tải lại trang. Bạn cần đọc và đồng ý quy định trước khi gửi đăng ký."
+                />
+              )}
             </>
           )}
 
-          <div className="flex gap-2">
-            <Button disabled={!canSubmit} onClick={() => submitMutation.mutate()}>
-              {registration.status === "submitted" ? "Cập nhật đăng ký" : "Gửi đăng ký"}
-            </Button>
-            {registration.status === "submitted" && (
-              <Button
-                variant="outline"
-                disabled={cancelMutation.isPending}
-                onClick={() => {
-                  if (confirm("Bạn chắc chắn muốn huỷ đăng ký?")) cancelMutation.mutate();
-                }}
-              >
-                Huỷ đăng ký
+          {!readOnly && (
+            <div className="flex gap-2">
+              <Button disabled={!canSubmit} onClick={() => submitMutation.mutate()}>
+                {registration.status === "submitted" ? "Cập nhật đăng ký" : "Gửi đăng ký"}
               </Button>
-            )}
-          </div>
+              {registration.status === "submitted" && (
+                <ConfirmDialog
+                  trigger={
+                    <Button variant="outline" disabled={cancelMutation.isPending}>
+                      Huỷ đăng ký
+                    </Button>
+                  }
+                  title="Huỷ đăng ký?"
+                  description={
+                    <div className="flex flex-col gap-2 pt-2 text-left">
+                      <p>
+                        Hành động này cần liên hệ BTC nếu bạn muốn đăng ký lại sau đó.
+                      </p>
+                      <Label htmlFor="cancel-reason">Lý do (không bắt buộc)</Label>
+                      <Textarea
+                        id="cancel-reason"
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        placeholder="Cho BTC biết lý do bạn huỷ..."
+                      />
+                    </div>
+                  }
+                  confirmLabel="Huỷ đăng ký"
+                  destructive
+                  onConfirm={() => cancelMutation.mutate(cancelReason)}
+                />
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function TransportLegGroup({
+  title,
+  legs,
+  needs,
+  setNeeds,
+  pickupPoints,
+  disabled,
+}: {
+  title: string;
+  legs: TransportLeg[];
+  needs: Record<number, TransportNeed>;
+  setNeeds: React.Dispatch<React.SetStateAction<Record<number, TransportNeed>>>;
+  pickupPoints: PickupPoint[];
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <Label>Nhu cầu xe đưa đón — {title}</Label>
+      {legs.map((leg) => {
+        const need = needs[leg.id];
+        const missingPickup = need?.is_needed && !need.pickup_point_id;
+        return (
+          <div key={leg.id} className="flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-2">
+              <Checkbox
+                checked={need?.is_needed ?? false}
+                disabled={disabled}
+                onCheckedChange={(checked) =>
+                  setNeeds((prev) => ({
+                    ...prev,
+                    [leg.id]: {
+                      leg_id: leg.id,
+                      is_needed: checked === true,
+                      pickup_point_id: prev[leg.id]?.pickup_point_id ?? null,
+                    },
+                  }))
+                }
+              />
+              {leg.name}
+            </label>
+            {need?.is_needed && (
+              <>
+                <Select
+                  value={need.pickup_point_id ? String(need.pickup_point_id) : undefined}
+                  onValueChange={(v) =>
+                    setNeeds((prev) => ({
+                      ...prev,
+                      [leg.id]: { ...prev[leg.id], pickup_point_id: Number(v) },
+                    }))
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Điểm đón/trả" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pickupPoints.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {pickupPoints.length === 0 && (
+                  <p className="text-xs text-muted-foreground">BTC chưa cấu hình điểm đón</p>
+                )}
+                {missingPickup && (
+                  <p className="text-xs text-destructive">Chọn điểm đón trước khi gửi</p>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

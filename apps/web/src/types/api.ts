@@ -156,6 +156,7 @@ export type Registration = {
   is_participating: boolean | null;
   shift_id: number | null;
   wish_note: string | null;
+  terms_version: string | null;
   submitted_at: string | null;
   cancelled_at: string | null;
   transport_needs: TransportNeed[];

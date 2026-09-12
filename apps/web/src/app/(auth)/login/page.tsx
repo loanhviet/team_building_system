@@ -1,7 +1,9 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { BrandMark } from "@/components/domain/brand-mark";
@@ -10,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api";
-import { toast } from "sonner";
 
 const schema = z.object({
   email: z.string().email("Email không hợp lệ"),
@@ -22,6 +23,8 @@ type FormValues = z.infer<typeof schema>;
 export default function LoginPage() {
   const { login } = useAuth();
   const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -29,6 +32,7 @@ export default function LoginPage() {
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   const onSubmit = async (values: FormValues) => {
+    setLoginError(null);
     try {
       const user = await login(values.email, values.password);
       if (user.must_change_password) {
@@ -41,8 +45,7 @@ export default function LoginPage() {
         router.push("/");
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Đăng nhập thất bại";
-      toast.error(message);
+      setLoginError(err instanceof ApiError ? err.message : "Đăng nhập thất bại");
     }
   };
 
@@ -80,19 +83,46 @@ export default function LoginPage() {
                 Dùng email công ty BTC đã cấp tài khoản.
               </p>
             </div>
+            {loginError && (
+              <div
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {loginError}
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" autoComplete="email" {...register("email")} />
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                autoFocus
+                aria-invalid={!!errors.email}
+                {...register("email")}
+              />
               {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Mật khẩu</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                {...register("password")}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  aria-invalid={!!errors.password}
+                  className="pr-10"
+                  {...register("password")}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
               {errors.password && (
                 <p className="text-sm text-destructive">{errors.password.message}</p>
               )}
@@ -100,6 +130,9 @@ export default function LoginPage() {
             <Button type="submit" disabled={isSubmitting} className="self-start px-5">
               {isSubmitting ? "Đang đăng nhập..." : "Vào cổng"}
             </Button>
+            <p className="text-xs text-muted-foreground">
+              Quên mật khẩu? Liên hệ BTC để được cấp lại.
+            </p>
           </div>
         </form>
       </main>

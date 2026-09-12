@@ -14,6 +14,7 @@ from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.models.auth import User
+from app.models.enums import EventStatus
 from app.models.event import Event, PickupPoint, Shift, TransportLeg
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
@@ -37,6 +38,13 @@ from app.services.registration_service import (
 )
 
 router = APIRouter(prefix="/events/{event_id}/registrations", tags=["registrations"])
+# Unscoped counterpart to `GET /events/{event_id}/registrations/me`: once an
+# event leaves registration_open, GET /events/current returns null, so the
+# CBNV frontend has no event_id left to ask the scoped endpoint with — they'd
+# lose the ability to see what they submitted the moment the window closed.
+# This lets the register page find "my most relevant registration" without
+# already knowing which event it belongs to.
+me_router = APIRouter(prefix="/registrations", tags=["registrations"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
 settings = get_settings()
@@ -70,10 +78,31 @@ async def _registration_out(db: DbSession, reg: Registration) -> RegistrationOut
         is_participating=reg.is_participating,
         shift_id=reg.shift_id,
         wish_note=reg.wish_note,
+        terms_version=reg.terms_version,
         submitted_at=reg.submitted_at,
         cancelled_at=reg.cancelled_at,
         transport_needs=[TransportNeedOut.model_validate(n) for n in needs],
     )
+
+
+@me_router.get("/me", response_model=RegistrationOut | None)
+async def get_my_latest_registration(db: DbSession, user: CurrentUser) -> RegistrationOut | None:
+    """The most recent registration for this employee whose event hasn't
+    fully wrapped up — doesn't auto-create a draft (unlike the scoped
+    endpoint), since there may be no event_id to create one against."""
+    employee = await _current_employee(db, user)
+    result = await db.execute(
+        select(Registration)
+        .join(Event, Event.id == Registration.event_id)
+        .where(
+            Registration.employee_id == employee.id,
+            Event.status != EventStatus.event_completed,
+        )
+        .order_by(Registration.id.desc())
+        .limit(1)
+    )
+    reg = result.scalar_one_or_none()
+    return await _registration_out(db, reg) if reg is not None else None
 
 
 @router.get("/me", response_model=RegistrationOut)
