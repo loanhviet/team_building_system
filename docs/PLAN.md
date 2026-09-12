@@ -522,16 +522,50 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       `next build` sạch
 - **Xong khi:** 2 trình duyệt cùng chọn 1 ghế → chỉ 1 thành công, bên kia thấy ghế đổi trạng thái tức thì
 
-### Phase 8 — Chat RAG (Qdrant)
-- [ ] `services/rag/providers/`: interface `LLMProvider` + `EmbeddingProvider`, implement Anthropic + OpenAI + local, chọn qua env
-- [ ] Ingest: chuyển dữ liệu event thành `rag_documents` (lịch trình, thông báo, quy định, thông tin khách sạn,
-      FAQ do BTC nhập) + tài liệu cá nhân hoá (hành trình của từng CBNV) với `scope`
-- [ ] Task `reindex_rag`: chunk → embed → upsert Qdrant (payload có `event_id`, `scope`, `scope_ref_id`)
-- [ ] Retrieval **có lọc quyền**: filter Qdrant theo `scope in ['public']` OR `scope_ref_id == user.employee_id`
-      — tuyệt đối không để CBNV hỏi ra thông tin người khác
-- [ ] `POST /api/chat/sessions/{id}/messages` streaming SSE, trả kèm citations
-- [ ] FE: trang chat, hiển thị nguồn trích dẫn, gợi ý câu hỏi mẫu
-- **Xong khi:** hỏi "mấy giờ tôi tập trung ở sân bay?" trả đúng theo dữ liệu cá nhân, và không lộ dữ liệu người khác
+### Phase 8 — Chat RAG (Qdrant) ✅ (2026-09-12)
+- [x] `services/rag/providers/`: `LLMProvider`/`EmbeddingProvider` là Protocol (interface thật). **Chỉ hiện
+      thực 1 provider cụ thể mỗi loại** (Anthropic cho LLM, local/fastembed cho embedding) thay vì cả
+      Anthropic+OpenAI+local như bản nháp — hiện thực OpenAI khi chưa ai dùng chỉ là code chết đằng sau 1
+      interface đã đủ dùng; thêm sau chỉ tốn 1 file + 1 nhánh trong factory
+- [x] **Đổi model embedding:** kế hoạch gốc ghi "intfloat/multilingual-e5-small" nhưng fastembed không hỗ
+      trợ biến thể `-small` (chỉ có `-large`, nặng hơn) → đổi sang
+      `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (384 chiều, ONNX qua fastembed, không
+      cần torch, không cần tiền tố "query:"/"passage:" như họ E5)
+- [x] Ingest (`services/rag/ingest.py`): 1 `rag_document` cho mỗi schedule_item đã publish, announcement đã
+      publish, terms_text, mỗi khách sạn (đều `scope=public`) + 1 tài liệu "hành trình cá nhân" cho mỗi CBNV
+      `submitted`+`is_participating` (`scope=employee`, `scope_ref_id=employee_id`) — tái dùng thẳng
+      `journey_service.build_journey()` thay vì suy diễn lại dữ liệu chuyến bay/xe/phòng. Tài liệu cá nhân
+      **chỉ tạo khi event đã ở trạng thái publish**, giống đúng quy tắc hiển thị của trang Journey
+- [x] `reindex_rag_task` (ARQ, admin bấm `POST /events/{id}/rag/reindex`): diff theo checksum nội dung —
+      tài liệu không đổi thì không re-embed lại (đã kiểm chứng: đổi giờ 1 xe → chỉ 12/24 tài liệu bị
+      re-embed, đúng bằng số CBNV thực sự đi xe đó)
+- [x] Retrieval lọc quyền (`services/rag/qdrant_store.py`): filter Qdrant dạng `Filter(should=[...])` lồng
+      trong `must` — 1 Filter chỉ có `should` bắt buộc ít nhất 1 điều kiện khớp, nhờ vậy `scope=public OR
+      (scope=employee AND scope_ref_id=me)` trở thành điều kiện bắt buộc chứ không chỉ để tính điểm
+- [x] `POST /api/chat/sessions/{id}/messages` streaming SSE + citations. Việc gọi LLM chỉ thực sự chạy khi
+      generator SSE bắt đầu iterate (không phải lúc gọi hàm) nên lỗi (thiếu API key, rate limit...) xảy ra
+      **sau khi** header response đã gửi — generator bắt exception và trả 1 SSE event `{"error": ...}` thay
+      vì để connection chết giữa chừng; ghi tin nhắn assistant dùng 1 `AsyncSessionLocal` mới mở ngay trong
+      generator, không dùng `db` request-scoped (FastAPI có thể đã đóng dependency `yield` trước khi
+      generator của StreamingResponse chạy xong)
+- [x] FE: `/chat` — SSE tự parse bằng `fetch()` + `ReadableStream` (EventSource không gửi được POST body),
+      hiển thị citation dạng badge, gợi ý câu hỏi mẫu khi chưa có tin nhắn nào
+- **Bug bắt được khi rebuild:** `docker compose build api` **không** rebuild image `worker` dù cả hai cùng
+      dùng chung Dockerfile/context ở `apps/api` — compose coi mỗi service là build target riêng trừ khi
+      cùng khai báo `image:`. Từ giờ mọi thay đổi ở `apps/api` phải `docker compose build api worker` (hoặc
+      build không tham số), không chỉ `build api`
+- **Giới hạn đã biết:** chưa cấu hình `ANTHROPIC_API_KEY` thật trong môi trường này nên **không** kiểm chứng
+      được nội dung câu trả lời LLM thực tế — toàn bộ phần còn lại (ingest, checksum-diff, lưu Qdrant, lọc
+      quyền khi retrieval, lưu/đọc session và message, xử lý lỗi SSE) đã kiểm chứng đầy đủ qua Qdrant thật.
+      Cache model fastembed nằm trong filesystem tạm của container (không phải volume) nên container mới sẽ
+      tải lại model lần đầu dùng (~150 giây) — chấp nhận được cho MVP, có thể mount volume riêng sau nếu cần
+- **Đã kiểm chứng:** reindex ra 24 tài liệu; retrieval với `employee_id=2` chỉ trả tài liệu hành trình của
+      chính họ (không bao giờ thấy tài liệu của employee 3), và ngược lại — đúng yêu cầu bảo mật cốt lõi;
+      gửi chat message không có API key thật vẫn lưu đúng tin nhắn user và trả lỗi SSE sạch. `ruff check`,
+      `next lint`, `next build` sạch
+- **Xong khi:** hỏi "mấy giờ tôi tập trung ở sân bay?" trả đúng theo dữ liệu cá nhân, và không lộ dữ liệu
+      người khác — **retrieval đã chứng minh đúng; câu trả lời cuối cùng cần `ANTHROPIC_API_KEY` thật để BTC
+      tự kiểm chứng nốt**
 
 ### Phase 9 — Hoàn thiện
 - [ ] Admin Dashboard (mục 10): tổng CBNV, đã/chưa đăng ký, theo ca, nhu cầu xe từng chặng, tình trạng slot bay, tình trạng phân xe/phòng
