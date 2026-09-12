@@ -131,6 +131,51 @@ export type EventTerms = {
   terms_version: string;
 };
 
+export type Hotel = {
+  id: number;
+  event_id: number;
+  name: string;
+  address: string | null;
+  checkin_date: string | null;
+  checkout_date: string | null;
+  note: string | null;
+};
+
+export type Room = {
+  id: number;
+  hotel_id: number;
+  room_number: string;
+  room_type_id: number | null;
+  capacity: number;
+  note: string | null;
+  occupied: number;
+};
+
+export type RoomAssignment = {
+  id: number;
+  room_id: number;
+  employee_id: number;
+  source: "manual" | "import";
+  employee_code: string | null;
+  full_name: string;
+  team_name: string | null;
+  hotel_name: string;
+  room_number: string;
+  assigned_at: string | null;
+};
+
+export type UnassignedEmployee = {
+  employee_id: number;
+  employee_code: string | null;
+  full_name: string;
+};
+
+export type ImportResult = {
+  ok_rows: number;
+  error_rows: number;
+  errors: { row: number; error: string }[];
+};
+
 export type Flight = {
   id: number;
   event_id: number;
