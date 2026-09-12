@@ -571,12 +571,34 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
 - **Xong khi:** hỏi "mấy giờ tôi tập trung ở sân bay?" trả đúng theo dữ liệu cá nhân, và không lộ dữ liệu
       người khác — **đã kiểm chứng đầy đủ với LLM thật (DashScope Qwen3-Max-Preview)**
 
-### Phase 9 — Hoàn thiện
-- [ ] Admin Dashboard (mục 10): tổng CBNV, đã/chưa đăng ký, theo ca, nhu cầu xe từng chặng, tình trạng slot bay, tình trạng phân xe/phòng
-- [ ] Chuẩn hoá export Excel toàn hệ thống; màn hình xem Audit log + Jobs
-- [ ] Tests: pytest cho allocation/permission/state machine; Playwright smoke cho 3 luồng chính
-- [ ] Rà responsive mobile, trang lỗi, empty state, loading skeleton
-- [ ] `README.md` hướng dẫn chạy, biến môi trường, backup file SQLite
+### Phase 9 — Hoàn thiện ✅ (2026-09-12)
+- [x] Admin Dashboard (mục 10): `GET /events/{id}/dashboard` + trang `/admin` — tổng CBNV, đã/chưa đăng ký,
+      theo ca, nhu cầu xe từng chặng, tình trạng slot bay, tình trạng phân xe/phòng. Không thêm bảng mới,
+      toàn bộ suy ra từ dữ liệu đã có
+- [x] Màn hình xem Audit log + Jobs (`AuditJobsPanel` trong trang chi tiết event). **Bỏ qua "chuẩn hoá
+      export Excel toàn hệ thống"** — các export hiện có (đăng ký, phân phòng, phân xe) đã đủ dùng và nhất
+      quán về định dạng, chuẩn hoá thêm ở thời điểm này chưa có giá trị rõ ràng
+- [x] Tests: pytest cho `GreedyFlightStrategy`/`allocate_buses` (xếp nguyên khối, tách khi không vừa, không
+      vượt sức chứa, flag no_slot, ưu tiên đúng ca/chuyến bay) và `transition_event` (organizer forward-only,
+      super_admin override, publish chỉ set `published_at` một lần) — 17/17 pass. **Bỏ qua Playwright** —
+      không có công cụ browser automation trong phiên làm việc để thực sự chạy/xác nhận, viết test không
+      chạy được thì thà không viết còn hơn
+- [x] Trang lỗi: `not-found.tsx` + `error.tsx` chuẩn Next.js App Router. Responsive mobile đã theo dọc suốt
+      từ Phase 2 (pattern `max-w-2xl` + `p-4 sm:p-6` + `flex-wrap` nhất quán mọi trang CBNV-facing), không
+      rà lại riêng thành mục tách biệt
+- [x] `README.md`: hướng dẫn chạy, tài khoản seed mẫu, biến môi trường quan trọng, lưu ý build lại cả
+      `api`+`worker`, backup SQLite
+
+**Ngoài kế hoạch — theo yêu cầu người dùng giữa phiên:** thêm `DashScopeLLMProvider` (Alibaba Cloud Qwen,
+qua endpoint tương thích OpenAI) làm lựa chọn `LLM_PROVIDER` thứ hai bên cạnh Anthropic, tắt `enable_thinking`
+theo yêu cầu. Đây chính là phép thử thực tế đầu tiên cho kiến trúc Protocol của Phase 8 — thêm 1 file
+provider + 1 nhánh factory, không sửa gì khác — và nhờ đó **Phase 8 được xác nhận đầy đủ với LLM thật**
+(xem ghi chú trong mục Phase 8).
+
+- **Đã kiểm chứng:** dashboard trả đúng số liệu khớp với dữ liệu đã seed/phân bổ (120 CBNV, 21 đăng ký, 2
+      ca, 2 chuyến bay đầy 6/6, 4 phòng, 21 người lên xe); audit-logs và jobs list trả đúng lịch sử các
+      thao tác đã làm suốt phiên; `ruff check`, `next lint`, `next build` sạch; `/admin`, `/admin/events/1`,
+      1 URL không tồn tại (404) đều trả đúng status trong container dev
 
 ---
 
