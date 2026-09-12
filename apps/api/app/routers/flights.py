@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
@@ -29,10 +30,12 @@ from app.schemas.flight import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.notification.email_service import enqueue_email
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
+settings = get_settings()
 
 REQUIRED_IMPORT_HEADERS = {"flight_code", "direction", "capacity"}
 
@@ -233,8 +236,13 @@ async def list_allocation_runs(
 
 @router.post("/flight-assignments/adjust")
 async def adjust_flight_assignments(
-    event_id: int, payload: AdjustAssignmentRequest, db: DbSession, user: AdminUser
+    event_id: int,
+    payload: AdjustAssignmentRequest,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
+    event = await master_data.get_or_404(db, Event, event_id)
     target_flight = await master_data.get_or_404(db, Flight, payload.flight_id, event_id=event_id)
 
     result = await db.execute(
@@ -295,4 +303,21 @@ async def adjust_flight_assignments(
         )
 
     await db.commit()
+
+    if event.status.value in ("information_published", "event_started"):
+        for employee_id in payload.employee_ids:
+            employee = await db.get(Employee, employee_id)
+            if employee is None:
+                continue
+            await enqueue_email(
+                db, queue, event_id=event_id, to_email=employee.email,
+                template_code="flight_changed",
+                payload={
+                    "full_name": employee.full_name, "event_name": event.name,
+                    "app_url": settings.app_base_url,
+                },
+                dedupe_key=f"flight_changed:{event_id}:{employee_id}:{utcnow().isoformat()}",
+            )
+        await db.commit()
+
     return {"moved": len(payload.employee_ids), "warnings": warnings}

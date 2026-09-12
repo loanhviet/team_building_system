@@ -1,9 +1,11 @@
 from typing import Annotated
 
+from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, require_admin
+from app.core.queue import get_queue
 from app.models.auth import User
 from app.models.enums import EventStatus
 from app.models.event import Event
@@ -115,7 +117,11 @@ async def update_event(
 
 @router.post("/{event_id}/transition", response_model=EventOut)
 async def transition_event_status(
-    event_id: int, payload: EventTransition, db: DbSession, user: AdminUser
+    event_id: int,
+    payload: EventTransition,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> EventOut:
     event = await master_data.get_or_404(db, Event, event_id)
     before_status = event.status.value
@@ -132,4 +138,8 @@ async def transition_event_status(
     )
     await db.commit()
     await db.refresh(event)
+
+    if payload.status == EventStatus.information_published:
+        await queue.enqueue_job("send_bulk_emails_task", event_id, "info_published")
+
     return _event_out(event)

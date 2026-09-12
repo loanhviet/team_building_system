@@ -26,8 +26,10 @@ from app.routers import (
     health,
     hotels,
     jobs,
+    journey,
     registrations,
     room_assignments,
+    schedule,
     sites,
     teams,
 )
@@ -72,3 +74,5 @@ app.include_router(flights.router, prefix="/api")
 app.include_router(hotels.router, prefix="/api")
 app.include_router(room_assignments.router, prefix="/api")
 app.include_router(buses.router, prefix="/api")
+app.include_router(schedule.router, prefix="/api")
+app.include_router(journey.router, prefix="/api")

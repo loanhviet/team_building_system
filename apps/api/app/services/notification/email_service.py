@@ -19,7 +19,32 @@ DEFAULT_TEMPLATES = {
             "</ul>"
             "<p><a href='{{ app_url }}'>Xem chi tiết trên hệ thống</a></p>"
         ),
-    }
+    },
+    "info_published": {
+        "subject": "Thông tin hành trình {{ event_name }} đã được công bố",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>BTC đã công bố thông tin chuyến bay, xe đưa đón, khách sạn và lịch trình cho "
+            "<b>{{ event_name }}</b>.</p>"
+            "<p><a href='{{ app_url }}'>Xem hành trình của bạn</a></p>"
+        ),
+    },
+    "flight_changed": {
+        "subject": "Thay đổi thông tin chuyến bay - {{ event_name }}",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>Thông tin chuyến bay của bạn cho <b>{{ event_name }}</b> vừa được BTC cập nhật.</p>"
+            "<p><a href='{{ app_url }}'>Xem chi tiết mới nhất</a></p>"
+        ),
+    },
+    "bus_changed": {
+        "subject": "Thay đổi thông tin xe đưa đón - {{ event_name }}",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>Thông tin xe đưa đón của bạn cho <b>{{ event_name }}</b> vừa được BTC cập nhật.</p>"
+            "<p><a href='{{ app_url }}'>Xem chi tiết mới nhất</a></p>"
+        ),
+    },
 }
 
 

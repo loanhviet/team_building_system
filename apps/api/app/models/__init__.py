@@ -7,10 +7,12 @@ from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
 from app.models.notification import EmailOutbox, EmailTemplate
 from app.models.organization import Employee, Site, Team
 from app.models.registration import Registration, RegistrationTransportNeed
+from app.models.schedule import Announcement, ScheduleItem
 from app.models.system import AllocationRun, ImportBatch, Job
 
 __all__ = [
     "AllocationRun",
+    "Announcement",
     "AuditLog",
     "Bus",
     "BusAssignment",
@@ -31,6 +33,7 @@ __all__ = [
     "Room",
     "RoomAssignment",
     "RoomType",
+    "ScheduleItem",
     "Shift",
     "Site",
     "Team",
