@@ -413,13 +413,19 @@ async def seed_schedule(db: AsyncSession, event: Event) -> None:
 
 async def run_allocations(db: AsyncSession, event: Event, legs: list[TransportLeg], organizer_id: int) -> None:
     for direction in ("outbound", "inbound"):
-        run = AllocationRun(event_id=event.id, type="flight", status="running", created_by=organizer_id)
+        run = AllocationRun(
+            event_id=event.id, type="flight", status="running", created_by=organizer_id,
+            params_json={"direction": direction},
+        )
         db.add(run)
         await db.flush()
         await run_flight_allocation(db, event.id, direction, None, run.id)
 
     for leg in legs:
-        run = AllocationRun(event_id=event.id, type="bus", status="running", created_by=organizer_id)
+        run = AllocationRun(
+            event_id=event.id, type="bus", status="running", created_by=organizer_id,
+            params_json={"leg_id": leg.id},
+        )
         db.add(run)
         await db.flush()
         await run_bus_allocation(db, event.id, leg.id, run.id)

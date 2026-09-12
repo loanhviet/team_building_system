@@ -94,7 +94,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const { data: history } = useQuery({
     queryKey: ["events", eventId, "allocations", "bus"],
     queryFn: () => apiFetch<AllocationRun[]>(`/api/events/${eventId}/allocations/bus/history`),
-    enabled: historyOpen,
   });
 
   const { data: assignments, refetch: refetchAssignments } = useQuery({
@@ -220,10 +219,20 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
     },
   });
 
-  const summary = job?.result_json as
-    | { total_needed: number; total_assigned: number; total_flagged: number;
-        buses: { bus_id: number; capacity: number; assigned: number; remaining: number }[] }
-    | undefined;
+  type BusAllocationSummary = {
+    total_needed: number;
+    total_assigned: number;
+    total_flagged: number;
+    buses: { bus_id: number; capacity: number; assigned: number; remaining: number }[];
+  };
+
+  // Same fallback as the flights panel: without this, the summary card (and
+  // any per-bus remaining count) only ever appeared right after running an
+  // allocation in this exact tab, not on a normal page load.
+  const latestRunForLeg = history?.find(
+    (run) => run.status === "succeeded" && (run.params_json as { leg_id?: number } | null)?.leg_id === currentLegId,
+  );
+  const summary = (job?.result_json ?? latestRunForLeg?.summary_json) as BusAllocationSummary | undefined;
 
   const teamName = (id: number) => teams?.find((t) => t.id === id)?.name ?? `#${id}`;
 

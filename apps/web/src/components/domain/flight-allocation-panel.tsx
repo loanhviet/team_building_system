@@ -85,7 +85,6 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const { data: history } = useQuery({
     queryKey: ["events", eventId, "allocations", "flight"],
     queryFn: () => apiFetch<AllocationRun[]>(`/api/events/${eventId}/allocations?type_filter=flight`),
-    enabled: historyOpen,
   });
   const { data: assignments, refetch: refetchAssignments } = useQuery({
     queryKey: ["events", eventId, "flight-assignments", direction],
@@ -199,14 +198,23 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.status, job?.id]);
 
-  const summary = job?.result_json as
-    | {
-        total_submitted: number;
-        total_assigned: number;
-        total_flagged: number;
-        split_team_ids: number[];
-        flights: { flight_id: number; capacity: number; assigned: number; remaining: number }[];
-      }
+  type FlightAllocationSummary = {
+    total_submitted: number;
+    total_assigned: number;
+    total_flagged: number;
+    split_team_ids: number[];
+    flights: { flight_id: number; capacity: number; assigned: number; remaining: number }[];
+  };
+
+  // A fresh run's job.result_json wins while it's live in this tab; otherwise
+  // fall back to the latest persisted run for this direction, so "Còn trống"
+  // still reflects reality on a normal page load, not just right after
+  // someone clicks "Chạy phân bổ tự động" in the same session.
+  const latestRunForDirection = history?.find(
+    (run) => run.status === "succeeded" && (run.params_json as { direction?: string } | null)?.direction === direction,
+  );
+  const summary = (job?.result_json ?? latestRunForDirection?.summary_json) as
+    | FlightAllocationSummary
     | undefined;
   const remainingByFlight = new Map(summary?.flights.map((f) => [f.flight_id, f.remaining]) ?? []);
   const teamName = (id: number) => teams?.find((t) => t.id === id)?.name ?? `#${id}`;

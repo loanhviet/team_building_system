@@ -35,14 +35,32 @@ function collectItemLabels(children: React.ReactNode): Record<string, React.Reac
 function Select<Value, Multiple extends boolean | undefined = false>({
   children,
   items,
+  value,
   ...props
 }: SelectPrimitive.Root.Props<Value, Multiple>) {
   const derivedItems = React.useMemo(
     () => items ?? collectItemLabels(children),
     [items, children]
   )
+  // Base UI's Select latches "controlled vs. uncontrolled" from whether the
+  // `value` prop is defined on the very first render, via a plain useRef —
+  // it never re-checks. Every Select here that derives its value from a
+  // query result (e.g. "default to the first item once the list loads")
+  // necessarily starts as `value={undefined}`, so it gets stuck permanently
+  // uncontrolled: later prop updates are silently ignored and the trigger
+  // keeps showing the placeholder until the user manually reselects. Forcing
+  // one remount the first time a real value shows up re-runs that latch with
+  // the real value already in place.
+  const [prevValue, setPrevValue] = React.useState(value)
+  const [mountGeneration, setMountGeneration] = React.useState(0)
+  if (value !== prevValue) {
+    setPrevValue(value)
+    if (value != null && prevValue == null) {
+      setMountGeneration((n) => n + 1)
+    }
+  }
   return (
-    <SelectPrimitive.Root items={derivedItems} {...props}>
+    <SelectPrimitive.Root key={mountGeneration} items={derivedItems} value={value} {...props}>
       {children}
     </SelectPrimitive.Root>
   )
