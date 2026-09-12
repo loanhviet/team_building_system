@@ -215,6 +215,32 @@ export type ImportResult = {
   errors: { row: number; error: string }[];
 };
 
+export type Dashboard = {
+  total_employees: number;
+  registered_count: number;
+  not_registered_count: number;
+  participating_count: number;
+  not_participating_count: number;
+  by_shift: { shift_name: string; count: number }[];
+  transport_need_by_leg: { leg_name: string; count: number }[];
+  flight_slots: { flight_code: string; direction: string; capacity: number; assigned: number }[];
+  rooms_assigned: number;
+  rooms_total_capacity: number;
+  buses_assigned: number;
+};
+
+export type AuditLogEntry = {
+  id: number;
+  actor_user_id: number | null;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  before_json: Record<string, unknown> | null;
+  after_json: Record<string, unknown> | null;
+  reason: string | null;
+  created_at: string;
+};
+
 export type ChatSession = {
   id: number;
   event_id: number;
