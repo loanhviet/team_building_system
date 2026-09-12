@@ -283,7 +283,10 @@ async def hold_seat(
 
     await publish_gala_event(
         redis, event_id,
-        {"type": "seat_update", "seat_id": seat.id, "status": "held", "held_by_team_id": team_id},
+        {
+            "type": "seat_update", "seat_id": seat.id, "status": "held", "held_by_team_id": team_id,
+            "hold_expires_at": seat.hold_expires_at.isoformat(),
+        },
     )
     return seat
 

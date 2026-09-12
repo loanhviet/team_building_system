@@ -7,7 +7,7 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0-R3 xong (R2,R3 chưa click-through Chrome thật), R4 chưa bắt đầu
+Ngày lập: 2026-09-12 · Trạng thái: R0-R4 xong (R2-R4 chưa click-through Chrome thật), R5 chưa bắt đầu
 
 ---
 
@@ -593,38 +593,70 @@ Cần làm khi có điều kiện, bắt buộc trước R6. Khung 390px cũng c
 đúng, mất kết nối rồi nối lại bảng vẫn khớp server.
 
 **Backend (phần chưa nằm trong R1):**
-- [ ] `gala_service.py` — hàm trả về turn queue đầy đủ (danh sách turn theo `order_no` kèm tên team,
-      không chỉ turn active) nếu `GalaStateOut` schema chưa có sẵn field này, bổ sung
+- [x] `gala_service.py` — **đã có sẵn**: `_turns_out()` (`routers/gala.py`) đã trả toàn bộ turn theo
+      `order_no` kèm `team_name`, không chỉ turn active; `GalaStateOut.turns` đã đúng shape. Không cần
+      sửa gì — chỉ FE chưa dùng hết dữ liệu này (giờ đã dùng, xem bên dưới)
+- [x] *Phát sinh khi làm, không có trong checklist gốc:* `GalaSeatOut` **thiếu** `hold_expires_at` dù
+      model đã lưu — thêm vào schema + đưa vào payload WS `seat_update` khi `hold` (trước đó FE không
+      thể tự đếm ngược giữ ghế vì API không trả field này)
 
 **CBNV — `app/(employee)/gala/[eventId]/page.tsx` + `gala-seat-map.tsx`:**
-- [ ] Sửa bộ đếm quota: hiện đúng "số ghế Team đang-tới-lượt đã chọn / quota của chính Team đó" khi
-      không phải lượt của mình; giữ hiện số của mình khi đúng lượt mình
-- [ ] Thêm dải hàng chờ: "Bạn: thứ N · đang tới lượt: Team X" dùng danh sách turn đầy đủ ở trên
-- [ ] Sửa nhãn trạng thái theo đúng `gala_configs.status` (setup/drawing/in_progress/finished) qua `lib/labels.ts`
-- [ ] Hiện tên Team trên mỗi ghế đã confirmed (tooltip + nếu đủ chỗ thì text trên ghế), phân biệt màu
-      "Team mình" rõ hơn viền hiện tại
-- [ ] Thêm đếm ngược hold (`hold_expires_at`) cạnh đếm ngược lượt
-- [ ] `heldMine` đổi từ `find` sang `filter` — nút "Bỏ chọn" xử lý nhiều ghế đang giữ
-- [ ] Seat button ≥ 44px, thêm `aria-label`, `aria-pressed`; bọc floor plan trong container `overflow-auto`
-      có chỉ báo "vuốt để xem" trên mobile
-- [ ] `lib/use-gala-ws.ts` — khi `onopen` sau reconnect, gọi `queryClient.invalidateQueries` cho
-      `["events", id, "gala", "state"]`; thêm state `connected` hiện chấm xanh/đỏ trên UI
+- [x] Sửa bộ đếm quota: đổi từ đếm ghế đã confirmed của **Team mình** sang đếm của **Team đang tới
+      lượt** (`activeTeamConfirmedCount`) — verify bằng dữ liệu seed thật: trước fix, leader Sales
+      (13 ghế đã confirmed) xem lúc Customer Success đang chọn sẽ thấy "13/12 ghế" (vô lý, vượt quota
+      của Team khác); sau fix thấy đúng "0/12 ghế"
+- [x] Dải hàng chờ: liệt kê toàn bộ turn theo thứ tự (pill có viền/gạch ngang theo trạng thái) +
+      dòng "Team bạn: thứ N trong hàng chờ" (N = vị trí trong các Team còn `waiting`, không tính Team
+      đã xong) — verify bằng trace tay trên dữ liệu seed thật (8 turn, my_team ở các vị trí done/waiting
+      khác nhau) khớp kỳ vọng
+- [x] Nhãn trạng thái qua `galaConfigStatusLabel`/`galaSeatStatusLabel` (`lib/labels.ts`, R2)
+- [x] Tên Team trên mỗi ghế confirmed qua `title`/`aria-label` (tooltip); ghế Team mình đổi hẳn màu nền
+      sang `--lantern` thay vì chỉ viền — phân biệt rõ hơn nhiều so với các Team khác (đều cùng màu lagoon)
+- [x] Đếm ngược hold cạnh nút "Bỏ chọn" — dùng `hold_expires_at` mới thêm ở trên
+- [x] `heldMine` đổi `find`→`filter`; render 1 nút "Bỏ chọn ghế N" cho từng ghế đang giữ
+- [x] Seat 44px (từ 28px, `CLUSTER` tăng theo cho khỏi chồng bàn cạnh nhau); `aria-label` mô tả đủ số
+      ghế + trạng thái + Team; `aria-pressed` cho ghế đang giữ/đã chọn của mình; dòng "Vuốt để xem" hiện
+      trên mobile (`sm:hidden`)
+- [x] `lib/use-gala-ws.ts` — thêm callback `onOpen` (gọi `invalidateQueries` mỗi khi (re)connect) + trả
+      về `{ connected }`; trang CBNV hiện chấm xanh/đỏ + chữ "Đang cập nhật trực tiếp"/"Mất kết nối..."
+- [x] Tách `useCountdown` ra `lib/use-countdown.ts` dùng chung CBNV + Admin (trước đó định nghĩa lặp
+      lại trong 1 file, giờ 1 nguồn)
 
 **Admin — `components/domain/gala-admin-panel.tsx`:**
-- [ ] Dialog "Sửa cấu hình" nạp giá trị hiện có từ `state.config` khi mở, không dùng hằng số mặc định (`:38-40`)
-- [ ] Thêm nút "Mở/Đóng chọn ghế cho CBNV" (đổi `gala_configs.status` tường minh, không chỉ side-effect
-      của draw/start) — cần thêm field/endpoint nếu backend chưa hỗ trợ set status trực tiếp
-- [ ] Bọc nút "Bốc thăm" bằng `<ConfirmDialog>`; vô hiệu hoá + ẩn hoàn toàn nếu `turns` đã tồn tại (rõ
-      ràng "không thể bốc lại", không chỉ disable im lặng)
-- [ ] Bọc "Bỏ qua lượt" bằng `<ConfirmDialog>`
-- [ ] Thêm sửa/xoá bàn (không chỉ kéo x/y)
-- [ ] Hiện đếm ngược cho lượt đang chạy trên màn hình admin
-- [ ] Dịch nhãn trạng thái qua `lib/labels.ts`
+- [x] Dialog "Sửa cấu hình" nạp giá trị thật từ `state.config` khi mở (`openConfigDialog`), không còn
+      hằng số mặc định `"Gala Dinner"/60/30` ghi đè lên cấu hình đã lưu
+- [ ] ~~Nút "Mở/Đóng chọn ghế cho CBNV"~~ — **quyết định không làm**: cơ chế lượt đã tự gate hoàn toàn
+      ai được thao tác khi nào (`hold`/`confirm` đòi hỏi có turn `status=active` đúng Team — không có
+      turn active thì không ai thao tác được, tương đương "đã đóng"). Thêm 1 field `is_open` riêng cho
+      `GalaConfig.status` có nguy cơ tạo trạng thái mâu thuẫn (config nói "đóng" nhưng turn vẫn active)
+      mà BRD không yêu cầu rõ; để trống thay vì làm nửa vời
+- [x] "Bốc thăm" bọc `<ConfirmDialog>` + **ẩn hẳn** (không chỉ disable) khi đã có turn, thay bằng dòng
+      chữ "Đã bốc thăm — không thể bốc lại"
+- [x] "Bỏ qua lượt" bọc `<ConfirmDialog destructive>`, mô tả nêu rõ tên Team sẽ mất lượt
+- [x] Sửa/xoá bàn: thêm `EditTableDialog` (code/số ghế/hình) + danh sách bàn dạng Card với nút Sửa/Xoá;
+      xoá là soft-delete (`PATCH is_active:false`) — **phát sinh khi làm**: endpoint cũ set `is_active`
+      mà không kiểm tra ghế đang giữ/confirmed trong bàn, có thể "xoá" một bàn còn ghế đã xác nhận (ẩn
+      khỏi sơ đồ nhưng vẫn tính vào quota Team) — thêm chặn 409 `seats_in_use` ở router + test route mới
+- [x] Đếm ngược lượt đang chạy hiện cạnh "Đang chọn: Team X"
+- [x] Nhãn trạng thái qua `lib/labels.ts` (trạng thái config + từng turn trong "Thứ tự bốc thăm")
 
 **Nghiệm thu:** Chrome 2 tab cùng lúc — tab A giữ ghế, tab B thấy ghế chuyển "đang giữ" theo thời gian
 thực; cả 2 cùng bấm xác nhận 1 ghế → chỉ 1 tab thành công, tab kia nhận lỗi rõ ràng.
 
-**Đã kiểm chứng:** _(điền khi xong)_
+**Đã kiểm chứng:** `ruff` sạch, `pytest` **46/46** (thêm 1 test route mới: xoá bàn còn ghế confirmed →
+409, xoá sau khi ghế trống → 200). `tsc --noEmit` + `next lint` sạch. Verify bằng curl thật trên dữ liệu
+seed (event 1, đã bốc thăm 8 Team, đang ở lượt Customer Success):
+- `GET /gala/state` trả `hold_expires_at` trong mỗi seat; hold 1 ghế → response có `hold_expires_at`
+  tương lai đúng bằng `hold_ttl_seconds`; release → về `null` — khớp thiết kế đếm ngược
+- Đối chiếu trực tiếp SQLite: Team Sales (my_team của nv001) có 13 ghế confirmed trong khi Team đang
+  active (Customer Success) có 0 — xác nhận cụ thể bug bộ đếm quota cũ sẽ hiện "13/12 ghế" sai, bug này
+  không còn tái hiện với code mới (đếm đúng theo `activeTurn.team_id`)
+- Admin: tạo bàn test → sửa code → xoá (`is_active:false`, ghế đang trống) → `200`; test route riêng
+  xác nhận xoá bị chặn `409` khi có ghế confirmed
+- `/gala/1` (CBNV) và `/admin/events/1/gala` đều trả 200 qua curl
+**Chưa click-through Chrome thật** (extension không kết nối được — xem R2/R3). Đặc biệt cần làm trước
+R6: kịch bản "2 tab cùng bấm 1 ghế" chỉ có thể verify thật bằng trình duyệt, curl tuần tự không mô
+phỏng được race condition đồng thời.
 
 ---
 

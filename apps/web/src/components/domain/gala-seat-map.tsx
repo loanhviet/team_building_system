@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { galaSeatStatusLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import type { GalaSeat, GalaState, GalaTable } from "@/types/api";
 
-const SEAT_SIZE = 28;
-const CLUSTER = 148;
+// 44px meets the minimum recommended touch target; the old 28px was roughly
+// a third of that. CLUSTER (the per-table allocated box) grew to match so
+// bigger seats don't spill into a neighboring table's box.
+const SEAT_SIZE = 44;
+const CLUSTER = 180;
 
 const SEAT_TONE: Record<GalaSeat["status"], string> = {
   available: "bg-[var(--ticket)] border-[var(--lagoon)] text-[var(--night)]",
@@ -38,6 +42,7 @@ export function GalaSeatMap({
   isMyTurn = false,
   arrange = false,
   blockMode = false,
+  teamNameById,
   onSeatClick,
   onTableMove,
 }: {
@@ -46,6 +51,9 @@ export function GalaSeatMap({
   isMyTurn?: boolean;
   arrange?: boolean;
   blockMode?: boolean;
+  /** team_id -> tên Team, để hiện trên ghế đã confirmed. Chỉ cần cho các Team
+   * đã có lượt (state.turns) — đủ vì ghế chỉ được confirm qua luồng lượt. */
+  teamNameById?: Record<number, string>;
   onSeatClick?: (seat: GalaSeat) => void;
   onTableMove?: (tableId: number, x: number, y: number) => void;
 }) {
@@ -90,89 +98,103 @@ export function GalaSeatMap({
   }, [arrange]);
 
   return (
-    <div className="overflow-auto border border-[var(--rule)] bg-[#e8eef1]">
-      <div className="bg-[var(--night)] px-4 py-3 text-center">
-        <p className="font-display text-sm tracking-wide text-[#fbf6ee]">
-          {state.config?.stage_label ?? "Sân khấu"}
-        </p>
-        <div className="mx-auto mt-2 h-1.5 w-2/3 bg-[var(--lantern)]/80" />
-      </div>
-      <div ref={floorRef} className="relative" style={{ width: maxX, height: maxY, minHeight: 380 }}>
-        {tables.map((table) => {
-          const pos = livePos[table.id] ?? { x: table.x, y: table.y };
-          const seats = state.seats
-            .filter((s) => s.table_id === table.id)
-            .sort((a, b) => a.seat_number - b.seat_number);
-          return (
-            <div
-              key={table.id}
-              className={cn("absolute", arrange && "cursor-grab active:cursor-grabbing")}
-              style={{ left: pos.x, top: pos.y, width: CLUSTER, height: CLUSTER }}
-              onPointerDown={(e) => {
-                if (!arrange || blockMode) return;
-                if ((e.target as HTMLElement).closest("button[data-seat]")) return;
-                const rect = floorRef.current?.getBoundingClientRect();
-                if (!rect) return;
-                drag.current = {
-                  id: table.id,
-                  dx: e.clientX - rect.left - pos.x,
-                  dy: e.clientY - rect.top - pos.y,
-                  x: pos.x,
-                  y: pos.y,
-                };
-                (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-              }}
-            >
+    <div className="flex flex-col gap-1">
+      <p className="text-xs text-muted-foreground sm:hidden">Vuốt ngang/dọc để xem toàn bộ sơ đồ</p>
+      <div className="overflow-auto border border-[var(--rule)] bg-[#e8eef1]">
+        <div className="bg-[var(--night)] px-4 py-3 text-center">
+          <p className="font-display text-sm tracking-wide text-[#fbf6ee]">
+            {state.config?.stage_label ?? "Sân khấu"}
+          </p>
+          <div className="mx-auto mt-2 h-1.5 w-2/3 bg-[var(--lantern)]/80" />
+        </div>
+        <div ref={floorRef} className="relative" style={{ width: maxX, height: maxY, minHeight: 380 }}>
+          {tables.map((table) => {
+            const pos = livePos[table.id] ?? { x: table.x, y: table.y };
+            const seats = state.seats
+              .filter((s) => s.table_id === table.id)
+              .sort((a, b) => a.seat_number - b.seat_number);
+            return (
               <div
-                className={cn(
-                  "absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center border border-[var(--night)]/20 bg-[var(--ticket)] shadow-[inset_0_0_0_6px_rgba(14,124,134,0.12)]",
-                  table.shape === "round" ? "size-[72px] rounded-full" : "h-[58px] w-[86px] rounded-sm",
-                )}
+                key={table.id}
+                className={cn("absolute", arrange && "cursor-grab active:cursor-grabbing")}
+                style={{ left: pos.x, top: pos.y, width: CLUSTER, height: CLUSTER }}
+                onPointerDown={(e) => {
+                  if (!arrange || blockMode) return;
+                  if ((e.target as HTMLElement).closest("button[data-seat]")) return;
+                  const rect = floorRef.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  drag.current = {
+                    id: table.id,
+                    dx: e.clientX - rect.left - pos.x,
+                    dy: e.clientY - rect.top - pos.y,
+                    x: pos.x,
+                    y: pos.y,
+                  };
+                  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                }}
               >
-                <p className="font-display text-sm leading-none">{table.code}</p>
+                <div
+                  className={cn(
+                    "absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center border border-[var(--night)]/20 bg-[var(--ticket)] shadow-[inset_0_0_0_6px_rgba(14,124,134,0.12)]",
+                    table.shape === "round" ? "size-[72px] rounded-full" : "h-[58px] w-[86px] rounded-sm",
+                  )}
+                >
+                  <p className="font-display text-sm leading-none">{table.code}</p>
+                </div>
+                {seats.map((seat, index) => {
+                  const off = seatOffset(index, seats.length, table.shape);
+                  const mineHeld = seat.held_by_team_id === state.my_team_id;
+                  const mineConfirmed = seat.status === "confirmed" && seat.team_id === state.my_team_id;
+                  const seatTeamName = seat.team_id != null ? teamNameById?.[seat.team_id] : undefined;
+                  const canAct =
+                    !arrange &&
+                    !blockMode &&
+                    canSelect &&
+                    isMyTurn &&
+                    (seat.status === "available" || mineHeld);
+                  const statusText = galaSeatStatusLabel(seat.status);
+                  const label = `Ghế ${seat.label ?? seat.seat_number} — ${statusText}${
+                    seatTeamName ? ` (${seatTeamName})` : ""
+                  }${mineConfirmed ? " — Team bạn" : ""}`;
+                  return (
+                    <button
+                      key={seat.id}
+                      type="button"
+                      data-seat
+                      disabled={
+                        blockMode
+                          ? seat.status === "held" || seat.status === "confirmed"
+                          : seat.status === "blocked" || (!canAct && !mineConfirmed && !blockMode)
+                      }
+                      onClick={() => onSeatClick?.(seat)}
+                      title={label}
+                      aria-label={label}
+                      aria-pressed={mineHeld || mineConfirmed}
+                      className={cn(
+                        "absolute grid place-items-center border text-[11px] font-medium",
+                        table.shape === "round" ? "rounded-full" : "rounded-sm",
+                        SEAT_TONE[seat.status],
+                        // own team's confirmed seats get a distinct fill, not
+                        // just a ring, so they stand out among every other
+                        // team's identically-teal confirmed seats
+                        mineConfirmed && "bg-[var(--lantern)] border-[var(--lantern)]",
+                        (mineHeld || mineConfirmed) && "ring-2 ring-[var(--lantern)] ring-offset-1",
+                      )}
+                      style={{
+                        width: SEAT_SIZE,
+                        height: SEAT_SIZE,
+                        left: CLUSTER / 2 + off.x - SEAT_SIZE / 2,
+                        top: CLUSTER / 2 + off.y - SEAT_SIZE / 2,
+                      }}
+                    >
+                      {seat.seat_number}
+                    </button>
+                  );
+                })}
               </div>
-              {seats.map((seat, index) => {
-                const off = seatOffset(index, seats.length, table.shape);
-                const mineHeld = seat.held_by_team_id === state.my_team_id;
-                const mineConfirmed = seat.status === "confirmed" && seat.team_id === state.my_team_id;
-                const canAct =
-                  !arrange &&
-                  !blockMode &&
-                  canSelect &&
-                  isMyTurn &&
-                  (seat.status === "available" || mineHeld);
-                return (
-                  <button
-                    key={seat.id}
-                    type="button"
-                    data-seat
-                    disabled={
-                      blockMode
-                        ? seat.status === "held" || seat.status === "confirmed"
-                        : seat.status === "blocked" || (!canAct && !mineConfirmed && !blockMode)
-                    }
-                    onClick={() => onSeatClick?.(seat)}
-                    title={`Ghế ${seat.label ?? seat.seat_number} — ${seat.status}`}
-                    className={cn(
-                      "absolute grid place-items-center border text-[10px] font-medium",
-                      table.shape === "round" ? "rounded-full" : "rounded-sm",
-                      SEAT_TONE[seat.status],
-                      (mineHeld || mineConfirmed) && "ring-2 ring-[var(--lantern)]",
-                    )}
-                    style={{
-                      width: SEAT_SIZE,
-                      height: SEAT_SIZE,
-                      left: CLUSTER / 2 + off.x - SEAT_SIZE / 2,
-                      top: CLUSTER / 2 + off.y - SEAT_SIZE / 2,
-                    }}
-                  >
-                    {seat.seat_number}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -188,13 +210,14 @@ export function GalaLegend() {
         <span className="size-3 rounded-full bg-amber-300" /> Đang chọn
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--lagoon)]" /> Đã xác nhận
+        <span className="size-3 rounded-full bg-[var(--lagoon)]" /> Đã xác nhận (Team khác)
       </span>
       <span className="flex items-center gap-1.5">
         <span className="size-3 rounded-full bg-[var(--night)]/25" /> Khoá
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full ring-2 ring-[var(--lantern)]" /> Team bạn
+        <span className="size-3 rounded-full bg-[var(--lantern)] ring-2 ring-[var(--lantern)] ring-offset-1" />{" "}
+        Team bạn
       </span>
     </div>
   );

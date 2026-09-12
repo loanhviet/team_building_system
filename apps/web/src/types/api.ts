@@ -380,6 +380,7 @@ export type GalaSeat = {
   label: string | null;
   status: GalaSeatStatus;
   held_by_team_id: number | null;
+  hold_expires_at: string | null;
   team_id: number | null;
   version: number;
 };

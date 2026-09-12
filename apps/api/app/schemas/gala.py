@@ -67,6 +67,7 @@ class GalaSeatOut(BaseModel):
     label: str | None
     status: str
     held_by_team_id: int | None
+    hold_expires_at: datetime | None
     team_id: int | None
     version: int
 

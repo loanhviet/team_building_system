@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { GalaLegend, GalaSeatMap } from "@/components/domain/gala-seat-map";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -27,21 +28,23 @@ import {
 } from "@/components/ui/select";
 import { apiFetch, ApiError } from "@/lib/api";
 import { applyGalaMessage } from "@/lib/gala-sync";
+import { galaConfigStatusLabel, galaTurnStatusLabel } from "@/lib/labels";
+import { useCountdown } from "@/lib/use-countdown";
 import { useGalaWebSocket } from "@/lib/use-gala-ws";
 import type { GalaConfig, GalaSeat, GalaState, GalaTable, GalaTurn } from "@/types/api";
+
+const DEFAULT_CONFIG_FORM = { name: "Gala Dinner", stageLabel: "Sân khấu", turnDuration: "60", holdTtl: "30" };
 
 export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const queryKey = ["events", eventId, "gala", "state"];
   const [configOpen, setConfigOpen] = useState(false);
-  const [name, setName] = useState("Gala Dinner");
-  const [stageLabel, setStageLabel] = useState("Sân khấu");
-  const [turnDuration, setTurnDuration] = useState("60");
-  const [holdTtl, setHoldTtl] = useState("30");
+  const [configForm, setConfigForm] = useState(DEFAULT_CONFIG_FORM);
   const [tableOpen, setTableOpen] = useState(false);
   const [tableCode, setTableCode] = useState("");
   const [tableSeatCount, setTableSeatCount] = useState("8");
   const [tableShape, setTableShape] = useState<"round" | "rect">("round");
+  const [editingTable, setEditingTable] = useState<GalaTable | null>(null);
   const [blockMode, setBlockMode] = useState(false);
 
   const { data: state } = useQuery({
@@ -57,15 +60,29 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey });
 
+  const openConfigDialog = () => {
+    if (state?.config) {
+      setConfigForm({
+        name: state.config.name,
+        stageLabel: state.config.stage_label,
+        turnDuration: String(state.config.turn_duration_seconds),
+        holdTtl: String(state.config.hold_ttl_seconds),
+      });
+    } else {
+      setConfigForm(DEFAULT_CONFIG_FORM);
+    }
+    setConfigOpen(true);
+  };
+
   const saveConfigMutation = useMutation({
     mutationFn: () =>
       apiFetch<GalaConfig>(`/api/events/${eventId}/gala/config`, {
         method: "PUT",
         body: JSON.stringify({
-          name,
-          stage_label: stageLabel,
-          turn_duration_seconds: Number(turnDuration),
-          hold_ttl_seconds: Number(holdTtl),
+          name: configForm.name,
+          stage_label: configForm.stageLabel,
+          turn_duration_seconds: Number(configForm.turnDuration),
+          hold_ttl_seconds: Number(configForm.holdTtl),
         }),
       }),
     onSuccess: () => {
@@ -93,6 +110,34 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
       invalidate();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const updateTableMutation = useMutation({
+    mutationFn: ({ id, ...payload }: { id: number; code: string; seat_count: number; shape: string }) =>
+      apiFetch<GalaTable>(`/api/events/${eventId}/gala/tables/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      toast.success("Đã cập nhật bàn");
+      setEditingTable(null);
+      invalidate();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const deleteTableMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<GalaTable>(`/api/events/${eventId}/gala/tables/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: false }),
+      }),
+    onSuccess: () => {
+      toast.success("Đã xoá bàn");
+      invalidate();
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Không xoá được bàn"),
   });
 
   const drawMutation = useMutation({
@@ -140,13 +185,16 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không khoá được ghế"),
   });
 
-  const hasActive = !!state?.turns.find((t) => t.status === "active");
+  const activeTurn = state?.turns.find((t) => t.status === "active");
+  const activeTurnRemaining = useCountdown(activeTurn?.expires_at ?? null);
   const hasWaiting = !!state?.turns.find((t) => t.status === "waiting");
+  const hasAnyTurns = !!state && state.turns.length > 0;
+  const activeTables = (state?.tables ?? []).filter((t) => t.is_active);
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+        <Dialog open={configOpen} onOpenChange={(open) => (open ? openConfigDialog() : setConfigOpen(false))}>
           <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
             {state?.config ? "Sửa cấu hình" : "Tạo cấu hình Gala"}
           </DialogTrigger>
@@ -157,28 +205,44 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="gala-name">Tên</Label>
-                <Input id="gala-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input
+                  id="gala-name"
+                  value={configForm.name}
+                  onChange={(e) => setConfigForm((f) => ({ ...f, name: e.target.value }))}
+                />
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="stage-label">Nhãn sân khấu</Label>
-                <Input id="stage-label" value={stageLabel} onChange={(e) => setStageLabel(e.target.value)} />
+                <Input
+                  id="stage-label"
+                  value={configForm.stageLabel}
+                  onChange={(e) => setConfigForm((f) => ({ ...f, stageLabel: e.target.value }))}
+                />
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="turn-duration">Thời gian mỗi lượt (giây)</Label>
                 <Input
                   id="turn-duration"
                   type="number"
-                  value={turnDuration}
-                  onChange={(e) => setTurnDuration(e.target.value)}
+                  value={configForm.turnDuration}
+                  onChange={(e) => setConfigForm((f) => ({ ...f, turnDuration: e.target.value }))}
                 />
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="hold-ttl">Thời gian giữ ghế (giây)</Label>
-                <Input id="hold-ttl" type="number" value={holdTtl} onChange={(e) => setHoldTtl(e.target.value)} />
+                <Input
+                  id="hold-ttl"
+                  type="number"
+                  value={configForm.holdTtl}
+                  onChange={(e) => setConfigForm((f) => ({ ...f, holdTtl: e.target.value }))}
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button disabled={!name || saveConfigMutation.isPending} onClick={() => saveConfigMutation.mutate()}>
+              <Button
+                disabled={!configForm.name || saveConfigMutation.isPending}
+                onClick={() => saveConfigMutation.mutate()}
+              >
                 Lưu
               </Button>
             </DialogFooter>
@@ -229,29 +293,47 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           </DialogContent>
         </Dialog>
 
-        <Button
-          size="sm"
-          disabled={!state?.config || (state.turns.length > 0) || drawMutation.isPending}
-          onClick={() => drawMutation.mutate()}
-        >
-          Bốc thăm thứ tự Team
-        </Button>
+        {hasAnyTurns ? (
+          <p className="text-xs text-muted-foreground">
+            Đã bốc thăm — không thể bốc lại (thứ tự Team đã cố định)
+          </p>
+        ) : (
+          <ConfirmDialog
+            trigger={
+              <Button size="sm" disabled={!state?.config || drawMutation.isPending}>
+                Bốc thăm thứ tự Team
+              </Button>
+            }
+            title="Bốc thăm thứ tự Team?"
+            description="Thứ tự sẽ cố định ngay sau khi bốc — không thể bốc lại. Chỉ bốc khi đã chốt danh sách đăng ký."
+            confirmLabel="Bốc thăm"
+            onConfirm={() => drawMutation.mutate()}
+          />
+        )}
         <Button
           size="sm"
           variant="outline"
-          disabled={!hasWaiting || hasActive || startMutation.isPending}
+          disabled={!hasWaiting || !!activeTurn || startMutation.isPending}
           onClick={() => startMutation.mutate()}
         >
           Bắt đầu lượt
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!hasActive || skipMutation.isPending}
-          onClick={() => skipMutation.mutate()}
-        >
-          Bỏ qua lượt
-        </Button>
+        <ConfirmDialog
+          trigger={
+            <Button size="sm" variant="outline" disabled={!activeTurn || skipMutation.isPending}>
+              Bỏ qua lượt
+            </Button>
+          }
+          title="Bỏ qua lượt hiện tại?"
+          description={
+            activeTurn
+              ? `Team "${activeTurn.team_name}" sẽ mất lượt này, mọi ghế đang giữ sẽ được nhả. Chuyển sang Team tiếp theo.`
+              : undefined
+          }
+          confirmLabel="Bỏ qua"
+          destructive
+          onConfirm={() => skipMutation.mutate()}
+        />
         <Button
           size="sm"
           variant={blockMode ? "default" : "outline"}
@@ -265,11 +347,21 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
       </div>
 
       {state?.config && (
-        <p className="text-sm text-muted-foreground">
-          Trạng thái: <Badge variant="outline">{state.config.status}</Badge> — {state.tables.length} bàn,{" "}
-          {state.seats.length} ghế
-          {blockMode ? " — bấm ghế trống để khoá/mở" : " — kéo bàn để xếp sơ đồ"}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>
+            Trạng thái: <Badge variant="outline">{galaConfigStatusLabel(state.config.status)}</Badge>
+          </span>
+          <span>
+            {state.tables.length} bàn, {state.seats.length} ghế
+          </span>
+          {activeTurn && (
+            <span>
+              Đang chọn: <b>{activeTurn.team_name}</b>
+              {activeTurnRemaining !== null && ` — còn ${activeTurnRemaining}s`}
+            </span>
+          )}
+          <span>{blockMode ? "— bấm ghế trống để khoá/mở" : "— kéo bàn để xếp sơ đồ"}</span>
+        </div>
       )}
 
       {state?.config && (
@@ -287,6 +379,49 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
       )}
       <GalaLegend />
 
+      {activeTables.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Danh sách bàn</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {activeTables.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-2 border-b border-[var(--rule)] py-1.5 text-sm last:border-0">
+                <span>
+                  <b>{t.code}</b> — {t.seat_count} ghế, {t.shape === "round" ? "tròn" : "chữ nhật"}
+                </span>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => setEditingTable(t)}>
+                    Sửa
+                  </Button>
+                  <ConfirmDialog
+                    trigger={
+                      <Button size="sm" variant="ghost" className="text-destructive">
+                        Xoá
+                      </Button>
+                    }
+                    title={`Xoá bàn ${t.code}?`}
+                    description="Bàn sẽ bị ẩn khỏi sơ đồ. Không xoá được nếu còn ghế đang giữ/đã xác nhận trong bàn."
+                    confirmLabel="Xoá"
+                    destructive
+                    onConfirm={() => deleteTableMutation.mutate(t.id)}
+                  />
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {editingTable && (
+        <EditTableDialog
+          table={editingTable}
+          onClose={() => setEditingTable(null)}
+          onSave={(payload) => updateTableMutation.mutate({ id: editingTable.id, ...payload })}
+          pending={updateTableMutation.isPending}
+        />
+      )}
+
       {state && state.turns.length > 0 && (
         <Card>
           <CardHeader>
@@ -299,12 +434,76 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                 variant={t.status === "active" ? "default" : "outline"}
                 className={t.status === "done" || t.status === "skipped" || t.status === "expired" ? "opacity-50" : undefined}
               >
-                #{t.order_no} {t.team_name} ({t.seat_quota} ghế) — {t.status}
+                #{t.order_no} {t.team_name} ({t.seat_quota} ghế) — {galaTurnStatusLabel(t.status)}
               </Badge>
             ))}
           </CardContent>
         </Card>
       )}
     </div>
+  );
+}
+
+function EditTableDialog({
+  table,
+  onClose,
+  onSave,
+  pending,
+}: {
+  table: GalaTable;
+  onClose: () => void;
+  onSave: (payload: { code: string; seat_count: number; shape: string }) => void;
+  pending: boolean;
+}) {
+  const [code, setCode] = useState(table.code);
+  const [seatCount, setSeatCount] = useState(String(table.seat_count));
+  const [shape, setShape] = useState<"round" | "rect">(table.shape);
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Sửa bàn {table.code}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="edit-table-code">Mã bàn</Label>
+            <Input id="edit-table-code" value={code} onChange={(e) => setCode(e.target.value)} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="edit-table-seats">Số ghế</Label>
+            <Input
+              id="edit-table-seats"
+              type="number"
+              value={seatCount}
+              onChange={(e) => setSeatCount(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Giảm số ghế sẽ thất bại nếu ghế bị cắt đang được giữ/xác nhận.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Hình bàn</Label>
+            <Select value={shape} onValueChange={(v) => setShape((v as "round" | "rect") ?? "round")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="round">Tròn</SelectItem>
+                <SelectItem value="rect">Chữ nhật</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={!code || pending}
+            onClick={() => onSave({ code, seat_count: Number(seatCount), shape })}
+          >
+            Lưu
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

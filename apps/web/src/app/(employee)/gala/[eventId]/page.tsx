@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { use, useEffect, useState } from "react";
+import { use } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/domain/empty-state";
 import { GalaLegend, GalaSeatMap } from "@/components/domain/gala-seat-map";
@@ -10,26 +10,11 @@ import { Button } from "@/components/ui/button";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { applyGalaMessage } from "@/lib/gala-sync";
+import { galaConfigStatusLabel } from "@/lib/labels";
+import { useCountdown } from "@/lib/use-countdown";
 import { useGalaWebSocket } from "@/lib/use-gala-ws";
+import { cn } from "@/lib/utils";
 import type { GalaSeat, GalaState } from "@/types/api";
-
-function useCountdown(expiresAt: string | null) {
-  const [remaining, setRemaining] = useState<number | null>(null);
-  useEffect(() => {
-    const tick = () => {
-      if (!expiresAt) {
-        setRemaining(null);
-        return;
-      }
-      setRemaining(Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 1000)));
-    };
-    tick();
-    if (!expiresAt) return;
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [expiresAt]);
-  return remaining;
-}
 
 export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId: eventIdStr } = use(params);
@@ -45,17 +30,40 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
     queryFn: () => apiFetch<GalaState>(`/api/events/${eventId}/gala/state`),
   });
 
-  useGalaWebSocket(eventId, (raw) => {
-    queryClient.setQueryData<GalaState | undefined>(queryKey, (prev) =>
-      prev ? applyGalaMessage(prev, raw as Record<string, unknown>) : prev,
-    );
-  });
+  const { connected } = useGalaWebSocket(
+    eventId,
+    (raw) => {
+      queryClient.setQueryData<GalaState | undefined>(queryKey, (prev) =>
+        prev ? applyGalaMessage(prev, raw as Record<string, unknown>) : prev,
+      );
+    },
+    () => queryClient.invalidateQueries({ queryKey }),
+  );
 
-  const activeTurn = state?.turns.find((t) => t.status === "active");
+  const orderedTurns = [...(state?.turns ?? [])].sort((a, b) => a.order_no - b.order_no);
+  const activeTurn = orderedTurns.find((t) => t.status === "active");
   const remaining = useCountdown(activeTurn?.expires_at ?? null);
   const isMyTurn = canSelect && !!activeTurn && activeTurn.team_id === state?.my_team_id;
-  const myConfirmedCount =
-    state?.seats.filter((s) => s.status === "confirmed" && s.team_id === state.my_team_id).length ?? 0;
+  // the quota progress shown must always be *the team whose turn it is*, not
+  // the viewer's own team — showing "my" count next to someone else's quota
+  // was the actual bug here
+  const activeTeamConfirmedCount =
+    state?.seats.filter((s) => s.status === "confirmed" && s.team_id === activeTurn?.team_id)
+      .length ?? 0;
+
+  const teamNameById: Record<number, string> = {};
+  for (const t of orderedTurns) teamNameById[t.team_id] = t.team_name ?? `Team #${t.team_id}`;
+
+  const myTurnIndex = orderedTurns.findIndex((t) => t.team_id === state?.my_team_id);
+  const myWaitPosition =
+    myTurnIndex >= 0 && orderedTurns[myTurnIndex]?.status === "waiting"
+      ? orderedTurns.filter((t, i) => i <= myTurnIndex && t.status === "waiting").length
+      : null;
+
+  const heldMine = (state?.seats ?? []).filter((s) => s.held_by_team_id === state?.my_team_id);
+  // called unconditionally (before any early return) — hooks can't be
+  // called conditionally, so this can't move down next to where it's used
+  const holdRemaining = useCountdown(heldMine[0]?.hold_expires_at ?? null);
 
   const holdMutation = useMutation({
     mutationFn: (seatId: number) =>
@@ -92,8 +100,6 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
     );
   }
 
-  const heldMine = state.seats.find((s) => s.held_by_team_id === state.my_team_id);
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -101,21 +107,55 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
           <p className="ticket-kicker">Sơ đồ chỗ ngồi</p>
           <h1 className="font-display text-3xl font-semibold">{state.config.name}</h1>
         </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span
+            className={cn("size-2 rounded-full", connected ? "bg-emerald-500" : "bg-destructive")}
+            aria-hidden
+          />
+          {connected ? "Đang cập nhật trực tiếp" : "Mất kết nối, đang thử lại..."}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
         {activeTurn ? (
           <div className="flex items-center gap-2 text-sm">
             <span>
-              Lượt của: <b>{activeTurn.team_name}</b> ({myConfirmedCount}/{activeTurn.seat_quota} ghế)
+              Lượt của: <b>{activeTurn.team_name}</b> ({activeTeamConfirmedCount}/{activeTurn.seat_quota} ghế)
             </span>
             {remaining !== null && (
               <Badge variant={remaining < 10 ? "destructive" : "outline"}>{remaining}s</Badge>
             )}
           </div>
         ) : (
+          <p className="text-sm text-muted-foreground">{galaConfigStatusLabel(state.config.status)}</p>
+        )}
+        {myWaitPosition !== null && (
           <p className="text-sm text-muted-foreground">
-            {state.config.status === "drawing" ? "BTC đã bốc thăm, chờ bắt đầu lượt" : "Chưa bắt đầu bốc thăm"}
+            Team bạn: thứ <b>{myWaitPosition}</b> trong hàng chờ
           </p>
         )}
       </div>
+
+      {orderedTurns.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {orderedTurns.map((t) => (
+            <span
+              key={t.id}
+              className={cn(
+                "rounded-full border px-2 py-0.5",
+                t.status === "active" && "border-primary bg-primary/10 font-medium",
+                t.status === "done" && "border-transparent text-muted-foreground line-through",
+                t.status === "waiting" && "border-[var(--rule)] text-muted-foreground",
+                t.status === "skipped" && "border-transparent text-muted-foreground/60 line-through",
+                t.status === "expired" && "border-transparent text-muted-foreground/60",
+                t.team_id === state.my_team_id && "ring-1 ring-[var(--lantern)]",
+              )}
+            >
+              {t.order_no}. {t.team_name}
+            </span>
+          ))}
+        </div>
+      )}
 
       {!canSelect && (
         <p className="text-xs text-muted-foreground">
@@ -123,12 +163,32 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
         </p>
       )}
 
-      <GalaSeatMap state={state} canSelect={canSelect} isMyTurn={isMyTurn} onSeatClick={onSeatClick} />
+      <GalaSeatMap
+        state={state}
+        canSelect={canSelect}
+        isMyTurn={isMyTurn}
+        teamNameById={teamNameById}
+        onSeatClick={onSeatClick}
+      />
 
-      {heldMine && isMyTurn && (
-        <Button size="sm" variant="outline" className="self-start" onClick={() => releaseMutation.mutate(heldMine.id)}>
-          Bỏ chọn ghế đang giữ
-        </Button>
+      {heldMine.length > 0 && isMyTurn && (
+        <div className="flex flex-wrap items-center gap-2">
+          {heldMine.map((seat) => (
+            <Button
+              key={seat.id}
+              size="sm"
+              variant="outline"
+              onClick={() => releaseMutation.mutate(seat.id)}
+            >
+              Bỏ chọn ghế {seat.label ?? seat.seat_number}
+            </Button>
+          ))}
+          {holdRemaining !== null && (
+            <span className="text-xs text-muted-foreground">
+              Giữ ghế còn {holdRemaining}s trước khi tự nhả
+            </span>
+          )}
+        </div>
       )}
 
       <GalaLegend />

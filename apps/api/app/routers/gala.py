@@ -133,6 +133,20 @@ async def update_table(
     table = await master_data.get_or_404(db, GalaTable, table_id, event_id=event_id)
     data = payload.model_dump(exclude_unset=True)
     new_seat_count = data.pop("seat_count", None)
+
+    if data.get("is_active") is False:
+        result = await db.execute(
+            select(GalaSeat.id).where(
+                GalaSeat.table_id == table.id, GalaSeat.status.in_(["held", "confirmed"])
+            )
+        )
+        if result.first() is not None:
+            raise AppError(
+                "seats_in_use",
+                "Không thể xoá bàn: còn ghế đang được giữ/đã xác nhận trong bàn này",
+                status.HTTP_409_CONFLICT,
+            )
+
     await master_data.update(db, table, data)
     if new_seat_count is not None and new_seat_count != table.seat_count:
         await resize_table_seats(db, table, new_seat_count)

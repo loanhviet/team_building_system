@@ -2,14 +2,19 @@ import type { GalaSeat, GalaState } from "@/types/api";
 
 export function applyGalaMessage(prev: GalaState, msg: Record<string, unknown>): GalaState {
   if (msg.type === "seat_update") {
+    const status = msg.status as GalaSeat["status"];
     return {
       ...prev,
       seats: prev.seats.map((s) =>
         s.id === msg.seat_id
           ? {
               ...s,
-              status: msg.status as GalaSeat["status"],
+              status,
               held_by_team_id: (msg.held_by_team_id as number | undefined) ?? null,
+              // every status other than "held" genuinely has no hold server-side;
+              // only "held" ever carries hold_expires_at in the message
+              hold_expires_at:
+                status === "held" ? ((msg.hold_expires_at as string | undefined) ?? null) : null,
               team_id: (msg.team_id as number | undefined) ?? s.team_id,
             }
           : s,
