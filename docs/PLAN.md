@@ -419,11 +419,26 @@ Sau mỗi phase: cập nhật `docs/PLAN.md`, commit.
       sạch, FE `next build`/`next lint` sạch, route `/admin/events/[id]` trả 200
 - **Xong khi:** chạy phân bổ cho 120 CBNV + ~6 chuyến, xem được báo cáo, chỉnh tay được và có cảnh báo đúng
 
-### Phase 4 — Module 2b: Khách sạn & phòng
-- [ ] Models: `hotels`, `room_types`, `rooms`, `room_assignments`
-- [ ] CRUD khách sạn/loại phòng/phòng + import danh sách phòng và **import kết quả phân phòng** từ Excel
-- [ ] Màn gán thủ công: danh sách CBNV chưa có phòng ↔ sơ đồ phòng, validate sức chứa
-- [ ] Export danh sách phân phòng
+### Phase 4 — Module 2b: Khách sạn & phòng ✅ (2026-09-12)
+- [x] Models: `hotels`, `room_types`, `rooms`, `room_assignments` (`room_assignments` UNIQUE
+      `(event_id, employee_id)` chứ không phải unique toàn cục trên `employee_id` — đúng tinh thần
+      multi-event, sửa lại so với bản nháp đầu vì suýt chặn 1 người có phòng ở 2 event khác nhau)
+- [x] CRUD khách sạn/loại phòng/phòng + import danh sách phòng và import kết quả phân phòng từ Excel —
+      cả hai đều chạy đồng bộ (cùng lý do như import chuyến bay ở Phase 3)
+- [x] Màn gán thủ công (`POST /room-assignments/assign`): danh sách CBNV chưa có phòng
+      (`GET .../unassigned`, join Registration submitted+participating thiếu row room_assignment) ↔ chọn
+      phòng; validate sức chứa **chặn cứng**, không có `force` như bên flight — đúng yêu cầu "không cho
+      vượt sức chứa" của phase này, không phải trường hợp cần BTC ghi đè
+- [x] Export danh sách phân phòng (`GET /room-assignments/export`, đồng bộ, .xlsx)
+- **Bug bắt được trước khi commit:** dựng `RoomAssignment` bằng `add()+flush()+commit()+db.refresh()`
+      rồi đọc `assignment.employee.team` ngay sau đó — `refresh()` trên AsyncSession không đảm bảo load
+      lại quan hệ (`lazy="joined"` chỉ áp dụng khi SQLAlchemy tự phát SELECT, không phải khi refresh()
+      column-only), rủi ro `MissingGreenlet`. Sửa bằng cách query lại tường minh với `selectinload` trước
+      khi serialize, thay vì tin vào `refresh()`
+- **Đã kiểm chứng qua curl:** tạo khách sạn + phòng capacity 2 → gán 2 người OK → người thứ 3 bị chặn
+      409 `room_full` → import file phòng mẫu + import file phân phòng mẫu (1 dòng cố tình sai mã NV, báo
+      lỗi đúng dòng) → export ra đúng danh sách. `ruff check`, `next lint`, `next build` sạch;
+      `/admin/events/[id]` trả 200
 - **Xong khi:** import được file phân phòng mẫu, gán tay được, không cho vượt sức chứa
 
 ### Phase 5 — Module 3: Xe & điều phối
