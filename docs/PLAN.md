@@ -4,6 +4,14 @@
 > Ở Phase 0, copy file này thành `docs/PLAN.md` trong repo và cập nhật nó mỗi khi hoàn thành một phase
 > (đánh dấu `[x]`, ghi chú lệch so với plan). Các session sau chỉ cần đọc `docs/PLAN.md` là tiếp tục được.
 
+> **Cập nhật 2026-09-12:** Phase 0-13 dưới đây mô tả đúng lịch sử triển khai (kiến trúc, data model,
+> thuật toán phân bổ, migration — vẫn tra cứu ở đây). Nhưng sau khi dùng thử, hệ thống lộ ra nhiều
+> khoảng trống so với `docs/BRD.md` (dữ liệu demo rỗng, một số trường BRD bắt buộc không có ô nhập
+> trong Admin, lớp UI chưa hoàn thiện) — nguyên nhân gốc là 13 phase trước chưa từng click-through
+> bằng trình duyệt thật. **Nguồn sự thật cho công việc đang làm là
+> [`docs/REBUILD-PLAN.md`](REBUILD-PLAN.md)** (đợt làm lại R0-R6): đọc file đó trước khi sửa bất kỳ
+> phần nào của hệ thống.
+
 ---
 
 ## 1. Context
@@ -599,6 +607,71 @@ provider + 1 nhánh factory, không sửa gì khác — và nhờ đó **Phase 8
       ca, 2 chuyến bay đầy 6/6, 4 phòng, 21 người lên xe); audit-logs và jobs list trả đúng lịch sử các
       thao tác đã làm suốt phiên; `ruff check`, `next lint`, `next build` sạch; `/admin`, `/admin/events/1`,
       1 URL không tồn tại (404) đều trả đúng status trong container dev
+
+### Phase 10 — Portal CBNV (productization FE) ✅ (2026-09-12)
+- [x] Shell CBNV (`(employee)/layout` + `EmployeeShell`): header sticky, nav Đăng ký / Hành trình / Gala /
+      Hỏi đáp / Team (chỉ `team_leader`), bottom nav mobile, Đổi mật khẩu + Đăng xuất. Visual itinerary
+      (Be Vietnam Pro + Fraunces, palette forest) scoped trong `.employee-shell` — admin giữ zinc cũ
+- [x] Gate `must_change_password` → ép `/account`. `POST /api/auth/change-password` đã có từ Phase 1,
+      lần đầu có UI. Login redirect thẳng `/account` nếu flag bật
+- [x] `GET /auth/me` trả thêm `employee_code`, `phone`, `team_name`, `site_name`. `GET/PATCH /employees/me`
+      (chỉ SĐT) — CBNV không sửa họ tên/email/team (master data)
+- [x] Form đăng ký hiện card hồ sơ auto-fill (BRD 4.2) + sửa SĐT; empty/cancelled states rõ hơn
+- [x] Journey timeline 6 khối: cá nhân+Team, thông báo, bay, xe (điểm tập trung/giờ/trưởng xe), KS/phòng
+      (địa chỉ + checkin/checkout), Gala bàn/ghế, lịch trình. `JourneyOut` bổ sung `gala`, pickup, hotel
+      address, event dates/status
+- [x] Team Leader `/team`: `GET /events/{id}/team/roster` — leader chỉ thấy Team mình, employee 403,
+      admin bắt buộc `?team_id=`. FE bảng thành viên + CTA chọn ghế Gala
+- [x] Gala: CBNV thường xem-only; chỉ `team_leader`/BTC hold/confirm (BE vốn đã chặn, FE ẩn thao tác)
+- [x] Login có branding tiếng Việt, không forgot-password (để Phase 13)
+- **Không làm trong phase này:** tách admin workspace (Phase 11), kéo-thả sơ đồ Gala (Phase 12)
+- **Đã kiểm chứng:** `ruff check` sạch; pytest 22 pass (thêm 5 test `resolve_roster_team_id`); `next lint`
+      + `tsc --noEmit` sạch. Curl: `/auth/me` đủ hồ sơ; PATCH phone; journey trả gala/hotel/bus; roster
+      403 với employee, 403 khi leader xem team khác, 200 với team của mình. Các route FE `/login`
+      `/register` `/journey` `/account` `/team` `/chat` `/gala/1` trả 200. **Chưa** click-through trình
+      duyệt (không có browser automation trong phiên)
+
+### Phase 11 — Admin workspace ✅ (2026-09-12)
+- [x] Tách `/admin/events/[id]` thành sub-route: tổng quan, cấu hình, đăng ký, chuyến bay, xe, khách sạn,
+      Gala, lịch & TB, audit. Tab ngang (scroll trên mobile). Sidebar admin có hamburger + highlight
+      `pathname.startsWith`
+- [x] Event settings: PATCH ngày/điểm đến/cửa sổ ĐK; `GET/PUT /events/{id}/settings` cho terms + trọng số
+      phân bổ. Allocation runner đọc trọng số từ `event_settings` khi request không gửi weights
+- [x] CBNV admin: thêm/sửa, filter team/site, pagination 50, export Excel, file mẫu import. POST CBNV
+      tự tạo User (`must_change_password`, MK = employee_code)
+- [x] Đăng ký admin: cột ca + nhu cầu xe; filter status/team/ca
+- [x] Form chuyến bay đúng field (direction/ca/datetime, không gõ shift_id). Adjust **không** `force: true`
+      mặc định — 409 `over_capacity` rồi dialog ghi đè + bắt `reason`. Cùng pattern cho xe
+- [x] Super Admin `/admin/users`: list, đổi role, khoá/mở, reset MK về employee_code. BTC 403
+- **Đã kiểm chứng:** ruff sạch; pytest 25 pass; `tsc` + `next lint` sạch. Curl: settings GET/PUT, PATCH
+      event, employees `{total, items}`, users 403/200 theo role, registrations có `shift_name`/
+      `transport_summary`, import-template 200 xlsx, adjust không force → 409. Các route FE admin
+      sub-page trả 200. **Chưa** click-through trình duyệt
+
+### Phase 12 — Gala sơ đồ rạp ✅ (2026-09-12)
+- [x] Sơ đồ dùng chung `GalaSeatMap`: sân khấu trên, bàn tròn/chữ nhật, ghế xếp quanh bàn (không grid 4 cột),
+      4 màu + legend + viền lantern cho ghế Team mình
+- [x] Admin kéo bàn trên preview → `PATCH /tables/{id}` ghi x/y; bàn mới tự xếp lưới nếu không nhập toạ độ
+- [x] Khoá/mở ghế: `POST /seats/{id}/block` `{blocked}`. Chỉ khoá ghế trống
+- [x] Bốc thăm chỉ tạo thứ tự (`status=drawing`), không tự chạy lượt. `POST /turns/start` bắt đầu lượt
+      chờ; `POST /turns/skip` bỏ qua lượt đang chạy (nhả ghế đang hold) rồi sang Team tiếp
+- [x] CBNV thường xem-only; team_leader hold/confirm như cũ. Journey đã hiện bàn/ghế từ Phase 10
+- **Đã kiểm chứng:** ruff sạch; pytest 26 pass; `tsc` + `next lint` sạch. Curl: block/unblock ghế,
+      skip lượt 200, start 409 khi đang có lượt active (đúng). `/gala/1` và `/admin/events/1/gala` 200.
+      **Chưa** click-through trình duyệt
+
+### Phase 13 — Ops còn lại ✅ (2026-09-12)
+- [x] Template `schedule_changed` + `send_bulk_emails_task` khi tạo/sửa `schedule_items` (chỉ khi event đã
+      công bố; dedupe theo item+giờ để không spam)
+- [x] BTC sửa mẫu email: `GET/PUT /events/{id}/email-templates` + tab **Email** trên workspace sự kiện.
+      5 mẫu: đăng ký, công bố hành trình, đổi bay, đổi xe, đổi lịch
+- [x] **Không** làm forgot-password OTP — Super Admin reset MK (Phase 11) đủ MVP
+- [x] Export: phân bổ chuyến bay (xlsx), audit log (CSV). File mẫu import: chuyến bay, phòng, phân phòng
+      (CBNV đã có từ Phase 11)
+- [x] `EmptyState` dùng chung cho hành trình chưa công bố / chưa mở ĐK / Gala chưa cấu hình
+- **Đã kiểm chứng:** ruff sạch; pytest 29 pass; `tsc` + `next lint` sạch. Curl: 5 templates, PUT custom,
+      import-template/export 200, audit CSV có BOM utf-8, `/admin/events/1/emails` 200. **Chưa**
+      click-through trình duyệt
 
 ---
 
