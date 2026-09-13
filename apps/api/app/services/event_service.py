@@ -10,6 +10,9 @@ from app.models.enums import EventStatus, UserRole
 from app.models.event import Event, EventSetting
 from app.services.allocation.base import DEFAULT_WEIGHTS
 
+# Real events are expected to set their own terms on Cấu hình (or seed_knowledge
+# fills in the AI-generated demo pack for a fresh event — see docs/CHAT-RAG.md).
+# This default is only what a brand-new, un-configured event shows meanwhile.
 DEFAULT_TERMS_TEXT = (
     "Tôi xác nhận đã đọc và đồng ý với quy định chương trình Team Building, "
     "bao gồm chính sách/phí phạt trong trường hợp huỷ đăng ký không đúng quy định."

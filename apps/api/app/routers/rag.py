@@ -8,6 +8,7 @@ from app.core.queue import get_queue
 from app.models.auth import User
 from app.models.event import Event
 from app.services import master_data
+from app.services.rag.enqueue import create_reindex_job, start_reindex_job
 
 router = APIRouter(prefix="/events/{event_id}/rag", tags=["rag"])
 
@@ -18,9 +19,14 @@ AdminUser = Annotated[User, Depends(require_admin)]
 async def reindex(
     event_id: int,
     db: DbSession,
-    _user: AdminUser,
+    user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
     await master_data.get_or_404(db, Event, event_id)
-    arq_job = await queue.enqueue_job("reindex_rag_task", event_id)
-    return {"job_id": arq_job.job_id if arq_job else None}
+    job = await create_reindex_job(db, event_id, user.id)
+    await db.commit()
+    arq_id = await start_reindex_job(queue, event_id, job.id)
+    if arq_id:
+        job.arq_job_id = arq_id
+        await db.commit()
+    return {"job_id": job.id}

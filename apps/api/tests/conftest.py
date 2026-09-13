@@ -33,12 +33,21 @@ class FakeQueue:
 
     def __init__(self) -> None:
         self.jobs: list[tuple[str, tuple, dict]] = []
+        self._kv: dict[str, int] = {}
 
     async def enqueue_job(self, name: str, *args, **kwargs):
         self.jobs.append((name, args, kwargs))
+        return SimpleNamespace(job_id=f"fake-{len(self.jobs)}")
 
     async def publish(self, channel: str, message) -> None:
         return None
+
+    async def incr(self, key: str) -> int:
+        self._kv[key] = int(self._kv.get(key, 0)) + 1
+        return self._kv[key]
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        return True
 
 
 @pytest_asyncio.fixture
@@ -59,6 +68,11 @@ async def test_engine():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        from sqlalchemy import text as sa_text
+
+        from app.services.rag.fts import FTS_DDL
+
+        await conn.execute(sa_text(FTS_DDL))
 
     yield engine
     await engine.dispose()
@@ -83,11 +97,18 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_queue] = lambda: fake_queue
 
+    from app.routers import chat as chat_router
+
+    chat_router.AsyncSessionLocal = factory
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         ac.fake_queue = fake_queue  # type: ignore[attr-defined]
         yield ac
 
+    from app.db.session import AsyncSessionLocal as real_factory
+
+    chat_router.AsyncSessionLocal = real_factory
     app.dependency_overrides.clear()
 
 

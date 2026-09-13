@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.core.time import utcnow
 from app.db.base import Base
+from app.db.knowledge_pack import KNOWLEDGE_FAQS, TERMS_TEXT, TERMS_VERSION
 from app.db.session import AsyncSessionLocal, engine
 from app.models.auth import User
 from app.models.bus import Bus
@@ -37,11 +38,13 @@ from app.models.flight import Flight
 from app.models.gala import GalaConfig, GalaSeat, GalaTable, GalaTurn
 from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
 from app.models.organization import Employee, Site, Team
+from app.models.rag import KnowledgeDocument
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.models.schedule import Announcement, ScheduleItem
 from app.models.system import AllocationRun
 from app.services.allocation.bus_runner import run_bus_allocation
 from app.services.allocation.runner import run_flight_allocation
+from app.services.event_service import get_setting, upsert_setting
 from app.services.gala.gala_service import auto_table_position
 
 LAST_NAMES = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Vũ", "Đặng", "Bùi", "Đỗ"]
@@ -409,6 +412,31 @@ async def seed_schedule(db: AsyncSession, event: Event) -> None:
     ]
     db.add_all(announcements)
     await db.flush()
+    await seed_knowledge(db, event)
+
+
+async def seed_knowledge(db: AsyncSession, event: Event) -> None:
+    """Seed-only demo content (docs/CHAT-RAG.md: pack is AI-generated test
+    data, not real policy). Fill-if-empty, never overwrite: a real event with
+    its own terms/FAQ (typed by BTC, or copied via "Sao chép từ sự kiện
+    khác") must never be clobbered by re-running the seed."""
+    has_terms = await get_setting(db, event.id, "terms_text", None) is not None
+    if not has_terms:
+        await upsert_setting(db, event.id, "terms_text", TERMS_TEXT)
+        await upsert_setting(db, event.id, "terms_version", TERMS_VERSION)
+
+    existing = await db.execute(
+        select(KnowledgeDocument.id).where(KnowledgeDocument.event_id == event.id).limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return
+    for title, body in KNOWLEDGE_FAQS:
+        db.add(
+            KnowledgeDocument(
+                event_id=event.id, title=title, body_md=body, is_published=True,
+            )
+        )
+    await db.flush()
 
 
 async def run_allocations(db: AsyncSession, event: Event, legs: list[TransportLeg], organizer_id: int) -> None:
@@ -506,6 +534,7 @@ async def seed() -> None:
         db.add(event_b)
         await db.flush()
         await seed_event_b_config(db, event_b, sites)
+        await seed_knowledge(db, event_b)
 
         await db.commit()
 

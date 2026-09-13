@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatSessionCreate(BaseModel):
@@ -18,7 +18,7 @@ class ChatSessionOut(BaseModel):
 
 
 class ChatMessageCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=2000)
 
 
 class ChatMessageOut(BaseModel):
@@ -26,6 +26,7 @@ class ChatMessageOut(BaseModel):
     role: str
     content: str
     citations_json: list[dict] | None
+    tool_trace_json: list[dict] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

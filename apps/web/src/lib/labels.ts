@@ -41,6 +41,7 @@ export const jobTypeLabel = makeLookup({
   flight_allocation: "Phân bổ chuyến bay",
   bus_allocation: "Phân bổ xe",
   import_employees: "Import CBNV",
+  rag_reindex: "Đánh chỉ mục hỏi đáp",
 });
 
 export const auditActionLabel = makeLookup({
@@ -76,6 +77,7 @@ export const auditEntityTypeLabel = makeLookup({
   gala_seat: "Ghế Gala",
   gala_turn: "Lượt Gala",
   hotel: "Khách sạn",
+  knowledge_document: "Tài liệu hỏi đáp",
   pickup_point: "Điểm đón",
   registration: "Đăng ký",
   room: "Phòng",

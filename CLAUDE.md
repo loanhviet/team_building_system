@@ -4,17 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Start here
 
-**`docs/REBUILD-PLAN.md` is the current source of truth.** Phases 0–13 (recorded in `docs/PLAN.md`)
-shipped a backend and data model that match `docs/BRD.md` closely, but a full audit against the running
-system (2026-09-12) found the UI layer, demo data, and several BRD-required fields fell short — because
-none of those 13 phases were ever click-tested in a real browser, only verified with `curl`/`ruff`/`tsc`.
-`docs/REBUILD-PLAN.md` is a rebuild pass (phases **R0–R6**) that fixes this: real seed data, root-cause
-backend fixes, a shared component layer, then the CBNV portal, Gala, and Admin workspace redone with
-actual browser verification. **Read it, find the current R-phase, and follow its checklist** before
-touching anything else. `docs/PLAN.md` stays as the historical record of Phase 0–13 — still the right
-place to look up the original architecture, data model, and algorithm design.
+Two tracks — pick the doc that matches the work, don't mix them:
 
-`docs/BRD.md` is the original business requirements doc (converted from the source `.docx`), in Vietnamese.
+| Track | Source of truth | Branch |
+|---|---|---|
+| Portal rebuild R0–R6 (đăng ký, hành trình, Gala, admin) | `docs/REBUILD-PLAN.md` | `rebuild/r6-browser-acceptance` — R6 **chưa xong** |
+| ChatRAG concierge (hỏi đáp chuyến đi) | `docs/CHAT-RAG.md` | `feat/chatrag-concierge` — **đã triển khai** (1 commit `feat: ChatRAG concierge for trip Q&A`). Revert: `git checkout rebuild/r6-browser-acceptance` |
+
+Phases 0–13 live in `docs/PLAN.md` (architecture, data model, allocation). `docs/BRD.md` is the original
+business requirements (Vietnamese). **Do not treat Phase 8's "embed every personal journey into Qdrant"
+as the current chat design** — that pipeline was replaced.
+
+If the task is CBNV portal / Gala / admin lists: read `docs/REBUILD-PLAN.md`, find the current R-phase,
+follow its checklist. If the task is `/chat`, knowledge pack, RAG ingest, or LLM tools: read
+`docs/CHAT-RAG.md` and the section **ChatRAG concierge** below.
 
 ## Rules learned from the R0–R6 audit — don't repeat these
 
@@ -78,15 +81,59 @@ smoke-test data — see `docs/REBUILD-PLAN.md` §R0 before relying on its output
 everything to dev mode (bind-mounted source, `uvicorn --reload`, `next dev` with Turbopack, `arq --watch`,
 plus a MailHog container on `:8025` that catches all outgoing email instead of sending it).
 
-Qdrant (for the RAG chat feature, Phase 8) is gated behind the `rag` compose profile and is not started by
-plain `make up`: `docker compose --profile rag up -d`. **The chat/RAG feature is intentionally frozen** —
-it isn't in the original BRD, and the plan is to redesign it later against the ragflow project rather than
-extend it now. Don't invest UI/UX effort there during the R0–R6 rebuild; small label/color consistency
-fixes are fine.
+Qdrant is gated behind the `rag` compose profile: `docker compose --profile rag up -d qdrant`.
+Plain `make up` does **not** start it. Chat **SQL tools still work without Qdrant** (journey/registration
+lookups). FAQ/policy retrieval falls back to SQLite FTS5; start Qdrant when you want hybrid vector search.
+Reindex is two-phase (DB commit, then Qdrant) — if Qdrant is down or embedding fails, chunks still land in
+FTS and `rag_documents.indexed_at` simply stays NULL; the *next* reindex retries those automatically. No
+manual "force re-embed" step needed.
 
 **Gotcha:** Compose merges `profiles:` lists as a union, not an override — a service's `profiles` key
 cannot be cleared from the override file. This is why MailHog is defined as a whole separate service block
 in `docker-compose.override.yml` rather than as a `profiles: []` override on a base-file service.
+
+## ChatRAG concierge (implemented)
+
+Design + file map + what not to port from RAGFlow: **`docs/CHAT-RAG.md`**.
+
+**What it is:** a trip concierge, not a generic document RAG. Personal facts (my flight/bus/room/Gala
+turn/registration) come from **SQL tools bound to the JWT `employee_id`**. Published unstructured text
+(terms, announcements, schedule copy, BTC FAQs) is retrieved with **FTS5 + Qdrant**. Never embed
+per-employee journey blobs again — that was Phase 8 and it went stale + leaked-by-filter.
+
+**Runtime path:** `POST /api/chat/sessions/{id}/messages` → `services/rag/chat_service.py` (tool-calling
+loop, auto-search if the LLM answers with no tools — no separate query-rewrite LLM call; a bare follow-up
+just gets the prior user turn folded into the fallback search query) → SSE `{delta|tool|citations|done}`.
+Session `event_id` is checked in `services/rag/access.py`.
+
+**Key files**
+
+| Piece | Where |
+|---|---|
+| Tools (`get_my_journey`, `get_my_registration`, `get_event_context`, `get_gala_my_team`, `search_event_knowledge`, `get_my_team_roster`) | `apps/api/app/services/rag/tools.py` |
+| Orchestrator | `apps/api/app/services/rag/chat_service.py` |
+| Hybrid retrieve | `apps/api/app/services/rag/hybrid.py` (FAQ/terms get a score boost over schedule titles) |
+| Ingest (no `source_type=journey`, no `event`/`hotel` — those are served live by tools) | `apps/api/app/services/rag/ingest.py` + `reindex.py` |
+| Demo corpus (AI-generated test content, seed-only) | `apps/api/app/db/knowledge_pack.py` |
+| Seed fill-if-empty | `seed_knowledge()` in `apps/api/app/db/seed.py` |
+| Admin CRUD + copy from a prior event | `apps/api/app/routers/knowledge.py` + `apps/web/src/app/admin/events/[id]/knowledge/page.tsx` |
+| Employee UI | `apps/web/src/app/(employee)/chat/page.tsx` |
+| Tests | `apps/api/tests/test_rag_*.py`, `test_knowledge_pack.py` |
+
+**Knowledge is not hardcoded at chat time.** Chat reads SQLite: `event_settings.terms_text`,
+`knowledge_documents` (published), published announcements/schedule. `knowledge_pack.py` is **AI-generated
+demo/test content, not real policy** — `seed_knowledge()` only **fills it in when the event has none yet**
+(no terms setting, zero `knowledge_documents` rows) and never overwrites existing content, so re-running
+`make seed` is safe against an event BTC has already edited. For a real new event, BTC either types terms +
+FAQ from scratch on the **Hỏi đáp** admin tab, or uses **"Sao chép từ sự kiện khác"** there to copy a prior
+kỳ's FAQ in as drafts (skips titles that already exist at the target) and edits/publishes from there.
+
+**Do not:** add GraphRAG / DeepDoc / canvas / Text-to-SQL / a BTC "ask anything about all staff" chat;
+put PII in Qdrant; trust `event_id` from the client without `event_for_chat`; mark chat UI done from
+`curl 200` alone.
+
+Login for live checks after seed: `nv010@teambuilding.vn` / `NV010` (has room 102). Seed passwords are
+the employee code (`NV010`); accounts that already passed `/account` no longer accept that password.
 
 ## Architecture
 
@@ -95,7 +142,8 @@ FastAPI (async, Python 3.12) + SQLAlchemy 2 async/aiosqlite + Alembic, behind Ne
 TypeScript, Tailwind, TanStack Query). SQLite (WAL mode) is the database — chosen deliberately over Postgres
 for this project's scale, but the schema is kept portable. Redis + ARQ run background jobs; Redis also backs
 distributed locking for Gala Dinner seat selection and pub/sub for its realtime updates. Qdrant is the
-vector store for the frozen chat/RAG feature, behind a provider-agnostic LLM/embedding interface.
+dense vector half of ChatRAG hybrid retrieval (FTS5 is the keyword half), behind a provider-agnostic
+LLM/embedding interface (`DashScope` chat + local MiniLM embed in current `.env`).
 
 **Next.js 16 has breaking changes vs. what you may know as "Next.js."** Before writing frontend code, read
 the relevant guide under `apps/web/node_modules/next/dist/docs/` (see `apps/web/AGENTS.md`).

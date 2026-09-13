@@ -1,16 +1,24 @@
 import json
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from arq import ArqRedis
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
 from app.core.errors import AppError
+from app.core.queue import get_queue
 from app.db.session import AsyncSessionLocal
+from app.models.auth import User
+from app.models.event import Event
 from app.models.rag import ChatMessage, ChatSession
 from app.schemas.chat import ChatMessageCreate, ChatMessageOut, ChatSessionCreate, ChatSessionOut
+from app.services.rag.access import event_for_chat
 from app.services.rag.chat_service import answer_stream
+from app.services.rag.rate_limit import check_chat_rate
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("app")
@@ -20,6 +28,7 @@ logger = logging.getLogger("app")
 async def create_session(
     payload: ChatSessionCreate, db: DbSession, user: CurrentUser
 ) -> ChatSession:
+    await event_for_chat(db, user, payload.event_id)
     session = ChatSession(user_id=user.id, event_id=payload.event_id, title=payload.title)
     db.add(session)
     await db.commit()
@@ -33,6 +42,7 @@ async def list_sessions(
 ) -> list[ChatSession]:
     stmt = select(ChatSession).where(ChatSession.user_id == user.id)
     if event_id is not None:
+        await event_for_chat(db, user, event_id)
         stmt = stmt.where(ChatSession.event_id == event_id)
     result = await db.execute(stmt.order_by(ChatSession.created_at.desc()))
     return list(result.scalars().all())
@@ -58,9 +68,15 @@ async def list_messages(
 
 @router.post("/sessions/{session_id}/messages")
 async def send_message(
-    session_id: int, payload: ChatMessageCreate, db: DbSession, user: CurrentUser
+    session_id: int,
+    payload: ChatMessageCreate,
+    db: DbSession,
+    user: CurrentUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> StreamingResponse:
+    await check_chat_rate(queue, user.id)
     session = await _get_owned_session(db, session_id, user.id)
+    await event_for_chat(db, user, session.event_id)
 
     result = await db.execute(
         select(ChatMessage)
@@ -70,37 +86,59 @@ async def send_message(
     )
     history = [{"role": m.role, "content": m.content} for m in reversed(result.scalars().all())]
 
-    db.add(ChatMessage(session_id=session_id, role="user", content=payload.content))
+    content = (payload.content or "").strip()
+    if not content:
+        raise AppError("validation_error", "Nội dung trống", status.HTTP_400_BAD_REQUEST)
+
+    db.add(ChatMessage(session_id=session_id, role="user", content=content))
     await db.commit()
 
-    stream, citations = await answer_stream(
-        session.event_id, user.employee_id, payload.content, history
-    )
+    user_id = user.id
+    event_id = session.event_id
+    query = content
 
     async def event_source():
         chunks: list[str] = []
+        citations: list[dict] = []
+        tool_trace: list[dict] = []
         try:
-            async for delta in stream:
-                chunks.append(delta)
-                yield f"data: {json.dumps({'delta': delta})}\n\n"
-        except Exception as exc:
+            async with AsyncSessionLocal() as write_db:
+                result = await write_db.execute(
+                    select(User).options(selectinload(User.employee)).where(User.id == user_id)
+                )
+                live_user = result.scalar_one()
+                event = await write_db.get(Event, event_id)
+                if event is None:
+                    yield f"data: {json.dumps({'error': 'Sự kiện không tồn tại'})}\n\n"
+                    return
+                async for evt in answer_stream(write_db, event, live_user, query, history):
+                    if evt.get("delta"):
+                        chunks.append(evt["delta"])
+                    if evt.get("citations") is not None:
+                        citations = evt["citations"]
+                    if evt.get("tool_trace") is not None:
+                        tool_trace = evt["tool_trace"]
+                    if evt.get("error"):
+                        yield f"data: {json.dumps({'error': evt['error']})}\n\n"
+                        return
+                    out = {k: v for k, v in evt.items() if k not in ("text", "tool_trace")}
+                    if out.get("done"):
+                        out["citations"] = citations
+                    yield f"data: {json.dumps(out, ensure_ascii=False)}\n\n"
+        except Exception:
             logger.exception("chat stream failed for session %s", session_id)
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'error': 'Trợ lý tạm thời không trả lời được, vui lòng thử lại.'})}\n\n"
             return
 
         full_text = "".join(chunks)
-        # A fresh session here, not the request-scoped `db` — by the time this
-        # generator resumes after the first yield, FastAPI may already have
-        # closed the request's DB dependency.
         async with AsyncSessionLocal() as write_db:
             write_db.add(
                 ChatMessage(
                     session_id=session_id, role="assistant", content=full_text,
-                    citations_json=citations,
+                    citations_json=citations or None,
+                    tool_trace_json=tool_trace or None,
                 )
             )
             await write_db.commit()
-
-        yield f"data: {json.dumps({'done': True, 'citations': citations})}\n\n"
 
     return StreamingResponse(event_source(), media_type="text/event-stream")

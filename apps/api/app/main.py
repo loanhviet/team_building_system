@@ -33,6 +33,7 @@ from app.routers import (
     hotels,
     jobs,
     journey,
+    knowledge,
     ops,
     rag,
     registrations,
@@ -100,6 +101,7 @@ app.include_router(email_templates.router, prefix="/api")
 app.include_router(journey.router, prefix="/api")
 app.include_router(gala.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
+app.include_router(knowledge.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(ops.router, prefix="/api")

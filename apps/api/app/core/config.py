@@ -27,9 +27,8 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = False
 
     qdrant_url: str = "http://localhost:6333"
-    llm_provider: str = "anthropic"
+    llm_provider: str = "dashscope"
     embedding_provider: str = "local"
-    anthropic_api_key: str = ""
     openai_api_key: str = ""
     dashscope_api_key: str = ""
     dashscope_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"

@@ -1,8 +1,12 @@
+import logging
+
 from qdrant_client import AsyncQdrantClient, models
 
 from app.core.config import get_settings
 
-COLLECTION = "rag_documents"
+COLLECTION = "rag_chunks"
+
+logger = logging.getLogger("app")
 
 _client: AsyncQdrantClient | None = None
 
@@ -23,11 +27,18 @@ async def ensure_collection(dimension: int) -> None:
         )
 
 
-async def upsert_document(doc_id: int, vector: list[float], payload: dict) -> None:
+async def upsert_points(points: list[tuple[int, list[float], dict]]) -> None:
+    """Batch upsert (id, vector, payload) triples in one round trip — avoids
+    one Qdrant call per chunk during reindex."""
+    if not points:
+        return
     client = get_client()
     await client.upsert(
         collection_name=COLLECTION,
-        points=[models.PointStruct(id=doc_id, vector=vector, payload=payload)],
+        points=[
+            models.PointStruct(id=doc_id, vector=vector, payload=payload)
+            for doc_id, vector, payload in points
+        ],
     )
 
 
@@ -40,38 +51,33 @@ async def delete_documents(doc_ids: list[int]) -> None:
     )
 
 
-async def search(
-    vector: list[float], event_id: int, employee_id: int | None, limit: int = 5
+async def search_chunks(
+    vector: list[float],
+    event_id: int,
+    limit: int = 8,
+    source_types: list[str] | None = None,
 ) -> list[dict]:
     client = get_client()
+    if not await client.collection_exists(COLLECTION):
+        return []
 
-    should: list[models.FieldCondition | models.Filter] = [
-        models.FieldCondition(key="scope", match=models.MatchValue(value="public"))
+    must: list[models.FieldCondition | models.Filter] = [
+        models.FieldCondition(key="event_id", match=models.MatchValue(value=event_id)),
+        models.FieldCondition(key="scope", match=models.MatchValue(value="public")),
     ]
-    if employee_id is not None:
-        should.append(
+    if source_types:
+        must.append(
             models.Filter(
-                must=[
-                    models.FieldCondition(key="scope", match=models.MatchValue(value="employee")),
-                    models.FieldCondition(
-                        key="scope_ref_id", match=models.MatchValue(value=employee_id)
-                    ),
+                should=[
+                    models.FieldCondition(key="source_type", match=models.MatchValue(value=st))
+                    for st in source_types
                 ]
             )
         )
-    # A Filter with only `should` set (no must/must_not) requires at least one
-    # should-condition to match — nesting it as a `must` entry below makes the
-    # permission check mandatory, not just a scoring boost.
-    permission_filter = models.Filter(should=should)
-
-    query_filter = models.Filter(
-        must=[
-            models.FieldCondition(key="event_id", match=models.MatchValue(value=event_id)),
-            permission_filter,
-        ]
-    )
-
     result = await client.query_points(
-        collection_name=COLLECTION, query=vector, query_filter=query_filter, limit=limit
+        collection_name=COLLECTION,
+        query=vector,
+        query_filter=models.Filter(must=must),
+        limit=limit,
     )
     return [{"id": p.id, "score": p.score, **(p.payload or {})} for p in result.points]

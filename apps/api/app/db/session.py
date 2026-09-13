@@ -24,6 +24,9 @@ def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:
     cursor.execute("PRAGMA busy_timeout=5000")
     cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.execute("PRAGMA foreign_keys=ON")
+    from app.services.rag.fts import ensure_fts_sync
+
+    ensure_fts_sync(cursor)
     cursor.close()
 
 

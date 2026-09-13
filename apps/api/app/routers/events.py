@@ -29,6 +29,7 @@ from app.services.event_service import (
     save_event_settings,
     transition_event,
 )
+from app.services.rag.enqueue import enqueue_reindex_fire_and_forget
 from app.services.team_roster_service import build_team_roster, resolve_roster_team_id
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -134,7 +135,11 @@ async def get_settings(event_id: int, db: DbSession, _user: AdminUser) -> EventS
 
 @router.put("/{event_id}/settings", response_model=EventSettingsOut)
 async def update_settings(
-    event_id: int, payload: EventSettingsUpdate, db: DbSession, user: AdminUser
+    event_id: int,
+    payload: EventSettingsUpdate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> EventSettingsOut:
     await master_data.get_or_404(db, Event, event_id)
     before = await get_event_settings(db, event_id)
@@ -156,6 +161,7 @@ async def update_settings(
         event_id=event_id,
     )
     await db.commit()
+    await enqueue_reindex_fire_and_forget(queue, event_id)
     return EventSettingsOut(**data)
 
 
@@ -185,6 +191,8 @@ async def transition_event_status(
 
     if payload.status == EventStatus.information_published:
         await queue.enqueue_job("send_bulk_emails_task", event_id, "info_published")
+        # No reindex here: journeys/hotels aren't indexed (served live by
+        # chat tools), and this transition doesn't publish any knowledge text.
 
     return _event_out(event)
 
