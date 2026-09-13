@@ -26,3 +26,8 @@ class KnowledgeDocumentOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class KnowledgeCopyOut(BaseModel):
+    copied: int
+    skipped: int

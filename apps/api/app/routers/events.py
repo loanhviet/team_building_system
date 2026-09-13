@@ -191,7 +191,8 @@ async def transition_event_status(
 
     if payload.status == EventStatus.information_published:
         await queue.enqueue_job("send_bulk_emails_task", event_id, "info_published")
-        await enqueue_reindex_fire_and_forget(queue, event_id)
+        # No reindex here: journeys/hotels aren't indexed (served live by
+        # chat tools), and this transition doesn't publish any knowledge text.
 
     return _event_out(event)
 

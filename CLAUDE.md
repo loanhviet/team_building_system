@@ -84,8 +84,9 @@ plus a MailHog container on `:8025` that catches all outgoing email instead of s
 Qdrant is gated behind the `rag` compose profile: `docker compose --profile rag up -d qdrant`.
 Plain `make up` does **not** start it. Chat **SQL tools still work without Qdrant** (journey/registration
 lookups). FAQ/policy retrieval falls back to SQLite FTS5; start Qdrant when you want hybrid vector search.
-After a Qdrant-less reindex, force re-embed (checksums otherwise skip): set `rag_documents.checksum` stale
-then `reindex_event`, or POST `/api/events/{id}/rag/reindex` once vectors are needed.
+Reindex is two-phase (DB commit, then Qdrant) — if Qdrant is down or embedding fails, chunks still land in
+FTS and `rag_documents.indexed_at` simply stays NULL; the *next* reindex retries those automatically. No
+manual "force re-embed" step needed.
 
 **Gotcha:** Compose merges `profiles:` lists as a union, not an override — a service's `profiles` key
 cannot be cleared from the override file. This is why MailHog is defined as a whole separate service block
@@ -100,9 +101,10 @@ turn/registration) come from **SQL tools bound to the JWT `employee_id`**. Publi
 (terms, announcements, schedule copy, BTC FAQs) is retrieved with **FTS5 + Qdrant**. Never embed
 per-employee journey blobs again — that was Phase 8 and it went stale + leaked-by-filter.
 
-**Runtime path:** `POST /api/chat/sessions/{id}/messages` → `services/rag/chat_service.py` (rewrite
-follow-ups only, tool-calling loop, auto-search if the LLM answers with no tools) → SSE
-`{delta|tool|citations|done}`. Session `event_id` is checked in `services/rag/access.py`.
+**Runtime path:** `POST /api/chat/sessions/{id}/messages` → `services/rag/chat_service.py` (tool-calling
+loop, auto-search if the LLM answers with no tools — no separate query-rewrite LLM call; a bare follow-up
+just gets the prior user turn folded into the fallback search query) → SSE `{delta|tool|citations|done}`.
+Session `event_id` is checked in `services/rag/access.py`.
 
 **Key files**
 
@@ -111,19 +113,20 @@ follow-ups only, tool-calling loop, auto-search if the LLM answers with no tools
 | Tools (`get_my_journey`, `get_my_registration`, `get_event_context`, `get_gala_my_team`, `search_event_knowledge`, `get_my_team_roster`) | `apps/api/app/services/rag/tools.py` |
 | Orchestrator | `apps/api/app/services/rag/chat_service.py` |
 | Hybrid retrieve | `apps/api/app/services/rag/hybrid.py` (FAQ/terms get a score boost over schedule titles) |
-| Ingest (no `source_type=journey`) | `apps/api/app/services/rag/ingest.py` + `reindex.py` |
-| Demo corpus (seed **defaults** only) | `apps/api/app/db/knowledge_pack.py` |
-| Seed upsert | `seed_knowledge()` in `apps/api/app/db/seed.py` |
-| Admin CRUD | `apps/api/app/routers/knowledge.py` + `apps/web/src/app/admin/events/[id]/knowledge/page.tsx` |
+| Ingest (no `source_type=journey`, no `event`/`hotel` — those are served live by tools) | `apps/api/app/services/rag/ingest.py` + `reindex.py` |
+| Demo corpus (AI-generated test content, seed-only) | `apps/api/app/db/knowledge_pack.py` |
+| Seed fill-if-empty | `seed_knowledge()` in `apps/api/app/db/seed.py` |
+| Admin CRUD + copy from a prior event | `apps/api/app/routers/knowledge.py` + `apps/web/src/app/admin/events/[id]/knowledge/page.tsx` |
 | Employee UI | `apps/web/src/app/(employee)/chat/page.tsx` |
 | Tests | `apps/api/tests/test_rag_*.py`, `test_knowledge_pack.py` |
 
 **Knowledge is not hardcoded at chat time.** Chat reads SQLite: `event_settings.terms_text`,
-`knowledge_documents` (published), published announcements/schedule. `knowledge_pack.py` is the **demo
-pack** copied into the DB by `seed_knowledge()` (upsert by **title**, unpublish rows whose title is not
-in the pack). Editing FAQ for a live event = Admin → event → tab **Hỏi đáp**, then reindex. Running
-`seed_knowledge` again **overwrites** matching titles and hides extra BTC-authored FAQs — fine for demo
-reset, not for production content.
+`knowledge_documents` (published), published announcements/schedule. `knowledge_pack.py` is **AI-generated
+demo/test content, not real policy** — `seed_knowledge()` only **fills it in when the event has none yet**
+(no terms setting, zero `knowledge_documents` rows) and never overwrites existing content, so re-running
+`make seed` is safe against an event BTC has already edited. For a real new event, BTC either types terms +
+FAQ from scratch on the **Hỏi đáp** admin tab, or uses **"Sao chép từ sự kiện khác"** there to copy a prior
+kỳ's FAQ in as drafts (skips titles that already exist at the target) and edits/publishes from there.
 
 **Do not:** add GraphRAG / DeepDoc / canvas / Text-to-SQL / a BTC "ask anything about all staff" chat;
 put PII in Qdrant; trust `event_id` from the client without `event_for_chat`; mark chat UI done from

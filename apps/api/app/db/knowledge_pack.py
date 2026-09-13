@@ -1,4 +1,9 @@
-"""Canonical demo corpus for ChatRAG: program rules + FAQ.
+"""DEMO corpus for ChatRAG, generated for testing — NOT real company policy.
+
+Used only by `db/seed.py::seed_knowledge` to give a fresh/demo event some
+terms + FAQ to test the concierge against. A real event's content is typed by
+BTC on the Hỏi đáp admin tab (or copied from a prior event via "Sao chép từ
+sự kiện khác") — no runtime code path reads this module directly.
 
 Personal facts (my flight, my bus, my room) are NOT here — those come from
 SQL tools. These documents answer policy / how-to questions CBNV would

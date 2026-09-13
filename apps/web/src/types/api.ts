@@ -371,6 +371,11 @@ export type KnowledgeDocument = {
   updated_at: string;
 };
 
+export type KnowledgeCopyResult = {
+  copied: number;
+  skipped: number;
+};
+
 export type GalaConfig = {
   id: number;
   event_id: number;

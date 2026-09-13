@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from collections import defaultdict
 
 from app.core.time import utcnow
 from app.db.session import AsyncSessionLocal
@@ -8,9 +10,15 @@ from app.services.rag.reindex import reindex_event
 
 logger = logging.getLogger("worker")
 
+# ponytail: in-process lock keyed by event_id — enough because ARQ runs this
+# worker as a single process. Two workers reindexing the same event at once
+# would still race on rag_chunks/FTS rowids; move to a Redis lock if the
+# worker is ever scaled beyond one instance.
+_event_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
 
 async def reindex_rag_task(ctx: dict, event_id: int, job_id: int | None = None) -> dict:
-    async with AsyncSessionLocal() as db:
+    async with _event_locks[event_id], AsyncSessionLocal() as db:
         job = await db.get(Job, job_id) if job_id is not None else None
         if job is not None:
             job.status = JobStatus.running

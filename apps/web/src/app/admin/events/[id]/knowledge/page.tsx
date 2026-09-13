@@ -15,10 +15,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, ApiError } from "@/lib/api";
 import { jobStatusLabel } from "@/lib/labels";
-import type { Job, KnowledgeDocument } from "@/types/api";
+import type { Event, Job, KnowledgeCopyResult, KnowledgeDocument } from "@/types/api";
 
 const emptyForm = { title: "", body_md: "", is_published: false };
 
@@ -31,11 +38,20 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [jobId, setJobId] = useState<number | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySourceId, setCopySourceId] = useState<string>("");
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["events", eventId, "knowledge"],
     queryFn: () => apiFetch<KnowledgeDocument[]>(`/api/events/${eventId}/knowledge`),
   });
+
+  const { data: events = [] } = useQuery({
+    queryKey: ["events"],
+    queryFn: () => apiFetch<Event[]>("/api/events"),
+    enabled: copyOpen,
+  });
+  const copySources = events.filter((e) => e.id !== eventId);
 
   const { data: job } = useQuery({
     queryKey: ["jobs", jobId],
@@ -92,6 +108,21 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
       toast.success("Đã gửi job đánh chỉ mục");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không reindex được"),
+  });
+
+  const copyMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<KnowledgeCopyResult>(
+        `/api/events/${eventId}/knowledge/copy-from/${copySourceId}`,
+        { method: "POST" },
+      ),
+    onSuccess: (res) => {
+      toast.success(`Đã sao chép ${res.copied} tài liệu, bỏ qua ${res.skipped} trùng tiêu đề`);
+      setCopyOpen(false);
+      setCopySourceId("");
+      invalidate();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không sao chép được"),
   });
 
   const openCreate = () => {
@@ -188,6 +219,9 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
               className="w-64"
             />
             <Button onClick={openCreate}>Thêm tài liệu</Button>
+            <Button variant="outline" onClick={() => setCopyOpen(true)}>
+              Sao chép từ sự kiện khác
+            </Button>
             <ConfirmDialog
               trigger={
                 <Button variant="outline" disabled={reindexMutation.isPending}>
@@ -270,6 +304,41 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
                 Lưu nháp
               </Button>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={copyOpen} onOpenChange={setCopyOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sao chép tài liệu hỏi đáp</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Sao chép FAQ từ một sự kiện khác thành bản nháp ở đây. Tiêu đề đã có sẵn sẽ được
+              bỏ qua. Bạn cần tự đăng lại từng tài liệu muốn dùng.
+            </p>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="copy-source">Sự kiện nguồn</Label>
+              <Select value={copySourceId} onValueChange={(v) => setCopySourceId(v ?? "")}>
+                <SelectTrigger id="copy-source">
+                  <SelectValue placeholder="Chọn sự kiện" />
+                </SelectTrigger>
+                <SelectContent>
+                  {copySources.map((e) => (
+                    <SelectItem key={e.id} value={String(e.id)}>
+                      {e.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              disabled={!copySourceId || copyMutation.isPending}
+              onClick={() => copyMutation.mutate()}
+            >
+              Sao chép thành bản nháp
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

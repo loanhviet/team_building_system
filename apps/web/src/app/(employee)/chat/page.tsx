@@ -192,6 +192,7 @@ export default function ChatPage() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend(input)}
           placeholder="Nhập câu hỏi về chuyến đi của bạn..."
+          maxLength={2000}
           disabled={!session || isStreaming}
         />
         <Button disabled={!session || isStreaming || !input.trim()} onClick={() => handleSend(input)}>

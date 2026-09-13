@@ -3,12 +3,9 @@ import hashlib
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.event import Event
-from app.models.hotel import Hotel
 from app.models.rag import KnowledgeDocument, RagDocument
 from app.models.schedule import Announcement, ScheduleItem
 from app.services.event_service import get_setting
-from app.services.journey_service import PUBLISHED_STATUSES
 
 
 def _checksum(text: str) -> str:
@@ -39,31 +36,20 @@ async def _upsert_document(
     doc.checksum = checksum
     doc.scope = scope
     doc.scope_ref_id = scope_ref_id
+    # Content changed (or brand new) — clear indexed_at so reindex knows this
+    # document still needs (re-)embedding even if the Qdrant step of a
+    # previous reindex failed partway through.
+    doc.indexed_at = None
     await db.flush()
     return doc, True
 
 
 async def build_event_documents(db: AsyncSession, event_id: int) -> list[tuple[RagDocument, bool]]:
     """(Re)computes public rag_documents for an event. Personal journeys are
-    intentionally not indexed — those facts are served live via chat tools."""
-    event = await db.get(Event, event_id)
+    intentionally not indexed — those facts are served live via chat tools.
+    Event overview / hotel are also not indexed — get_event_context and
+    get_my_journey already serve that live and more accurately."""
     changed_docs: list[tuple[RagDocument, bool]] = []
-
-    if event is not None:
-        overview = f"Sự kiện {event.name}."
-        if event.destination:
-            overview += f" Điểm đến: {event.destination}."
-        if event.start_date:
-            overview += f" Bắt đầu: {event.start_date.isoformat()}."
-        if event.end_date:
-            overview += f" Kết thúc: {event.end_date.isoformat()}."
-        if event.description:
-            overview += f" {event.description}"
-        changed_docs.append(
-            await _upsert_document(
-                db, event_id, "event", str(event.id), event.name, overview,
-            )
-        )
 
     result = await db.execute(
         select(ScheduleItem).where(
@@ -108,18 +94,6 @@ async def build_event_documents(db: AsyncSession, event_id: int) -> list[tuple[R
                 db, event_id, "terms", "terms", "Quy định chương trình", str(terms_text),
             )
         )
-
-    if event is not None and event.status.value in PUBLISHED_STATUSES:
-        result = await db.execute(select(Hotel).where(Hotel.event_id == event_id))
-        for hotel in result.scalars().all():
-            content = f"Khách sạn {hotel.name}."
-            if hotel.address:
-                content += f" Địa chỉ: {hotel.address}."
-            changed_docs.append(
-                await _upsert_document(
-                    db, event_id, "hotel", str(hotel.id), hotel.name, content,
-                )
-            )
 
     result = await db.execute(
         select(KnowledgeDocument).where(

@@ -182,6 +182,133 @@ async def test_standalone_question_searches_when_llm_skips_tools(
     assert "Veston" not in text
 
 
+async def test_unrelated_followup_search_does_not_drag_in_the_prior_question(
+    client, world, auth_headers, monkeypatch
+):
+    """Regression: found live in browser testing. Two ordinary questions in a
+    row that both fall through to knowledge search (neither needs a tool)
+    must be searched independently — folding the previous question into the
+    new one's search query (meant only for a bare continuation like "còn
+    chiều về?") polluted retrieval with the old topic's terms."""
+    class SkipTools:
+        async def complete(self, system, messages, tools=None):
+            return LLMResponse(content="", tool_calls=[])
+
+        def stream(self, system, messages):
+            async def _gen():
+                yield "ok"
+
+            return _gen()
+
+    seen_queries: list[str] = []
+
+    async def fake_hybrid(_db, query, event_id, **_k):
+        seen_queries.append(query)
+        return []
+
+    monkeypatch.setattr("app.services.rag.chat_service.get_llm_provider", lambda: SkipTools())
+    monkeypatch.setattr("app.services.rag.tools.hybrid_search", fake_hybrid)
+
+    s = await client.post(
+        "/api/chat/sessions",
+        headers=auth_headers(world.employee_user),
+        json={"event_id": world.event.id},
+    )
+    sid = s.json()["id"]
+    await client.post(
+        f"/api/chat/sessions/{sid}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "Gala mac gi?"},
+    )
+    await client.post(
+        f"/api/chat/sessions/{sid}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "thoi tiet Da Nang ngay mai the nao?"},
+    )
+    assert len(seen_queries) == 2
+    assert "gala" not in seen_queries[1].lower()
+
+
+async def test_bare_followup_still_folds_prior_question_into_search(
+    client, world, auth_headers, monkeypatch
+):
+    class SkipTools:
+        async def complete(self, system, messages, tools=None):
+            return LLMResponse(content="", tool_calls=[])
+
+        def stream(self, system, messages):
+            async def _gen():
+                yield "ok"
+
+            return _gen()
+
+    seen_queries: list[str] = []
+
+    async def fake_hybrid(_db, query, event_id, **_k):
+        seen_queries.append(query)
+        return []
+
+    monkeypatch.setattr("app.services.rag.chat_service.get_llm_provider", lambda: SkipTools())
+    monkeypatch.setattr("app.services.rag.tools.hybrid_search", fake_hybrid)
+
+    s = await client.post(
+        "/api/chat/sessions",
+        headers=auth_headers(world.employee_user),
+        json={"event_id": world.event.id},
+    )
+    sid = s.json()["id"]
+    await client.post(
+        f"/api/chat/sessions/{sid}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "Gala mac gi?"},
+    )
+    await client.post(
+        f"/api/chat/sessions/{sid}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "con trang phuc thi sao?"},
+    )
+    assert "gala" in seen_queries[1].lower()
+
+
+async def test_llm_failure_does_not_leak_exception_text(client, world, auth_headers, monkeypatch):
+    class Boom:
+        async def complete(self, *a, **k):
+            raise RuntimeError("dashscope api_key=sk-super-secret invalid")
+
+    monkeypatch.setattr("app.services.rag.chat_service.get_llm_provider", lambda: Boom())
+    s = await client.post(
+        "/api/chat/sessions",
+        headers=auth_headers(world.employee_user),
+        json={"event_id": world.event.id},
+    )
+    sid = s.json()["id"]
+    resp = await client.post(
+        f"/api/chat/sessions/{sid}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "xe toi may gio?"},
+    )
+    events = _parse_sse(resp)
+    errors = [e["error"] for e in events if e.get("error")]
+    assert errors
+    assert "sk-super-secret" not in errors[0]
+    assert "dashscope" not in errors[0].lower()
+
+
+async def test_message_over_length_limit_is_rejected(client, world, auth_headers):
+    s = await client.post(
+        "/api/chat/sessions",
+        headers=auth_headers(world.employee_user),
+        json={"event_id": world.event.id},
+    )
+    sid = s.json()["id"]
+    resp = await client.post(
+        f"/api/chat/sessions/{sid}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "a" * 2001},
+    )
+    assert resp.status_code == 422
+
+
 async def test_chitchat_does_not_call_llm(client, world, auth_headers, monkeypatch):
     called = {"n": 0}
 

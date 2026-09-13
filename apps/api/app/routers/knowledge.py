@@ -1,4 +1,3 @@
-import hashlib
 from typing import Annotated
 
 from arq import ArqRedis
@@ -11,6 +10,7 @@ from app.models.auth import User
 from app.models.event import Event
 from app.models.rag import KnowledgeDocument
 from app.schemas.knowledge import (
+    KnowledgeCopyOut,
     KnowledgeDocumentCreate,
     KnowledgeDocumentOut,
     KnowledgeDocumentUpdate,
@@ -19,14 +19,11 @@ from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_event_not_completed
 from app.services.rag.enqueue import create_reindex_job, start_reindex_job
+from app.services.rag.knowledge_service import copy_knowledge
 
 router = APIRouter(prefix="/events/{event_id}/knowledge", tags=["knowledge"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
-
-
-def _checksum(title: str, body: str) -> str:
-    return hashlib.sha256(f"{title}\n{body}".encode()).hexdigest()
 
 
 @router.get("", response_model=list[KnowledgeDocumentOut])
@@ -50,11 +47,7 @@ async def create_knowledge(
     doc = await master_data.create(
         db,
         KnowledgeDocument,
-        {
-            **payload.model_dump(),
-            "checksum": _checksum(payload.title, payload.body_md),
-            "updated_by": user.id,
-        },
+        {**payload.model_dump(), "updated_by": user.id},
         event_id=event_id,
     )
     await record_audit(
@@ -69,6 +62,21 @@ async def create_knowledge(
         await start_reindex_job(queue, event_id, job.id)
     await db.refresh(doc)
     return doc
+
+
+@router.post(
+    "/copy-from/{source_event_id}",
+    response_model=KnowledgeCopyOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def copy_from_event(
+    event_id: int, source_event_id: int, db: DbSession, user: AdminUser,
+) -> dict:
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
+    result = await copy_knowledge(db, event, source_event_id, user.id)
+    await db.commit()
+    return result
 
 
 @router.patch("/{doc_id}", response_model=KnowledgeDocumentOut)
@@ -86,7 +94,6 @@ async def update_knowledge(
     before = KnowledgeDocumentOut.model_validate(doc).model_dump(mode="json")
     data = payload.model_dump(exclude_unset=True)
     await master_data.update(db, doc, data)
-    doc.checksum = _checksum(doc.title, doc.body_md)
     doc.updated_by = user.id
     doc.updated_at = utcnow()
     await record_audit(

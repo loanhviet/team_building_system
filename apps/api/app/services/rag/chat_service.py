@@ -19,17 +19,6 @@ logger = logging.getLogger("app")
 MAX_TOOL_ROUNDS = 3
 HISTORY_LIMIT = 8
 
-REWRITE_SYSTEM = (
-    "Nhiệm vụ DUY NHẤT: viết lại câu hỏi cuối thành một câu hỏi độc lập, tiếng Việt. "
-    "Không trả lời. Không thêm thông tin mới. Không liệt kê quy định. "
-    "Nếu câu cuối đã đủ nghĩa, in lại nguyên văn. Chỉ in câu hỏi, không giải thích."
-)
-
-_FOLLOWUP = re.compile(
-    r"^(còn|vậy|thế|thế thì|còn về|còn chiều|còn phòng|còn xe|còn bay)\b",
-    re.IGNORECASE,
-)
-
 SYSTEM_TEMPLATE = """Bạn là trợ lý hỏi đáp của chương trình Team Building "{event_name}".
 Người đang hỏi: {full_name}{team_bit}.
 Trạng thái sự kiện hiện tại: {status}.
@@ -44,6 +33,22 @@ Quy tắc bắt buộc:
 """
 
 GREETINGS = {"xin chào", "xin chao", "chào", "chao", "chào bạn", "hello", "hi", "hey", "alo"}
+
+GENERIC_ERROR = "Trợ lý tạm thời không trả lời được, vui lòng thử lại."
+
+# Bare continuations like "còn chiều về?" or "thế còn phòng?" carry no meaning
+# without the previous turn. Matched against the accent-folded query so it
+# catches both "còn..." and the unaccented "con...". Used only to decide
+# whether to fold the prior question into a fallback search — NOT a
+# general-purpose rewrite, so a new, unrelated question right after another
+# fallback-search turn is never forced to drag the old topic along and
+# pollute retrieval with it (a real bug caught in browser testing: "Gala mặc
+# gì?" then "thời tiết Đà Nẵng thế nào?" must not search on both combined).
+_FOLLOWUP = re.compile(r"^(con|vay|the)\b", re.IGNORECASE)
+
+
+def _looks_like_followup(query: str) -> bool:
+    return bool(_FOLLOWUP.search(_fold(query).strip()))
 
 
 def _fold(text: str) -> str:
@@ -60,40 +65,11 @@ def _user_turns(history: list[dict]) -> int:
     return sum(1 for m in history if m.get("role") == "user")
 
 
-def _needs_rewrite(history: list[dict], query: str) -> bool:
-    if _user_turns(history) < 1:
-        return False
-    q = query.strip()
-    if _FOLLOWUP.search(q):
-        return True
-    # Pronoun-only / very short follow-ups like "còn chiều về?" or "phòng nào?"
-    return len(q.split()) <= 4
-
-
-def _rewrite_looks_like_answer(text: str) -> bool:
-    s = text.strip()
-    if len(s) > 180:
-        return True
-    if s.count("\n") >= 2:
-        return True
-    lowered = s.lower()
-    return lowered.startswith(("đây là", "yêu cầu", "bạn nhớ", "cảm ơn", "- "))
-
-
-async def rewrite_query(history: list[dict], query: str) -> str:
-    if not _needs_rewrite(history, query):
-        return query
-    llm = get_llm_provider()
-    messages = [m for m in history if m.get("role") in ("user", "assistant")][-HISTORY_LIMIT:]
-    messages.append({"role": "user", "content": query})
-    try:
-        rewritten = (await llm.generate(REWRITE_SYSTEM, messages)).strip().strip('"')
-    except Exception:
-        logger.warning("query rewrite failed, using original", exc_info=True)
-        return query
-    if not rewritten or len(rewritten) > 240 or _rewrite_looks_like_answer(rewritten):
-        return query
-    return rewritten
+def _last_user_message(history: list[dict]) -> str | None:
+    for m in reversed(history):
+        if m.get("role") == "user":
+            return m.get("content")
+    return None
 
 
 def _system_prompt(event: Event, employee: Employee | None) -> str:
@@ -146,6 +122,12 @@ def _dedupe_citations(citations: list[dict]) -> list[dict]:
     return out
 
 
+def _chunk_trace(result: dict) -> list[dict]:
+    """Compact {id, score} summary of a search_event_knowledge result, for
+    tool_trace — enough to spot a wrong answer without logging full content."""
+    return [{"id": c["id"], "score": c["score"]} for c in result.get("chunks", []) if "id" in c]
+
+
 async def answer_stream(
     db: AsyncSession,
     event: Event,
@@ -153,7 +135,7 @@ async def answer_stream(
     query: str,
     history: list[dict],
 ) -> AsyncIterator[dict]:
-    """Yield SSE-shaped dicts: rewrite/tool/delta/error. Caller persists the answer."""
+    """Yield SSE-shaped dicts: tool/delta/done/error. Caller persists the answer."""
     employee = user.employee
     ctx = ToolContext(db=db, event=event, user=user)
     system = _system_prompt(event, employee)
@@ -168,15 +150,11 @@ async def answer_stream(
         yield {"done": True, "citations": [], "tool_trace": [], "text": hello}
         return
 
-    standalone = await rewrite_query(history, query)
-    if standalone != query:
-        yield {"rewrite": standalone}
-
     llm = get_llm_provider()
     messages: list[dict] = [
         m for m in history if m.get("role") in ("user", "assistant")
     ][-HISTORY_LIMIT:]
-    messages.append({"role": "user", "content": standalone})
+    messages.append({"role": "user", "content": query})
 
     citations: list[dict] = []
     tool_trace: list[dict] = []
@@ -185,9 +163,9 @@ async def answer_stream(
     for _round in range(MAX_TOOL_ROUNDS):
         try:
             response = await llm.complete(system, messages, tools=OPENAI_TOOLS)
-        except Exception as exc:
+        except Exception:
             logger.exception("LLM complete failed")
-            yield {"error": str(exc)}
+            yield {"error": GENERIC_ERROR}
             return
 
         if not response.tool_calls:
@@ -218,26 +196,35 @@ async def answer_stream(
             result, cites = await execute_tool(ctx, tc.name, tc.arguments)
             tools_ran.add(tc.name)
             citations.extend(cites)
-            tool_trace.append({"name": tc.name, "arguments": tc.arguments, "ok": "error" not in result})
+            trace_entry = {"name": tc.name, "arguments": tc.arguments, "ok": "error" not in result}
+            if tc.name == "search_event_knowledge":
+                trace_entry["chunks"] = _chunk_trace(result)
+            tool_trace.append(trace_entry)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
                 "content": json.dumps(result, ensure_ascii=False, default=str),
             })
 
-    if not tools_ran and not _is_chitchat(standalone):
+    if not tools_ran and not _is_chitchat(query):
+        # No rewrite step: only fold the previous user turn into the search
+        # query when this one looks like a bare continuation ("còn chiều
+        # về?"), never for an ordinary new question — see _FOLLOWUP above.
+        prior = _last_user_message(history) if _looks_like_followup(query) else None
+        search_query = f"{prior} {query}".strip() if prior else query
         yield {"tool": "search_event_knowledge"}
-        result, cites = await search_event_knowledge(ctx, standalone)
+        result, cites = await search_event_knowledge(ctx, search_query)
         citations.extend(cites)
         tool_trace.append({
-            "name": "search_event_knowledge", "arguments": {"query": standalone}, "ok": True,
+            "name": "search_event_knowledge", "arguments": {"query": search_query}, "ok": True,
+            "chunks": _chunk_trace(result),
         })
         messages.append({
             "role": "user",
             "content": "Ngữ cảnh tài liệu tìm được (JSON):\n"
             + json.dumps(result, ensure_ascii=False, default=str),
         })
-        if result.get("count") == 0 and not tools_ran:
+        if result.get("count") == 0:
             text = empty_response_for(event, "no_knowledge")
             yield {"delta": text}
             yield {"done": True, "citations": [], "tool_trace": tool_trace, "text": text}
@@ -248,9 +235,9 @@ async def answer_stream(
         async for delta in llm.stream(system, messages):
             chunks.append(delta)
             yield {"delta": delta}
-    except Exception as exc:
+    except Exception:
         logger.exception("LLM stream failed")
-        yield {"error": str(exc)}
+        yield {"error": GENERIC_ERROR}
         return
 
     text = "".join(chunks)

@@ -125,9 +125,9 @@ async def send_message(
                     if out.get("done"):
                         out["citations"] = citations
                     yield f"data: {json.dumps(out, ensure_ascii=False)}\n\n"
-        except Exception as exc:
+        except Exception:
             logger.exception("chat stream failed for session %s", session_id)
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'error': 'Trợ lý tạm thời không trả lời được, vui lòng thử lại.'})}\n\n"
             return
 
         full_text = "".join(chunks)

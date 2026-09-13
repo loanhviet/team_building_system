@@ -27,12 +27,18 @@ async def ensure_collection(dimension: int) -> None:
         )
 
 
-async def upsert_document(doc_id: int, vector: list[float], payload: dict) -> None:
-    """Upsert one chunk. Name kept for call-site familiarity; id is rag_chunks.id."""
+async def upsert_points(points: list[tuple[int, list[float], dict]]) -> None:
+    """Batch upsert (id, vector, payload) triples in one round trip — avoids
+    one Qdrant call per chunk during reindex."""
+    if not points:
+        return
     client = get_client()
     await client.upsert(
         collection_name=COLLECTION,
-        points=[models.PointStruct(id=doc_id, vector=vector, payload=payload)],
+        points=[
+            models.PointStruct(id=doc_id, vector=vector, payload=payload)
+            for doc_id, vector, payload in points
+        ],
     )
 
 
@@ -75,7 +81,3 @@ async def search_chunks(
         limit=limit,
     )
     return [{"id": p.id, "score": p.score, **(p.payload or {})} for p in result.points]
-
-
-# Back-compat alias used by older tests/callers if any.
-search = search_chunks

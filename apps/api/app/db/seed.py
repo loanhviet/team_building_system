@@ -19,7 +19,6 @@ Reset first: `docker compose exec api python -m app.db.seed --reset`
 
 import argparse
 import asyncio
-import hashlib
 import random
 from datetime import date, datetime, timedelta
 
@@ -45,7 +44,7 @@ from app.models.schedule import Announcement, ScheduleItem
 from app.models.system import AllocationRun
 from app.services.allocation.bus_runner import run_bus_allocation
 from app.services.allocation.runner import run_flight_allocation
-from app.services.event_service import upsert_setting
+from app.services.event_service import get_setting, upsert_setting
 from app.services.gala.gala_service import auto_table_position
 
 LAST_NAMES = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Vũ", "Đặng", "Bùi", "Đỗ"]
@@ -417,39 +416,26 @@ async def seed_schedule(db: AsyncSession, event: Event) -> None:
 
 
 async def seed_knowledge(db: AsyncSession, event: Event) -> None:
-    """Idempotent upsert of terms + FAQ pack by title."""
-    await upsert_setting(db, event.id, "terms_text", TERMS_TEXT)
-    await upsert_setting(db, event.id, "terms_version", TERMS_VERSION)
-    keep_titles = {title for title, _ in KNOWLEDGE_FAQS}
+    """Seed-only demo content (docs/CHAT-RAG.md: pack is AI-generated test
+    data, not real policy). Fill-if-empty, never overwrite: a real event with
+    its own terms/FAQ (typed by BTC, or copied via "Sao chép từ sự kiện
+    khác") must never be clobbered by re-running the seed."""
+    has_terms = await get_setting(db, event.id, "terms_text", None) is not None
+    if not has_terms:
+        await upsert_setting(db, event.id, "terms_text", TERMS_TEXT)
+        await upsert_setting(db, event.id, "terms_version", TERMS_VERSION)
+
+    existing = await db.execute(
+        select(KnowledgeDocument.id).where(KnowledgeDocument.event_id == event.id).limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return
     for title, body in KNOWLEDGE_FAQS:
-        checksum = hashlib.sha256(f"{title}\n{body}".encode()).hexdigest()
-        result = await db.execute(
-            select(KnowledgeDocument).where(
-                KnowledgeDocument.event_id == event.id,
-                KnowledgeDocument.title == title,
+        db.add(
+            KnowledgeDocument(
+                event_id=event.id, title=title, body_md=body, is_published=True,
             )
         )
-        doc = result.scalar_one_or_none()
-        if doc is None:
-            db.add(
-                KnowledgeDocument(
-                    event_id=event.id,
-                    title=title,
-                    body_md=body,
-                    is_published=True,
-                    checksum=checksum,
-                )
-            )
-        else:
-            doc.body_md = body
-            doc.is_published = True
-            doc.checksum = checksum
-    stale = await db.execute(
-        select(KnowledgeDocument).where(KnowledgeDocument.event_id == event.id)
-    )
-    for doc in stale.scalars().all():
-        if doc.title not in keep_titles and doc.is_published:
-            doc.is_published = False
     await db.flush()
 
 

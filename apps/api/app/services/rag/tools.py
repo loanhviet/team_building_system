@@ -152,6 +152,7 @@ async def get_event_context(ctx: ToolContext) -> tuple[dict, list[dict]]:
     payload = {
         "event_id": event.id,
         "event_name": event.name,
+        "description": event.description,
         "destination": event.destination,
         "start_date": event.start_date.isoformat() if event.start_date else None,
         "end_date": event.end_date.isoformat() if event.end_date else None,
@@ -331,6 +332,7 @@ async def search_event_knowledge(
     citations: list[dict] = []
     for hit in hits:
         chunks.append({
+            "id": hit["id"],
             "title": hit["title"],
             "source_type": hit["source_type"],
             "content": hit["content"],

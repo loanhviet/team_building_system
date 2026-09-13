@@ -8,25 +8,50 @@
 
 ## Trạng thái triển khai (đọc cái này trước khi sửa chat)
 
-**Đã ship.** Không còn "embed hành trình cá nhân → cosine top-5". Concierge đang chạy.
+**Đã ship, đã qua một vòng audit sửa lỗi (2026-09).** Không còn "embed hành trình cá nhân → cosine
+top-5". Concierge đang chạy.
 
 | Lớp | Cách chạy |
 |---|---|
 | Sự thật vận hành (bay/xe/phòng/Gala/form **của người đang login**) | SQL tools, `employee_id` từ JWT — `services/rag/tools.py` |
 | Quy định / FAQ / thông báo / lịch mô tả | Hybrid FTS5 + Qdrant trên văn bản **đã publish** |
-| Corpus demo | `apps/api/app/db/knowledge_pack.py` → `seed_knowledge()` ghi vào DB. Chat **không** đọc file Python lúc hỏi |
+| Corpus demo | `apps/api/app/db/knowledge_pack.py` — chỉ `seed_knowledge()` đọc, **chỉ để test/demo**, không phải chính sách thật |
 | UI CBNV | `/chat` — gợi ý theo `event.status` |
-| UI BTC | `/admin/events/{id}/knowledge` — CRUD markdown, confirm khi đăng, nút reindex |
+| UI BTC | `/admin/events/{id}/knowledge` — CRUD markdown, confirm khi đăng, nút reindex, **Sao chép từ sự kiện khác** |
 
-Sau `make seed`, terms v2 + 17 FAQ nằm trong SQLite. Sửa kỳ thật trên admin, rồi reindex. Gọi `seed_knowledge` lần nữa sẽ **đè** FAQ trùng tiêu đề và unpublish FAQ extra.
+### Quy mô & giới hạn (đọc trước khi thêm cơ chế mới)
 
-Qdrant: `docker compose --profile rag up -d qdrant`. Không có Qdrant thì tool SQL vẫn trả lời được; FAQ dựa FTS5. Reindex khi Qdrant down rồi bật sau: phải force re-embed (checksum skip).
+Đo trên seed hiện tại: 120 CBNV, mỗi event có **~35 chunk / ~14KB** văn bản đã publish (terms + 17 FAQ +
+vài thông báo/lịch). Ở quy mô này, cả bộ máy hybrid (Qdrant + embedding CPU + FTS5 + chunking + worker
+reindex) là **dư so với dữ liệu nó phục vụ** — LLM đọc thẳng 14KB rẻ và luôn mới hơn tìm kiếm. Được **giữ
+lại có chủ đích** (không phải bỏ sót) vì hai lý do: (1) sẵn sàng khi BTC upload handbook dài hoặc vài trăm
+FAQ; (2) đúng thứ "vector RAG" khi cần trình bày kiến trúc. Ngưỡng để thấy lợi ích rõ: văn bản đã publish
+vượt **~40–60KB mỗi event**. Dưới ngưỡng đó, đừng thêm rerank/GraphRAG/multi-vector — chi phí vận hành
+(xem "Vận hành kỳ mới" bên dưới) đã đủ cho quy mô này.
 
-Test: `docker compose exec api pytest tests/test_rag_*.py tests/test_knowledge_pack.py`. Live: `nv010@teambuilding.vn` / `NV010` (phòng 102), `nv011` / `NV011` (phòng 103), `btc@teambuilding.vn` / `btc123`.
+### Vận hành kỳ mới
+
+1. Tạo event → **Cấu hình**: nhập quy định thật (mặc định là câu ngắn generic, không phải bản demo).
+2. Tab **Hỏi đáp** → **Sao chép từ sự kiện khác** → chọn kỳ trước → FAQ trùng tiêu đề bị bỏ qua, phần còn
+   lại vào dưới dạng **bản nháp**. Sửa nội dung cho đúng kỳ này rồi **Đăng** từng bài (confirm dialog — đăng
+   là công khai cho toàn bộ CBNV qua chat).
+3. `seed_knowledge()` (chạy trong `make seed`) chỉ **điền khi trống** — event đã có FAQ/terms riêng thì
+   seed không đụng vào, an toàn chạy lại nhiều lần trên môi trường đang có dữ liệu thật.
+
+Qdrant: `docker compose --profile rag up -d qdrant`. Không có Qdrant thì tool SQL vẫn trả lời được; FAQ dựa
+FTS5. Reindex khi Qdrant down: chunk vẫn được đánh index vào FTS ngay; `rag_documents.indexed_at` ở lại
+NULL và lần reindex **kế tiếp** tự embed lại — không cần thao tác "force re-embed" thủ công.
+
+Test: `docker compose exec api pytest tests/test_rag_*.py tests/test_knowledge_pack.py`. Live:
+`nv010@teambuilding.vn` / `NV010` (phòng 102), `nv011` / `NV011` (phòng 103), `btc@teambuilding.vn` /
+`btc123`.
 
 ---
 
-Phần dưới là thiết kế gốc (audit Phase 8, vì sao không RAG thường, lấy gì từ RAGFlow). Code đã theo kiến trúc đó — đừng implement lại pipeline cũ.
+Phần dưới là thiết kế gốc (audit Phase 8, vì sao không RAG thường, lấy gì từ RAGFlow). Code đã theo kiến
+trúc đó — đừng implement lại pipeline cũ. Phần "Vấn đề" trong bảng audit gốc (mục 1.3) đã sửa xong đợt
+2026-09; xem lịch sử git commit cho chi tiết fix (ngưỡng liên quan trước boost, reindex 2 pha, provider
+Anthropic giả bị bỏ, v.v.) thay vì đọc lại như còn tồn đọng.
 
 ---
 

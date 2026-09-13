@@ -3,12 +3,19 @@
 Mirrors RAGFlow's text+vector mix without bringing Elasticsearch. A miss on
 either side is fine — Qdrant down still answers 'VN001' via FTS; FTS miss
 still answers 'quy định hủy' via vectors.
+
+Relevance gate: a hit must actually match something (nonzero FTS rank score,
+or a vector hit at/above VECTOR_MIN) *before* SOURCE_BOOST is added. The boost
+only re-ranks among relevant hits — it must never be what makes an unrelated
+chunk clear the bar, or every query returns 6 chunks of noise and
+`empty_response_for(..., "no_knowledge")` never fires.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +27,10 @@ logger = logging.getLogger("app")
 
 TEXT_WEIGHT = 0.4
 VECTOR_WEIGHT = 0.6
-SIMILARITY_THRESHOLD = 0.12
+# Below this cosine score a vector hit is treated as noise, not a match —
+# calibrated against the seed knowledge pack (in-scope questions score
+# well above this; out-of-scope ones like "thời tiết" fall below it).
+VECTOR_MIN = 0.45
 TOP_CANDIDATES = 20
 TOP_N = 6
 # Policy/how-to docs beat schedule titles that merely share a word like "Gala".
@@ -30,9 +40,25 @@ SOURCE_BOOST = {
     "announcement": 0.05,
 }
 
+# Vietnamese function words that add no retrieval signal ("của tôi", "thế
+# nào", "có ... không") — left in the query they'd OR-match nearly every
+# chunk in FTS and mask the real gate above.
+_STOPWORDS = {
+    "toi", "cua", "la", "va", "the", "nao", "co", "khong", "duoc", "gi",
+    "nhu", "khi", "de", "voi", "cho", "nhung", "hay", "hoac", "a", "ban",
+    "minh", "tai", "sao", "sao vay", "vay", "roi", "da", "se", "bi", "o",
+    "trong", "ngoai", "tren", "duoi", "nay", "do", "day", "kia", "ay",
+}
+
+
+def _fold(text_: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", unicodedata.normalize("NFC", text_))
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
 
 def _fts_match_query(query: str) -> str | None:
     tokens = re.findall(r"[0-9A-Za-zÀ-ỹ_]+", query, flags=re.UNICODE)
+    tokens = [t for t in tokens if _fold(t) not in _STOPWORDS]
     if not tokens:
         return None
     # Quote each token so user punctuation cannot break MATCH syntax.
@@ -126,6 +152,11 @@ def _fuse(fts_hits: list[dict], vec_hits: list[dict]) -> list[dict]:
                 existing["content"] = hit.get("content")
     fused = []
     for item in merged.values():
+        # Gate on an actual match *before* the source boost — otherwise a
+        # boost alone (e.g. every faq chunk +0.35) would clear any threshold
+        # regardless of relevance.
+        if item["text_score"] <= 0 and item["vec_score"] < VECTOR_MIN:
+            continue
         item["score"] = TEXT_WEIGHT * item["text_score"] + VECTOR_WEIGHT * item["vec_score"]
         item["score"] += SOURCE_BOOST.get(item.get("source_type") or "", 0.0)
         fused.append(item)
@@ -145,4 +176,4 @@ async def hybrid_search(
     fts_hits = await _fts_search(db, query, event_id, TOP_CANDIDATES, source_types)
     vec_hits = await _vector_search(query, event_id, TOP_CANDIDATES, source_types)
     fused = _fuse(fts_hits, vec_hits)
-    return [h for h in fused if h["score"] >= SIMILARITY_THRESHOLD][:top_n]
+    return fused[:top_n]
