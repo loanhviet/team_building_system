@@ -7,10 +7,12 @@
 > Tài liệu này được viết để **một agent/người khác mở ra là code được ngay**, không cần đọc lại
 > hội thoại nào. Mỗi phase có checklist `- [ ]`, file + dòng cụ thể, và điều kiện nghiệm thu.
 
-Ngày lập: 2026-09-12 · Trạng thái: R0-R5 xong, browser đã kết nối được và đã click-through rộng (không
-theo đúng kịch bản R6) — tìm + sửa 4 lỗi thật (Select/RadioGroup controlled-value, seed thiếu
-params_json). R6 CHƯA xong: còn thiếu kịch bản đăng ký 3 người, đóng đăng ký→phân bổ→công bố trọn
-luồng, đua 2 tab Gala, và test 390px thật
+Ngày lập: 2026-09-12, cập nhật 2026-09-13 · Trạng thái: R0-R5 xong. R6: kịch bản 8 bước BRD §14 đã chạy
+trọn qua browser thật — đăng ký 3 CBNV (đủ cả nhánh Có tham gia/Không tham gia), đóng đăng ký → phân bổ
+bay có chỉnh tay + validation → phân phòng/xe → Gala (bốc thăm + race 2 tab đã test riêng) → công bố bấm
+thật, MailHog nhận đủ mail. Không phát hiện bug mới trong lượt chạy này (4 lỗi thật trước đó — Select/
+RadioGroup controlled-value, seed thiếu params_json — đã sửa, xem lịch sử commit). R6 còn thiếu: test
+390px thật (giới hạn công cụ phiên trước, chưa thử lại) và ghi GIF
 
 ---
 
@@ -774,23 +776,33 @@ Rủi ro cụ thể cần click thật trước khi coi R5 là "xong" theo đún
 
 - [x] `docker compose exec api python -m app.db.seed --reset` (tương đương phần dữ liệu của bước
       `make down/up/migrate/seed` — không restart lại container vì stack đã chạy sẵn)
-- [ ] BTC login → Event B: kiểm tra cấu hình → mở đăng ký _(đã login + xem dashboard/Sự kiện, chưa
-      chủ động bấm "mở đăng ký" vì Event B đã ở `registration_open` sẵn từ seed)_
-- [ ] 3 CBNV khác nhau đăng ký (1 người chọn Không tham gia) — **mới làm 1/3**: nv001 đăng ký "Không
-      tham gia" trên Event B trọn luồng (submit → email → summary → xem lại/sửa), MailHog nhận đúng
-      mail `registration_confirmed`. Chưa thử 2 người còn lại (nhất là chưa thử luồng "Có tham gia" +
-      chọn ca + tick xe, vì đó là nhánh code chưa test qua browser)
-- [ ] Đóng đăng ký → import/allocation/xử lý flag/chỉnh tay từng người + cả Team — **chưa làm**; chỉ mới
-      xem panel Chuyến bay ở trạng thái đã có sẵn dữ liệu (không tự chạy lại allocation/import trong
-      phiên này)
-- [ ] Import phân phòng → tạo xe đủ trường → chạy phân xe → sửa 1 xe — **chưa làm** việc tạo xe mới/
-      chạy phân xe; chỉ xem panel Xe với dữ liệu có sẵn
+- [x] BTC login → Event B: kiểm tra cấu hình → mở đăng ký — **xong (2026-09-13)**: Event B (TB2027) mở
+      lại từ `registration_closed` → `registration_open` qua nút thật (có `ConfirmDialog`), không phải
+      trạng thái có sẵn từ seed
+- [x] 3 CBNV khác nhau đăng ký (1 người chọn Không tham gia) — **xong (2026-09-13), đủ 3/3**: nv001 "Không
+      tham gia" (phiên trước) + nv004 "Có tham gia, Ca 1, tick 2 chặng chiều đi" + nv005 "Có tham gia,
+      Ca 2, tick 2 chặng chiều về" (nhánh "Có tham gia" chưa từng qua browser trước đó) — cả 2 nộp
+      thành công, MailHog nhận đúng mail xác nhận từng người
+- [x] Đóng đăng ký → import/allocation/xử lý flag/chỉnh tay từng người + cả Team — **xong (2026-09-13)**:
+      thêm slot bay thật (VN201 outbound, VN301 inbound) vì slot seed chỉ đủ 1 chỗ; "Chạy phân bổ tự
+      động" cho cả 2 chiều → 4/4 xếp, đúng gắn cờ `Không đúng ca` (2 người) và `Team bị tách: Sales`
+      (seed cũ); thử chỉnh tay 1 người sang chuyến đã đầy chỗ → cảnh báo "chỉ còn sức chứa 1, sau khi
+      chuyển sẽ có 2 người" + nút "Vẫn ghi đè sức chứa" riêng (huỷ, không ép ghi đè) — xác nhận validation
+      thật, không phải chỉ chặn cứng
+- [x] Import phân phòng → tạo xe đủ trường → chạy phân xe → sửa 1 xe — **xong (2026-09-13)**: tạo khách
+      sạn + loại phòng + 2 phòng thật, gán tay đủ 4 người (ưu tiên cùng Team, đúng thiết kế); tạo xe XE01
+      cho chặng Nhà/Văn phòng → Sân bay, "Chạy phân xe tự động" → 2/2 xếp không lỗi; sửa tay tên trưởng
+      xe + ghi chú, xác nhận cập nhật đúng
 - [x] Dựng sơ đồ Gala → bốc thăm → 2 trình duyệt cùng bấm 1 ghế — **xong (2026-09-13)**, xem chi tiết
-      kịch bản + kết quả ở mục "Đã kiểm chứng" bên dưới
-- [ ] Công bố thông tin (qua checklist mới) → kiểm tra mail hàng loạt — **chỉ test dialog xác nhận rồi
-      Huỷ** (cố ý không bấm thật để tránh gửi ~120 email giả cho seed data); dialog + checklist cảnh
-      báo hiện đúng, nhưng luồng gửi mail thật cho `information_published` chưa được xác nhận qua
-      browser
+      kịch bản + kết quả ở mục "Đã kiểm chứng" bên dưới. Riêng Event B cũng dựng cấu hình + 1 bàn + bốc
+      thăm + bắt đầu lượt thật (không lặp lại race 2-tab, đã chứng minh ở event test riêng)
+- [x] Công bố thông tin (qua checklist mới) → kiểm tra mail hàng loạt — **xong (2026-09-13), bấm thật**:
+      chuyển `registration_closed` → `allocation_processing` → `information_published`; dialog công bố
+      hiện đúng "Sẽ gửi email công bố hành trình cho 4 người tham gia" + cảnh báo "3 ca bay đang bị flag"
+      trước khi cho xác nhận; sau khi bấm, MailHog nhận đủ 4 mail "Thông tin hành trình ... đã được công
+      bố", đúng tên từng người trong nội dung; đăng nhập lại 1 CBNV (nv004), trang Hành trình hiện đúng
+      chuyến bay/xe (kèm tên trưởng xe vừa sửa tay)/phòng/trạng thái Gala — không có gì phải né lần này
+      vì đây là dữ liệu test, không phải danh sách CBNV thật
 - [ ] CBNV xem Journey ở khung 390px — **không thực hiện được**: `resize_window` (cả tab hiện tại lẫn
       tab mới) không thực sự thu nhỏ cửa sổ trình duyệt trong môi trường này (`window.innerWidth` vẫn
       báo 1920 sau khi gọi resize) — đây là giới hạn công cụ của phiên này, không phải đã kiểm tra và
@@ -805,8 +817,8 @@ Rủi ro cụ thể cần click thật trước khi coi R5 là "xong" theo đún
 - [ ] Cập nhật README nếu số tài khoản/lệnh seed thay đổi
 - [ ] Điền "Đã kiểm chứng" cho R0–R6 ở tài liệu này
 
-**Đã kiểm chứng — R6 CHƯA XONG, đây là ghi nhận một phiên browser-testing thật đầu tiên (không theo
-kịch bản đủ 8 bước ở trên, mà đi lướt qua gần hết các màn hình R2–R5 để tìm lỗi thật):**
+**Đã kiểm chứng — phiên browser-testing đầu tiên (2026-09-12), ghi nhận trước khi kịch bản 8 bước chạy
+trọn ở phiên 2026-09-13 phía trên:**
 
 `claude-in-chrome` đã kết nối được lần đầu trong đợt rebuild này. Thay vì chạy đúng kịch bản 8 bước ở
 trên từ đầu đến cuối, phiên này đi kiểm tra rộng — gần như mọi màn hình Admin (Tổng quan, Sự kiện,
