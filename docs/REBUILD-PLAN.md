@@ -785,8 +785,8 @@ Rủi ro cụ thể cần click thật trước khi coi R5 là "xong" theo đún
       phiên này)
 - [ ] Import phân phòng → tạo xe đủ trường → chạy phân xe → sửa 1 xe — **chưa làm** việc tạo xe mới/
       chạy phân xe; chỉ xem panel Xe với dữ liệu có sẵn
-- [ ] Dựng sơ đồ Gala → bốc thăm → 2 trình duyệt cùng bấm 1 ghế — **chưa làm** (cần 2 tab/2 phiên đăng
-      nhập khác nhau cùng lúc, chưa dựng kịch bản này)
+- [x] Dựng sơ đồ Gala → bốc thăm → 2 trình duyệt cùng bấm 1 ghế — **xong (2026-09-13)**, xem chi tiết
+      kịch bản + kết quả ở mục "Đã kiểm chứng" bên dưới
 - [ ] Công bố thông tin (qua checklist mới) → kiểm tra mail hàng loạt — **chỉ test dialog xác nhận rồi
       Huỷ** (cố ý không bấm thật để tránh gửi ~120 email giả cho seed data); dialog + checklist cảnh
       báo hiện đúng, nhưng luồng gửi mail thật cho `information_published` chưa được xác nhận qua
@@ -842,10 +842,45 @@ lại đúng lựa chọn đã lưu), Gala CBNV (hàng chờ lượt bốc thăm
 của mình" không che mất gạch ngang — chỉ là ảnh chụp màn hình lúc đầu zoom chưa đủ, xem kỹ lại thì
 đúng).
 
-**Việc mở khoá cho phiên R6 tiếp theo:** chạy đúng 8 bước kịch bản BRD §14 còn thiếu ở trên — đặc biệt
-kịch bản 2 trình duyệt bấm cùng 1 ghế Gala (chỉ có thể test thật bằng trình duyệt, không mô phỏng được
-bằng curl tuần tự) và test ở khung 390px thật (cần môi trường mà `resize_window` hoạt động, hoặc test
-trên thiết bị di động thật / DevTools device toolbar thủ công).
+**Việc mở khoá cho phiên R6 tiếp theo:** test ở khung 390px thật (cần môi trường mà `resize_window` hoạt
+động, hoặc test trên thiết bị di động thật / DevTools device toolbar thủ công); phần còn lại của kịch bản
+8 bước BRD §14 (allocation/import xe-phòng thật, gửi mail hàng loạt thật, 2/3 CBNV còn lại, GIF).
+
+### 2026-09-13 — Gala: 2 trình duyệt cùng bấm 1 ghế (`claude-in-chrome` đã kết nối)
+
+**Dựng kịch bản:** event nháp riêng (không đụng data demo TB2026/2027) — 2 CBNV thật (NV002 Marketing,
+NV003 Human Resources, đều `team_leader`) được thêm đăng ký `submitted`+tham gia; BTC cấu hình Gala
+(`fixed_quota=2`, 1 bàn 4 ghế), bốc thăm → HR đi trước, Marketing sau; BTC bấm bắt đầu lượt HR.
+
+**Test 1 — race thật ở tầng network** (không phải 2 tab tuần tự — 2 luồng Python bắn `POST
+.../seats/{id}/hold` cùng lúc lên cùng 1 ghế, cùng token): đúng **1 request thành công** (`held`), request
+còn lại nhận `409 seat_unavailable` sạch, không lỗi 500, không double-hold. Xác nhận khoá Redis
+(`SETNX ... nx=True`) là điểm chốt an toàn thật — không phải check `seat.status` phía DB (check đó có
+khoảng hở race, khoá Redis mới là thứ chặn).
+
+**Test 2 — 2 tab trình duyệt thật, cùng tài khoản trưởng nhóm** (không có 2 tài khoản `team_leader` khác
+nhau cùng 1 Team trong seed để mô phỏng "2 người thật của cùng Team"; đây là cách tái hiện gần nhất —
+1 người mở nhầm 2 tab/2 thiết bị, đúng tình huống BRD lo ngại):
+- Bấm ghế "2" gần như đồng thời ở cả 2 tab khi đang tới lượt Marketing: tab A giữ ghế trước, tab B thấy
+  ghế chuyển "đang chọn" qua WebSocket **trước khi kịp gửi request thứ hai** nên UI tự chuyển hành vi
+  click từ "giữ" sang "xác nhận" (đúng team) → không lỗi, cả 2 tab cùng thấy ghế "2" chuyển "Team bạn"
+  (đã xác nhận) tức thời, không cần refresh.
+- Xác nhận nốt ghế "1" → đủ quota 2/2 → lượt Marketing tự chuyển "Đã kết thúc" (gạch ngang, header cập
+  nhật) đồng thời trên cả 2 tab qua WS `turn_update`, không cần BTC bấm gì thêm (đây là lượt cuối, 2/2
+  team đã xong).
+- Bấm ghế còn trống (ghế "4") sau khi hết lượt: client không gửi request nào (`isMyTurn` đã false) — chặn
+  ở UI trước khi chạm server, nhất quán với chặn `not_your_turn` phía API đã thấy ở lượt HR khi lượt đó
+  hết giờ giữa chừng lúc đang thao tác (cron `expire_gala_holds_task` tự chuyển "expired" → tự kích hoạt
+  lượt kế, đúng lúc đang gọi API nên bắt được `403 not_your_turn` sống, không phải suy luận từ code).
+
+**Kết luận:** cơ chế race hoạt động đúng thiết kế — khoá thật nằm ở Redis (test 1), UI tầng trên chỉ là
+tiện ích đồng bộ qua WebSocket chứ không phải nguồn chống trùng ghế (test 2 cho thấy UI có thể "hợp tác"
+converts hold→confirm khi cùng Team, nhưng tầng dưới vẫn là request tuần tự thật, không có 2 ghi đồng
+thời). Không phát hiện lỗi mới ở Gala trong lượt test này.
+
+Dữ liệu test (event nháp + 2 registration chèn thẳng qua DB để có đủ 2 Team dự bốc thăm, không đi lại
+luồng đăng ký — luồng đăng ký đã test riêng ở mục trên) vẫn còn trong `data/teambuilding.db`, không ảnh
+hưởng TB2026/TB2027.
 
 ---
 
