@@ -1,3 +1,18 @@
+# Whole stack from a fresh clone: `docker compose up -d --build`
+# (.env is optional — defaults below are enough to run locally).
+# docker-compose.override.yml is auto-loaded by plain `docker compose` and only
+# switches api/worker/web to hot-reload dev mode; to run the production-style
+# build alone use `docker compose -f docker-compose.yml up -d --build`.
+
+x-api-env: &api-env
+  # Container-internal wiring; code defaults point at localhost, which is wrong
+  # inside a container. `${VAR:-default}` still lets .env override each one.
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+  SMTP_HOST: ${SMTP_HOST:-mailhog}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SEED_DEMO: ${SEED_DEMO:-1}
+
 services:
   redis:
     image: redis:7-alpine
@@ -9,6 +24,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # Catches all outgoing email (UI :8025). Point SMTP_HOST at a real server in
+  # .env for a real deployment.
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
 
   qdrant:
     image: qdrant/qdrant:v1.18.2
@@ -25,7 +47,9 @@ services:
     build:
       context: ./apps/api
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment: *api-env
     volumes:
       - ./data:/data
     ports:
@@ -33,18 +57,30 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
 
   worker:
     build:
       context: ./apps/api
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment: *api-env
     volumes:
       - ./data:/data
     depends_on:
       redis:
+        condition: service_healthy
+      # api runs migrations on start; the worker's 5s Gala cron would hit
+      # missing tables on a fresh DB if it started first.
+      api:
         condition: service_healthy
     command: arq app.worker.settings.WorkerSettings
 
@@ -54,7 +90,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     env_file:
-      - .env
+      - path: .env
+        required: false
     ports:
       - "3000:3000"
     depends_on:

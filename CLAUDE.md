@@ -54,7 +54,7 @@ All commands assume the stack is running via Docker (`make up`); there is no loc
 documented — services run inside containers.
 
 ```bash
-make up              # docker compose up -d --build (api, worker, web, redis; +mailhog in dev override)
+make up              # docker compose up -d --build (api, worker, web, redis, mailhog); api auto-migrates + seeds
 make down             # stop everything
 make logs s=worker     # tail logs for one service (s=api|worker|web|redis)
 make migrate           # alembic upgrade head (inside api container)
@@ -77,9 +77,16 @@ rewritten to produce complete, realistic data (flights with real times/airports,
 pickup points, a fully-seated Gala floor plan, a published event) instead of the previous skeletal
 smoke-test data — see `docs/REBUILD-PLAN.md` §R0 before relying on its output.
 
+**Fresh clone runs with one command:** `docker compose up -d --build` — `.env` is optional (`env_file`
+`required: false`; container wiring like `REDIS_URL`/`SMTP_HOST` has `${VAR:-default}` in
+`docker-compose.yml`). The api image's `apps/api/entrypoint.sh` runs `alembic upgrade head`, then the
+idempotent demo seed when `SEED_DEMO=1` (default; set `0` for a real deployment — demo passwords are
+public), then uvicorn. `worker` waits for `api` to be healthy so its 5s Gala cron never hits an
+unmigrated DB. MailHog (`:8025`) is in the base file and catches all outgoing email.
+
 `docker-compose.override.yml` is picked up automatically by plain `docker compose` commands and switches
-everything to dev mode (bind-mounted source, `uvicorn --reload`, `next dev` with Turbopack, `arq --watch`,
-plus a MailHog container on `:8025` that catches all outgoing email instead of sending it).
+api/worker/web to dev mode (bind-mounted source, `entrypoint.sh --reload`, `next dev` with Turbopack,
+`arq --watch`). `docker compose -f docker-compose.yml up -d --build` runs the production-style build alone.
 
 Qdrant is gated behind the `rag` compose profile: `docker compose --profile rag up -d qdrant`.
 Plain `make up` does **not** start it. Chat **SQL tools still work without Qdrant** (journey/registration
@@ -89,8 +96,8 @@ FTS and `rag_documents.indexed_at` simply stays NULL; the *next* reindex retries
 manual "force re-embed" step needed.
 
 **Gotcha:** Compose merges `profiles:` lists as a union, not an override — a service's `profiles` key
-cannot be cleared from the override file. This is why MailHog is defined as a whole separate service block
-in `docker-compose.override.yml` rather than as a `profiles: []` override on a base-file service.
+cannot be cleared from the override file. Don't put a service behind a profile in the base file expecting
+the override to "turn it on" (why MailHog lives unprofiled in the base file).
 
 ## ChatRAG concierge (implemented)
 

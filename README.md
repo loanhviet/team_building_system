@@ -15,20 +15,25 @@ Tailwind, TanStack Query) · SQLite (WAL) · Redis + ARQ (queue nền + khoá gh
 Yêu cầu: Docker + Docker Compose.
 
 ```bash
-cp .env.example .env        # chỉnh JWT_SECRET; DASHSCOPE_API_KEY nếu dùng hỏi đáp
-make up                      # dựng toàn bộ stack, hot-reload cho dev
-make seed                     # tạo dữ liệu mẫu: 1 super_admin, 1 organizer, 120 CBNV, 2 event + FAQ pack
+docker compose up -d --build   # clone về là chạy: migrate + seed dữ liệu mẫu tự động, không cần .env
 ```
+
+Lần đầu mất vài phút (build image + seed 120 CBNV, 2 event + FAQ pack). Tuỳ chọn:
+
+- `cp .env.example .env` rồi chỉnh khi cần: `JWT_SECRET`, `DASHSCOPE_API_KEY` (hỏi đáp), SMTP thật.
+- `SEED_DEMO=0` trong `.env` cho môi trường thật — tài khoản mẫu có mật khẩu công khai ở bảng dưới.
+- `docker compose up` thường tự nạp `docker-compose.override.yml` (hot-reload dev). Chạy bản build
+  production-style: `docker compose -f docker-compose.yml up -d --build`.
 
 - Web: http://localhost:3000 — CBNV vào `/register`, `/journey`, `/gala/{id}`, `/chat`, `/team` (trưởng nhóm), `/account`
 - API docs (Swagger): http://localhost:8000/docs
-- MailHog (bắt email dev): http://localhost:8025
+- MailHog (bắt mọi email gửi đi): http://localhost:8025
 - Qdrant (hybrid vector cho FAQ; FTS5 vẫn chạy không cần): `docker compose --profile rag up -d qdrant`
 - ChatRAG: thiết kế + cách chạy [`docs/CHAT-RAG.md`](docs/CHAT-RAG.md). BTC soạn FAQ tại `/admin/events/{id}/knowledge`. Corpus demo trong `apps/api/app/db/knowledge_pack.py` chỉ là seed, không phải nguồn lúc hỏi.
 
 CBNV import từ Excel lần đầu có `must_change_password` — hệ thống ép vào `/account` trước khi dùng portal.
 
-Tài khoản đăng nhập sau khi `make seed` (in ra ở cuối log seed):
+Tài khoản mẫu (seed tự chạy khi api khởi động; CBNV đổi mật khẩu lần đầu đăng nhập):
 
 | Vai trò | Email | Mật khẩu |
 |---|---|---|
@@ -59,9 +64,9 @@ Xem đầy đủ trong [`.env.example`](.env.example). Đáng chú ý:
 - `DATABASE_URL` — mặc định SQLite trên bind mount `./data`, backup bằng cách copy file `.db` khi không có
   tiến trình nào đang ghi.
 - `JWT_SECRET` — **phải đổi** trước khi dùng ngoài môi trường dev.
-- `LLM_PROVIDER` — `anthropic` (mặc định) hoặc `dashscope` (Alibaba Cloud/Qwen, dùng endpoint tương thích
-  OpenAI). Cấu hình `ANTHROPIC_API_KEY` hoặc `DASHSCOPE_API_KEY`/`DASHSCOPE_BASE_URL`/`DASHSCOPE_MODEL`
-  tương ứng. `EMBEDDING_PROVIDER` hiện chỉ có `local` (fastembed, chạy CPU, tự tải model lần đầu dùng).
+- `LLM_PROVIDER` — chỉ có `dashscope` (Alibaba Cloud/Qwen, endpoint tương thích OpenAI): cấu hình
+  `DASHSCOPE_API_KEY`/`DASHSCOPE_BASE_URL`/`DASHSCOPE_MODEL`. `EMBEDDING_PROVIDER` hiện chỉ có `local`
+  (fastembed, chạy CPU, tự tải model lần đầu dùng).
 
 ## Backup SQLite
 

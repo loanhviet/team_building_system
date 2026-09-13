@@ -1,15 +1,10 @@
+# Dev mode, auto-loaded by plain `docker compose`: bind-mounted source + hot reload.
 services:
-  mailhog:
-    image: mailhog/mailhog
-    ports:
-      - "8025:8025"
-
   api:
     volumes:
       - ./apps/api:/app
       - ./data:/data
-    command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: ["sh", "./entrypoint.sh", "--reload"]
 
   worker:
     volumes:
