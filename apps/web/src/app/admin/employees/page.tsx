@@ -1,14 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ActivePill } from "@/components/domain/active-pill";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { JobProgress } from "@/components/domain/job-progress";
 import { WorkspaceHeader } from "@/components/domain/workspace-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,7 +19,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -169,18 +169,27 @@ export default function EmployeesPage() {
       key: "full_name",
       header: "Họ tên",
       cell: (emp) => (
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-2.5">
           <InitialsAvatar name={emp.full_name} className="size-8" />
-          <span className="font-medium">{emp.full_name}</span>
+          <span className="min-w-0">
+            <span className="block font-medium">{emp.full_name}</span>
+            <span className="block truncate text-xs text-muted-foreground">{emp.email}</span>
+          </span>
         </span>
       ),
       sortValue: (emp) => emp.full_name,
     },
-    { key: "email", header: "Email", cell: (emp) => emp.email, sortValue: (emp) => emp.email },
     {
       key: "team_name",
       header: "Team",
-      cell: (emp) => emp.team_name ?? "—",
+      cell: (emp) =>
+        emp.team_name ? (
+          <span className="inline-flex rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+            {emp.team_name}
+          </span>
+        ) : (
+          "—"
+        ),
       sortValue: (emp) => emp.team_name ?? "",
     },
     {
@@ -193,21 +202,14 @@ export default function EmployeesPage() {
     {
       key: "is_active",
       header: "Trạng thái",
-      cell: (emp) => (
-        <Badge variant={emp.is_active ? "default" : "secondary"}>
-          {emp.is_active ? "Hoạt động" : "Ngừng"}
-        </Badge>
-      ),
+      cell: (emp) => <ActivePill active={emp.is_active} />,
+      sortValue: (emp) => (emp.is_active ? 1 : 0),
     },
     {
-      key: "actions",
+      key: "chevron",
       header: "",
-      className: "text-right",
-      cell: (emp) => (
-        <Button variant="outline" onClick={() => openEdit(emp)}>
-          Sửa hồ sơ
-        </Button>
-      ),
+      className: "w-8",
+      cell: () => <ChevronRight className="size-4 text-muted-foreground/60" aria-hidden="true" />,
     },
   ];
 
