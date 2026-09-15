@@ -8,6 +8,7 @@ class FlightCreate(BaseModel):
     airline: str | None = None
     direction: str
     shift_id: int | None = None
+    site_id: int | None = None
     depart_at: datetime | None = None
     arrive_at: datetime | None = None
     origin: str | None = None
@@ -21,6 +22,7 @@ class FlightUpdate(BaseModel):
     airline: str | None = None
     direction: str | None = None
     shift_id: int | None = None
+    site_id: int | None = None
     depart_at: datetime | None = None
     arrive_at: datetime | None = None
     origin: str | None = None
@@ -36,6 +38,7 @@ class FlightOut(BaseModel):
     airline: str | None
     direction: str
     shift_id: int | None
+    site_id: int | None
     depart_at: datetime | None
     arrive_at: datetime | None
     origin: str | None
@@ -93,3 +96,8 @@ class AdjustAssignmentRequest(BaseModel):
     flight_id: int
     reason: str
     force: bool = False
+
+
+class UnlockAssignmentRequest(BaseModel):
+    direction: str
+    employee_ids: list[int]

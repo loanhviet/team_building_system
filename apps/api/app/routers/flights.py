@@ -5,7 +5,7 @@ from typing import Annotated
 import openpyxl
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
@@ -16,7 +16,7 @@ from app.core.time import utcnow
 from app.models.auth import User
 from app.models.event import Event, Shift
 from app.models.flight import Flight, FlightAssignment
-from app.models.organization import Employee
+from app.models.organization import Employee, Site
 from app.models.registration import Registration
 from app.models.system import AllocationRun, Job
 from app.schemas.flight import (
@@ -28,11 +28,16 @@ from app.schemas.flight import (
     FlightCreate,
     FlightOut,
     FlightUpdate,
+    UnlockAssignmentRequest,
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
-from app.services.notification.email_service import dispatch_email, enqueue_email
+from app.services.notification.email_service import (
+    PUBLISHED_STATUSES,
+    dispatch_email,
+    enqueue_email,
+)
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
@@ -70,22 +75,73 @@ async def create_flight(
     return flight
 
 
+# fields that matter to a passenger already booked on the flight — changing
+# any of these after publish is what triggers the "flight_changed" email
+PASSENGER_FACING_FIELDS = {"flight_code", "direction", "site_id", "depart_at", "arrive_at"}
+
+
 @router.patch("/flights/{flight_id}", response_model=FlightOut)
 async def update_flight(
-    event_id: int, flight_id: int, payload: FlightUpdate, db: DbSession, user: AdminUser
+    event_id: int,
+    flight_id: int,
+    payload: FlightUpdate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> Flight:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
     flight = await master_data.get_or_404(db, Flight, flight_id, event_id=event_id)
     before = FlightOut.model_validate(flight).model_dump(mode="json")
-    await master_data.update(db, flight, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+
+    if data.get("capacity") is not None:
+        assigned_count = (
+            await db.execute(
+                select(func.count(FlightAssignment.id)).where(
+                    FlightAssignment.flight_id == flight_id
+                )
+            )
+        ).scalar_one()
+        if data["capacity"] < assigned_count:
+            raise AppError(
+                "capacity_below_assigned",
+                f"Chuyến này đã có {assigned_count} người, không thể đặt sức chứa thấp hơn",
+                status.HTTP_409_CONFLICT,
+            )
+
+    await master_data.update(db, flight, data)
+    after = FlightOut.model_validate(flight).model_dump(mode="json")
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="flight", entity_id=flight_id,
-        before=before, after=FlightOut.model_validate(flight).model_dump(mode="json"),
-        event_id=event_id,
+        before=before, after=after, event_id=event_id,
     )
     await db.commit()
     await db.refresh(flight)
+
+    changed_passenger_fields = any(before.get(f) != after.get(f) for f in PASSENGER_FACING_FIELDS)
+    if changed_passenger_fields and event.status.value in PUBLISHED_STATUSES:
+        result = await db.execute(
+            select(Employee).join(
+                FlightAssignment, FlightAssignment.employee_id == Employee.id
+            ).where(FlightAssignment.event_id == event_id, FlightAssignment.flight_id == flight_id)
+        )
+        outbox_ids = []
+        for employee in result.scalars().all():
+            outbox_id = await enqueue_email(
+                db, event_id=event_id, to_email=employee.email,
+                template_code="flight_changed",
+                payload={
+                    "full_name": employee.full_name, "event_name": event.name,
+                    "flight_code": flight.flight_code, "app_url": settings.app_base_url,
+                },
+                dedupe_key=f"flight_changed:{event_id}:{employee.id}:{flight_id}:{utcnow().isoformat()}",
+            )
+            outbox_ids.append(outbox_id)
+        await db.commit()
+        for outbox_id in outbox_ids:
+            await dispatch_email(queue, outbox_id)
+
     return flight
 
 
@@ -112,6 +168,10 @@ async def import_flights(
             status.HTTP_400_BAD_REQUEST,
         )
 
+    sites_by_code = {
+        s.code: s.id for s in (await db.execute(select(Site))).scalars().all()
+    }
+
     ok_rows = 0
     errors: list[dict] = []
     for index, raw_row in enumerate(rows_iter, start=2):
@@ -126,6 +186,9 @@ async def import_flights(
                 depart_at = row.get("depart_at")
                 arrive_at = row.get("arrive_at")
                 flight_code = str(row["flight_code"]).strip()
+                site_code = str(row["site_code"]).strip() if row.get("site_code") else None
+                if site_code and site_code not in sites_by_code:
+                    raise ValueError(f"site_code '{site_code}' không tồn tại")
 
                 # upsert by (event_id, flight_code): re-importing the same file
                 # (or a corrected one) updates the existing flight in place
@@ -142,6 +205,7 @@ async def import_flights(
 
                 flight.airline = str(row["airline"]).strip() if row.get("airline") else None
                 flight.direction = direction
+                flight.site_id = sites_by_code.get(site_code) if site_code else None
                 flight.depart_at = depart_at if isinstance(depart_at, datetime) else None
                 flight.arrive_at = arrive_at if isinstance(arrive_at, datetime) else None
                 flight.origin = str(row["origin"]).strip() if row.get("origin") else None
@@ -168,8 +232,8 @@ async def import_flights(
 async def download_flight_template(event_id: int, _user: AdminUser) -> object:
     return xlsx_file(
         "Chuyen bay",
-        ["flight_code", "direction", "capacity", "airline", "origin", "destination", "depart_at", "arrive_at", "note"],
-        [["VN123", "outbound", 180, "Vietnam Airlines", "HAN", "DAD", "2026-12-20 08:00", "2026-12-20 09:20", ""]],
+        ["flight_code", "direction", "capacity", "site_code", "airline", "origin", "destination", "depart_at", "arrive_at", "note"],
+        [["VN123", "outbound", 180, "HN", "Vietnam Airlines", "HAN", "DAD", "2026-12-20 08:00", "2026-12-20 09:20", ""]],
         f"flights_template_event_{event_id}.xlsx",
     )
 
@@ -359,6 +423,26 @@ async def adjust_flight_assignments(
         )
     employee_ids = valid_ids
 
+    warnings = []
+    if target_flight.site_id is not None:
+        mismatch_result = await db.execute(
+            select(Employee.employee_code).where(
+                Employee.id.in_(employee_ids),
+                Employee.site_id.is_not(None),
+                Employee.site_id != target_flight.site_id,
+            )
+        )
+        mismatched_codes = [row[0] or "?" for row in mismatch_result.all()]
+        if mismatched_codes:
+            if not payload.force:
+                raise AppError(
+                    "site_mismatch",
+                    f"Chuyến {target_flight.flight_code} không phục vụ địa điểm làm việc của: "
+                    f"{', '.join(sorted(mismatched_codes))}",
+                    status.HTTP_409_CONFLICT,
+                )
+            warnings.append("site_mismatch_forced")
+
     result = await db.execute(
         select(FlightAssignment).where(
             FlightAssignment.event_id == event_id,
@@ -370,7 +454,6 @@ async def adjust_flight_assignments(
     moving_in = employee_ids - current_on_target
     would_be_count = len(current_on_target) + len(moving_in)
 
-    warnings = []
     if would_be_count > target_flight.capacity:
         if not payload.force:
             raise AppError(
@@ -441,3 +524,31 @@ async def adjust_flight_assignments(
             await dispatch_email(queue, outbox_id)
 
     return {"moved": len(employee_ids), "warnings": warnings}
+
+
+@router.post("/flight-assignments/unlock")
+async def unlock_flight_assignments(
+    event_id: int, payload: UnlockAssignmentRequest, db: DbSession, user: AdminUser
+) -> dict:
+    """Reverses `is_locked=True` from a manual reassign so a later auto-run can
+    reconsider these people again (BRD §5.5 assumes adjustments are correctable,
+    not a one-way pin)."""
+    await master_data.get_or_404(db, Event, event_id)
+    result = await db.execute(
+        select(FlightAssignment).where(
+            FlightAssignment.event_id == event_id,
+            FlightAssignment.direction == payload.direction,
+            FlightAssignment.employee_id.in_(payload.employee_ids),
+            FlightAssignment.is_locked.is_(True),
+        )
+    )
+    assignments = result.scalars().all()
+    for a in assignments:
+        a.is_locked = False
+    await record_audit(
+        db, actor_user_id=user.id, action="unlock", entity_type="flight_assignment",
+        entity_id=event_id, after={"employee_ids": [a.employee_id for a in assignments]},
+        event_id=event_id,
+    )
+    await db.commit()
+    return {"unlocked": len(assignments)}

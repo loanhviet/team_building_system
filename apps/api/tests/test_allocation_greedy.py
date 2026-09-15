@@ -168,6 +168,42 @@ def test_default_weights_split_on_single_mismatch():
     assert 103 in result.assignments
 
 
+def test_site_filter_never_places_team_on_wrong_site_flight():
+    # Team is from site 1; only a site-2 flight has room. Even though it's
+    # the only whole-team fit by capacity, it must be rejected outright and
+    # the team flagged instead of silently boarded on the wrong city's flight.
+    team = TeamGroup(team_id=1, employees=make_team(1, 3).employees, site_id=1)
+    flights = [FlightSlot(flight_id=10, shift_id=1, capacity=5, site_id=2)]
+
+    result = GreedyFlightStrategy().allocate([team], flights, DEFAULT_WEIGHTS)
+
+    assert not result.assignments
+    assert all(reason == "no_slot" for reason in result.flagged.values())
+    assert len(result.flagged) == 3
+
+
+def test_site_filter_lets_team_use_matching_site_flight():
+    team = TeamGroup(team_id=1, employees=make_team(1, 3).employees, site_id=1)
+    flights = [
+        FlightSlot(flight_id=10, shift_id=1, capacity=5, site_id=2),
+        FlightSlot(flight_id=11, shift_id=1, capacity=5, site_id=1),
+    ]
+
+    result = GreedyFlightStrategy().allocate([team], flights, DEFAULT_WEIGHTS)
+
+    assert set(result.assignments.values()) == {11}
+    assert not result.flagged
+
+
+def test_flight_with_no_site_accepts_any_team():
+    team = TeamGroup(team_id=1, employees=make_team(1, 2).employees, site_id=1)
+    flights = [FlightSlot(flight_id=10, shift_id=1, capacity=2, site_id=None)]
+
+    result = GreedyFlightStrategy().allocate([team], flights, DEFAULT_WEIGHTS)
+
+    assert set(result.assignments.values()) == {10}
+
+
 def test_flight_with_no_shift_never_flags_or_forces_split():
     # Inbound flights have no shift_id at all (BRD's Ca 1/Ca 2 only applies to
     # the outbound "Ca đi") — a candidate's personal shift preference must not

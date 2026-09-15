@@ -42,6 +42,10 @@ class Candidate:
 class TeamGroup:
     team_id: int | None
     employees: list[Candidate]
+    # office site (HN/HCM) this subgroup flies from — runner splits a team
+    # into one TeamGroup per (team_id, site_id) so a team spread across sites
+    # is never scored as "should be kept whole" across an impossible site gap
+    site_id: int | None = None
 
 
 @dataclass
@@ -49,6 +53,8 @@ class FlightSlot:
     flight_id: int
     shift_id: int | None
     capacity: int
+    # null = serves any site; set = only candidates from that site may board
+    site_id: int | None = None
     assigned: list[int] = field(default_factory=list)
     # parallel to `assigned` (same index = same employee) so `_score` can reward
     # "team_together" without a second lookup — appended alongside every

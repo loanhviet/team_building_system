@@ -25,6 +25,12 @@ class Flight(TimestampMixin, Base):
     airline: Mapped[str | None] = mapped_column(String(100), nullable=True)
     direction: Mapped[str] = mapped_column(FlightDirection)
     shift_id: Mapped[int | None] = mapped_column(ForeignKey("shifts.id"), nullable=True)
+    # which office site this flight serves (HN/HCM) — null means "any site"
+    # (kept nullable so single-site events / legacy data don't need one).
+    # BRD §5 doesn't call this out explicitly, but every real flight departs
+    # from one specific airport near one office, so the allocator must not
+    # cross-assign a HCM employee onto a HAN-only flight (see runner.py).
+    site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True)
     depart_at: Mapped[datetime | None] = mapped_column(nullable=True)
     arrive_at: Mapped[datetime | None] = mapped_column(nullable=True)
     origin: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -32,6 +32,14 @@ def _is_shift_mismatch(candidate: Candidate, flight: FlightSlot) -> bool:
     return candidate.shift_id != flight.shift_id
 
 
+def _site_ok(flight: FlightSlot, site_id: int | None) -> bool:
+    # a flight with no site set serves everyone; a team/candidate with no
+    # known site is never excluded either — this is a hard filter (never a
+    # score penalty), because boarding someone on a flight from the wrong
+    # city isn't "suboptimal", it's simply wrong
+    return flight.site_id is None or site_id is None or flight.site_id == site_id
+
+
 class GreedyFlightStrategy:
     """Greedy allocator per docs/PLAN.md §7.1: place whole teams first, split the
     largest-remaining-shift-subgroup when a team can't fit, flag whatever's left over.
@@ -50,7 +58,9 @@ class GreedyFlightStrategy:
         for team in sorted(teams, key=lambda t: len(t.employees), reverse=True):
             group = list(team.employees)
 
-            whole_fit = [f for f in flights if f.remaining >= len(group)]
+            whole_fit = [
+                f for f in flights if f.remaining >= len(group) and _site_ok(f, team.site_id)
+            ]
             best_whole = max(whole_fit, key=lambda f: _score(f, group, weights)) if whole_fit else None
 
             force_split = False
@@ -84,7 +94,9 @@ class GreedyFlightStrategy:
             for subgroup in sorted(by_shift.values(), key=len, reverse=True):
                 leftover = list(subgroup)
                 while leftover:
-                    candidates = [f for f in flights if f.remaining > 0]
+                    candidates = [
+                        f for f in flights if f.remaining > 0 and _site_ok(f, team.site_id)
+                    ]
                     if not candidates:
                         for c in leftover:
                             flagged[c.employee_id] = "no_slot"

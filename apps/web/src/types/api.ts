@@ -494,6 +494,7 @@ export type Flight = {
   airline: string | null;
   direction: "outbound" | "inbound";
   shift_id: number | null;
+  site_id: number | null;
   depart_at: string | null;
   arrive_at: string | null;
   origin: string | null;

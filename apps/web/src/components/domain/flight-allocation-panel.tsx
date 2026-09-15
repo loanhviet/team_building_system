@@ -41,6 +41,7 @@ import type {
   FlightAssignment,
   Job,
   Shift,
+  Site,
   Team,
 } from "@/types/api";
 
@@ -51,6 +52,7 @@ const EMPTY_FLIGHT = {
   airline: "",
   direction: "outbound",
   shift_id: "",
+  site_id: "",
   capacity: "0",
   origin: "",
   destination: "",
@@ -89,6 +91,10 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const { data: teams } = useQuery({
     queryKey: ["teams"],
     queryFn: () => apiFetch<Team[]>("/api/teams"),
+  });
+  const { data: sites } = useQuery({
+    queryKey: ["sites"],
+    queryFn: () => apiFetch<Site[]>("/api/sites"),
   });
   const { data: history } = useQuery({
     queryKey: ["events", eventId, "allocations", "flight"],
@@ -143,6 +149,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
         airline: flightForm.airline || null,
         direction: flightForm.direction,
         shift_id: flightForm.shift_id ? Number(flightForm.shift_id) : null,
+        site_id: flightForm.site_id ? Number(flightForm.site_id) : null,
         capacity: Number(flightForm.capacity),
         origin: flightForm.origin || null,
         destination: flightForm.destination || null,
@@ -191,12 +198,26 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       refetchAssignments();
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.code === "over_capacity") {
+      if (err instanceof ApiError && (err.code === "over_capacity" || err.code === "site_mismatch")) {
         setOverCapacityMsg(err.message);
         return;
       }
       toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra");
     },
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<{ unlocked: number }>(`/api/events/${eventId}/flight-assignments/unlock`, {
+        method: "POST",
+        body: JSON.stringify({ direction, employee_ids: Array.from(selected) }),
+      }),
+    onSuccess: (data) => {
+      toast.success(`Đã bỏ ghim ${data.unlocked} người — lần chạy phân bổ tự động tiếp theo sẽ xét lại họ`);
+      setSelected(new Set());
+      refetchAssignments();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
   useEffect(() => {
@@ -239,6 +260,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       airline: flight.airline ?? "",
       direction: flight.direction,
       shift_id: flight.shift_id ? String(flight.shift_id) : "",
+      site_id: flight.site_id ? String(flight.site_id) : "",
       capacity: String(flight.capacity),
       origin: flight.origin ?? "",
       destination: flight.destination ?? "",
@@ -520,6 +542,20 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                       </SelectContent>
                     </Select>
                   </FormField>
+                  <FormField label="Địa điểm phục vụ" hint="Bỏ trống nếu chuyến này phục vụ mọi địa điểm">
+                    <Select value={flightForm.site_id} onValueChange={(v) => setFlightForm({ ...flightForm, site_id: v ?? "" })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Mọi địa điểm" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sites?.map((s) => (
+                          <SelectItem key={s.id} value={String(s.id)}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
                   <FormField label="Hạ cánh">
                     <Input type="datetime-local" value={flightForm.arrive_at} onChange={(e) => setFlightForm({ ...flightForm, arrive_at: e.target.value })} />
                   </FormField>
@@ -581,7 +617,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               <ResourceCard
                 key={f.id}
                 title={f.flight_code}
-                subtitle={`${f.origin ?? "—"} → ${f.destination ?? "—"}${shifts?.find((s) => s.id === f.shift_id) ? ` · ${shifts.find((s) => s.id === f.shift_id)!.name}` : ""}`}
+                subtitle={`${f.origin ?? "—"} → ${f.destination ?? "—"}${shifts?.find((s) => s.id === f.shift_id) ? ` · ${shifts.find((s) => s.id === f.shift_id)!.name}` : ""}${f.site_id ? ` · ${sites?.find((s) => s.id === f.site_id)?.name ?? ""}` : ""}`}
                 assigned={n}
                 capacity={f.capacity}
                 selected={focusFlightId === f.id}
@@ -739,6 +775,14 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           >
             Chuyển
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={unlockMutation.isPending}
+            onClick={() => unlockMutation.mutate()}
+          >
+            Bỏ ghim
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             Bỏ chọn
           </Button>
@@ -762,7 +806,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
               {overCapacityMsg && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
                 <p className="text-xs text-destructive">
-                  Ghi đè sức chứa cần lý do cụ thể, không dùng lý do mặc định.
+                  Ghi đè cảnh báo cần lý do cụ thể, không dùng lý do mặc định.
                 </p>
               )}
             </div>
@@ -786,7 +830,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                 }
                 onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), force: true })}
               >
-                Vẫn ghi đè sức chứa
+                Vẫn ghi đè cảnh báo
               </Button>
             )}
           </DialogFooter>
