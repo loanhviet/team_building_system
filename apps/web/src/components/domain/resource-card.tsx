@@ -34,7 +34,7 @@ export function ResourceCard({
         }
       }}
       className={cn(
-        "min-w-[11rem] flex-1 rounded-2xl border bg-card p-3 text-left",
+        "min-w-[11rem] flex-1 rounded-2xl border bg-card p-3 text-left transition-[border-color,box-shadow] duration-150",
         onClick && "cursor-pointer",
         selected ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-primary/50",
         warning && !selected && "border-[var(--status-flag-border)]",

@@ -7,7 +7,6 @@ import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { StatusChip } from "@/components/domain/status-chip";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -322,83 +321,6 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
     },
   ];
 
-  const roomColumns: DataTableColumn<Room>[] = [
-    { key: "room_number", header: "Số phòng", cell: (r) => r.room_number, sortValue: (r) => r.room_number },
-    {
-      key: "room_type",
-      header: "Loại phòng",
-      cell: (r) => roomTypes?.find((t) => t.id === r.room_type_id)?.name ?? "—",
-    },
-    { key: "capacity", header: "Sức chứa", cell: (r) => r.capacity, sortValue: (r) => r.capacity },
-    {
-      key: "occupied",
-      header: "Đã ở",
-      cell: (r) => <Badge variant={r.occupied >= r.capacity ? "secondary" : "outline"}>{r.occupied}/{r.capacity}</Badge>,
-      sortValue: (r) => r.occupied,
-    },
-    {
-      key: "occupants",
-      header: "Người ở",
-      cell: (r) => {
-        const names = allAssignments.filter((a) => a.room_id === r.id).map((a) => a.full_name);
-        return names.length ? (
-          <span className="text-xs text-muted-foreground">{names.join(", ")}</span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        );
-      },
-    },
-    {
-      key: "actions",
-      header: "",
-      cell: (r) => (
-        <div className="flex gap-1">
-          <Button size="sm" variant="ghost" onClick={() => openEditRoom(r)}>
-            Sửa
-          </Button>
-          <ConfirmDialog
-            trigger={
-              <Button size="sm" variant="ghost">
-                Xoá
-              </Button>
-            }
-            title="Xoá phòng này?"
-            description="Chỉ xoá được khi không còn ai đang ở phòng này."
-            confirmLabel="Xoá"
-            destructive
-            onConfirm={() => deleteRoomMutation.mutate(r.id)}
-          />
-        </div>
-      ),
-    },
-  ];
-
-  const assignmentColumns: DataTableColumn<RoomAssignment>[] = [
-    { key: "employee_code", header: "Mã NV", cell: (a) => a.employee_code ?? "—", className: "font-mono" },
-    { key: "full_name", header: "Họ tên", cell: (a) => a.full_name, sortValue: (a) => a.full_name },
-    { key: "team_name", header: "Team", cell: (a) => a.team_name ?? "—", sortValue: (a) => a.team_name },
-    { key: "hotel_name", header: "Khách sạn", cell: (a) => a.hotel_name },
-    { key: "room_number", header: "Phòng", cell: (a) => a.room_number },
-    {
-      key: "actions",
-      header: "",
-      cell: (a) => (
-        <ConfirmDialog
-          trigger={
-            <Button size="sm" variant="ghost">
-              Bỏ gán
-            </Button>
-          }
-          title="Bỏ gán phòng?"
-          description={`${a.full_name} sẽ trở lại danh sách chưa có phòng.`}
-          confirmLabel="Bỏ gán"
-          destructive
-          onConfirm={() => unassignMutation.mutate(a.id)}
-        />
-      ),
-    },
-  ];
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4">
@@ -596,9 +518,23 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                             {full ? " · đầy" : ""}
                           </p>
                         </div>
-                        <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => openEditRoom(r)}>
-                          Sửa
-                        </Button>
+                        <div className="flex shrink-0 gap-1">
+                          <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => openEditRoom(r)}>
+                            Sửa
+                          </Button>
+                          <ConfirmDialog
+                            trigger={
+                              <Button variant="ghost" className="h-8 px-2 text-xs">
+                                Xoá
+                              </Button>
+                            }
+                            title="Xoá phòng này?"
+                            description="Chỉ xoá được khi không còn ai đang ở phòng này."
+                            confirmLabel="Xoá"
+                            destructive
+                            onConfirm={() => deleteRoomMutation.mutate(r.id)}
+                          />
+                        </div>
                       </div>
                       {guests.length === 0 ? (
                         <p className="text-sm text-muted-foreground">Trống</p>

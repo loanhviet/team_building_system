@@ -29,7 +29,10 @@ export function CapacityBar({
         aria-label={label}
       >
         <div
-          className={cn("h-full", over ? "bg-[var(--status-over-slot-fg)]" : "bg-primary")}
+          className={cn(
+            "h-full transition-[width] duration-300 ease-out",
+            over ? "bg-[var(--status-over-slot-fg)]" : "bg-primary",
+          )}
           style={{ width: `${over ? 100 : pct}%` }}
         />
       </div>

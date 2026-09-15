@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -13,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import { auditActionLabel, auditEntityTypeLabel, jobStatusLabel, jobTypeLabel } from "@/lib/labels";
 import type { AuditLogEntry, Job } from "@/types/api";
@@ -99,62 +97,6 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
     }
   };
 
-  const auditColumns: DataTableColumn<AuditLogEntry>[] = [
-    {
-      key: "created_at",
-      header: "Thời gian",
-      cell: (log) => (
-        <span className="whitespace-nowrap text-xs">{new Date(log.created_at).toLocaleString("vi-VN")}</span>
-      ),
-      sortValue: (log) => log.created_at,
-    },
-    {
-      key: "actor_email",
-      header: "Người thực hiện",
-      cell: (log) => <span className="text-xs">{log.actor_email ?? "Hệ thống"}</span>,
-      sortValue: (log) => log.actor_email,
-    },
-    {
-      key: "action",
-      header: "Hành động",
-      cell: (log) => <Badge variant="outline">{auditActionLabel(log.action)}</Badge>,
-      sortValue: (log) => log.action,
-    },
-    {
-      key: "entity",
-      header: "Đối tượng",
-      cell: (log) => (
-        <div className="text-xs">
-          {auditEntityTypeLabel(log.entity_type)} #{log.entity_id}
-          {log.reason && <span className="text-muted-foreground"> — {log.reason}</span>}
-          <JsonDiff before={log.before_json} after={log.after_json} />
-        </div>
-      ),
-    },
-  ];
-
-  const jobColumns: DataTableColumn<Job>[] = [
-    { key: "type", header: "Loại", cell: (j) => <span className="text-xs">{jobTypeLabel(j.type)}</span> },
-    {
-      key: "status",
-      header: "Trạng thái",
-      cell: (j) => (
-        <Badge
-          variant={j.status === "succeeded" ? "default" : j.status === "failed" ? "destructive" : "outline"}
-        >
-          {jobStatusLabel(j.status)}
-        </Badge>
-      ),
-      sortValue: (j) => j.status,
-    },
-    {
-      key: "created_at",
-      header: "Thời gian",
-      cell: (j) => <span className="whitespace-nowrap text-xs">{new Date(j.created_at).toLocaleString("vi-VN")}</span>,
-      sortValue: (j) => j.created_at,
-    },
-  ];
-
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <div className="flex flex-wrap gap-2">
@@ -204,14 +146,17 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
           <p className="text-sm text-muted-foreground">Chưa có thay đổi nào.</p>
         )}
         <ol className="flex flex-col">
-          {(auditLogs ?? []).slice(0, 40).map((log) => (
-            <li key={log.id} className="border-b border-border py-3 last:border-0">
-              <p className="text-sm">
-                <span className="font-medium">{auditActionLabel(log.action)}</span>
-                {" · "}
+          {(auditLogs ?? []).slice(0, 40).map((log, i) => (
+            <li
+              key={log.id}
+              className="animate-in border-b border-border py-3 fade-in slide-in-from-bottom-1 duration-200 fill-mode-backwards last:border-0"
+              style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
+            >
+              <p className="flex flex-wrap items-center gap-1.5 text-sm">
+                <Badge variant="outline">{auditActionLabel(log.action)}</Badge>
                 {auditEntityTypeLabel(log.entity_type)} #{log.entity_id}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {new Date(log.created_at).toLocaleString("vi-VN")} · {log.actor_email ?? "Hệ thống"}
                 {log.reason ? ` · ${log.reason}` : ""}
               </p>
@@ -225,10 +170,16 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Job nền</h2>
         {jobsLoading && <p className="text-sm text-muted-foreground">Đang tải…</p>}
         <ul className="flex flex-col gap-2">
-          {(jobs ?? []).slice(0, 8).map((j) => (
-            <li key={j.id} className="flex items-center justify-between rounded-xl border border-border bg-card px-3 py-2 text-sm">
+          {(jobs ?? []).slice(0, 8).map((j, i) => (
+            <li
+              key={j.id}
+              className="flex animate-in items-center justify-between rounded-xl border border-border bg-card px-3 py-2 text-sm fade-in slide-in-from-bottom-1 duration-200 fill-mode-backwards"
+              style={{ animationDelay: `${i * 30}ms` }}
+            >
               <span>{jobTypeLabel(j.type)}</span>
-              <span className="text-muted-foreground">{jobStatusLabel(j.status)}</span>
+              <Badge variant={j.status === "succeeded" ? "default" : j.status === "failed" ? "destructive" : "outline"}>
+                {jobStatusLabel(j.status)}
+              </Badge>
             </li>
           ))}
         </ul>

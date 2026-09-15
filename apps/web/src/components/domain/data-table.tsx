@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 export type DataTableColumn<T> = {
   key: string;
@@ -137,7 +138,10 @@ export function DataTable<T>({
               paged.map((row) => (
                 <TableRow
                   key={rowKey(row)}
-                  className={onRowClick ? "cursor-pointer hover:bg-muted/70" : "hover:bg-muted/50"}
+                  className={cn(
+                    "transition-colors duration-150",
+                    onRowClick ? "cursor-pointer hover:bg-muted/70" : "hover:bg-muted/50",
+                  )}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                 >
                   {columns.map((c) => (

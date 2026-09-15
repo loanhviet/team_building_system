@@ -5,7 +5,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { FormField, MoreFields } from "@/components/domain/form-field";
-import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { LiteMarkdown } from "@/components/domain/lite-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -221,65 +220,6 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
     return teams?.find((t) => t.id === item.audience_ref_id)?.name ?? "Team #" + item.audience_ref_id;
   };
 
-  const scheduleColumns: DataTableColumn<ScheduleItem>[] = [
-    {
-      key: "day_date",
-      header: "Ngày",
-      cell: (s) => s.day_date ?? "—",
-      sortValue: (s) => s.day_date,
-    },
-    {
-      key: "start_at",
-      header: "Giờ",
-      cell: (s) => (s.start_at ? new Date(s.start_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : "—"),
-      sortValue: (s) => s.start_at,
-    },
-    { key: "title", header: "Tiêu đề", cell: (s) => s.title, sortValue: (s) => s.title },
-    { key: "location", header: "Địa điểm", cell: (s) => s.location ?? "—" },
-    { key: "audience", header: "Đối tượng", cell: (s) => audienceLabel(s) },
-    {
-      key: "is_published",
-      header: "Trạng thái",
-      cell: (s) =>
-        isPublished ? (
-          <ConfirmDialog
-            trigger={
-              <Button variant="ghost" size="sm" disabled={togglePublishMutation.isPending}>
-                <Badge variant={s.is_published ? "default" : "secondary"}>{s.is_published ? "Đã hiện" : "Ẩn"}</Badge>
-              </Button>
-            }
-            title="Đổi trạng thái hiển thị mục lịch trình?"
-            description="Sự kiện đã công bố — thay đổi này sẽ gửi email cập nhật lịch trình cho toàn bộ người tham gia."
-            confirmLabel="Đổi & gửi email"
-            onConfirm={() => togglePublishMutation.mutate(s)}
-          />
-        ) : (
-          <Button variant="ghost" size="sm" onClick={() => togglePublishMutation.mutate(s)} disabled={togglePublishMutation.isPending}>
-            <Badge variant={s.is_published ? "default" : "secondary"}>{s.is_published ? "Đã hiện" : "Ẩn"}</Badge>
-          </Button>
-        ),
-    },
-    {
-      key: "actions",
-      header: "",
-      cell: (s) => (
-        <div className="flex gap-1">
-          <Button size="sm" variant="ghost" onClick={() => openEditSchedule(s)}>
-            Sửa
-          </Button>
-          <ConfirmDialog
-            trigger={<Button size="sm" variant="ghost">Xoá</Button>}
-            title="Xoá mục lịch trình này?"
-            description={`"${s.title}" sẽ bị xoá khỏi lịch trình.`}
-            confirmLabel="Xoá"
-            destructive
-            onConfirm={() => deleteScheduleMutation.mutate(s.id)}
-          />
-        </div>
-      ),
-    },
-  ];
-
   return (
     <div className="grid gap-6 sm:grid-cols-2">
       <div className="flex flex-col gap-2">
@@ -399,6 +339,28 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
                             </p>
                           </div>
                           <div className="flex shrink-0 gap-1">
+                            {isPublished ? (
+                              <ConfirmDialog
+                                trigger={
+                                  <Button variant="ghost" className="h-8 px-2 text-xs" disabled={togglePublishMutation.isPending}>
+                                    {s.is_published ? "Ẩn" : "Hiện"}
+                                  </Button>
+                                }
+                                title="Đổi trạng thái hiển thị mục lịch trình?"
+                                description="Sự kiện đã công bố — thay đổi này sẽ gửi email cập nhật lịch trình cho toàn bộ người tham gia."
+                                confirmLabel="Đổi & gửi email"
+                                onConfirm={() => togglePublishMutation.mutate(s)}
+                              />
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                disabled={togglePublishMutation.isPending}
+                                onClick={() => togglePublishMutation.mutate(s)}
+                              >
+                                {s.is_published ? "Ẩn" : "Hiện"}
+                              </Button>
+                            )}
                             <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => openEditSchedule(s)}>
                               Sửa
                             </Button>

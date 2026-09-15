@@ -3,15 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CapacityBar } from "@/components/domain/capacity-bar";
-import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { PersonRow } from "@/components/domain/person-row";
 import { ResourceCard } from "@/components/domain/resource-card";
-import { StatusChip } from "@/components/domain/status-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
-import { assignmentSourceLabel, flagReasonLabel } from "@/lib/labels";
+import { flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
   AllocationRun,
@@ -241,104 +237,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const summary = (job?.result_json ?? latestRunForLeg?.summary_json) as BusAllocationSummary | undefined;
 
   const teamName = (id: number) => teams?.find((t) => t.id === id)?.name ?? `#${id}`;
-
-  const busColumns: DataTableColumn<Bus>[] = [
-    { key: "code", header: "Mã xe", cell: (b) => b.code, className: "font-mono", sortValue: (b) => b.code },
-    { key: "name", header: "Tên xe", cell: (b) => b.name ?? "—", sortValue: (b) => b.name },
-    {
-      key: "capacity",
-      header: "Sức chứa",
-      cell: (b) => {
-        const rem = summary?.buses.find((x) => x.bus_id === b.id)?.remaining;
-        const assigned = rem == null ? null : b.capacity - rem;
-        return assigned == null ? (
-          b.capacity
-        ) : (
-          <CapacityBar assigned={assigned} capacity={b.capacity} />
-        );
-      },
-      sortValue: (b) => b.capacity,
-    },
-    {
-      key: "gather_at",
-      header: "Tập trung",
-      cell: (b) => (b.gather_at ? new Date(b.gather_at).toLocaleString("vi-VN") : "—"),
-      sortValue: (b) => b.gather_at,
-    },
-    {
-      key: "pickup",
-      header: "Điểm đón",
-      cell: (b) => pickupPoints?.find((p) => p.id === b.pickup_point_id)?.name ?? "—",
-    },
-    { key: "destination", header: "Điểm đến", cell: (b) => b.destination ?? "—" },
-    {
-      key: "leader_name",
-      header: "Trưởng xe",
-      cell: (b) =>
-        b.leader_name ? b.leader_name : <StatusChip kind="flag" label="Chưa có Trưởng xe" />,
-      sortValue: (b) => b.leader_name,
-    },
-    { key: "leader_phone", header: "SĐT", cell: (b) => b.leader_phone ?? "—" },
-    {
-      key: "actions",
-      header: "",
-      cell: (b) => (
-        <Button size="sm" variant="ghost" onClick={() => openEditBus(b)}>
-          Sửa
-        </Button>
-      ),
-    },
-  ];
-
-  const assignmentColumns: DataTableColumn<BusAssignment>[] = [
-    {
-      key: "select",
-      header: "",
-      className: "w-8",
-      cell: (a) => (
-        <Checkbox
-          checked={selected.has(a.employee_id)}
-          onCheckedChange={(checked) =>
-            setSelected((prev) => {
-              const next = new Set(prev);
-              if (checked === true) next.add(a.employee_id);
-              else next.delete(a.employee_id);
-              return next;
-            })
-          }
-        />
-      ),
-    },
-    {
-      key: "employee_code",
-      header: "Mã NV",
-      cell: (a) => a.employee_code ?? "—",
-      className: "font-mono",
-      sortValue: (a) => a.employee_code,
-    },
-    { key: "full_name", header: "Họ tên", cell: (a) => a.full_name, sortValue: (a) => a.full_name },
-    { key: "team_name", header: "Team", cell: (a) => a.team_name ?? "—", sortValue: (a) => a.team_name },
-    {
-      key: "bus",
-      header: "Xe",
-      cell: (a) => (
-        <>
-          {buses?.find((b) => b.id === a.bus_id)?.code ?? "Chưa xếp"}
-          {a.is_locked && (
-            <Badge variant="secondary" className="ml-1">
-              Ghim
-            </Badge>
-          )}
-          {a.is_flagged && (
-            <span className="ml-1 inline-block">
-              <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} />
-            </span>
-          )}
-        </>
-      ),
-    },
-    { key: "source", header: "Nguồn", cell: (a) => assignmentSourceLabel(a.source), sortValue: (a) => a.source },
-  ];
 
   return (
     <div className="flex flex-col gap-6">

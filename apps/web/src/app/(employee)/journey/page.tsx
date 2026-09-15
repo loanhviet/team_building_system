@@ -6,6 +6,7 @@ import { Bus, Hotel, PartyPopper, Plane, RotateCw, ScrollText } from "lucide-rea
 import Link from "next/link";
 import { EmptyState } from "@/components/domain/empty-state";
 import { LiteMarkdown } from "@/components/domain/lite-markdown";
+import { PageHeader } from "@/components/domain/page-header";
 import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { StatusChip } from "@/components/domain/status-chip";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useEmployeeEvent } from "@/lib/use-employee-event";
 import {
   buildTimeline,
+  firstAnchorId,
+  jumpTargets,
   journeyGaps,
   journeyNext,
   KIND_LABEL,
@@ -110,6 +113,7 @@ export default function JourneyPage() {
   const gaps = journeyGaps(journey);
   const next = journeyNext(journey, gaps);
   const days = buildTimeline(journey);
+  const jumps = jumpTargets(days);
 
   const pinned = journey.announcements.filter((a) => a.is_pinned);
   const rest = journey.announcements.filter((a) => !a.is_pinned);
@@ -118,29 +122,35 @@ export default function JourneyPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {journey.team_name ?? "Hành trình"}
-            {journey.destination ? ` · ${journey.destination}` : ""}
-          </p>
-          <h1 className="font-display text-2xl font-semibold sm:text-3xl">{journey.event_name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {formatDate(journey.start_date)}
-            {journey.end_date ? ` – ${formatDate(journey.end_date)}` : ""}
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-11"
-          onClick={() => refetch()}
-          disabled={isFetching}
-          aria-label="Làm mới hành trình"
-        >
-          <RotateCw className={cn("size-4", isFetching && "animate-spin")} />
-        </Button>
-      </header>
+      <PageHeader
+        title={journey.event_name}
+        description={
+          <>
+            <p>
+              {[user?.full_name, user?.employee_code, journey.team_name]
+                .filter(Boolean)
+                .join(" · ")}
+              {journey.destination ? ` · ${journey.destination}` : ""}
+            </p>
+            <p>
+              {formatDate(journey.start_date)}
+              {journey.end_date ? ` – ${formatDate(journey.end_date)}` : ""}
+            </p>
+          </>
+        }
+        actions={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-11"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            aria-label="Làm mới hành trình"
+          >
+            <RotateCw className={cn("size-4", isFetching && "animate-spin")} />
+          </Button>
+        }
+      />
 
       {next && (
         <section className={cn("rounded-2xl border border-border bg-card p-4", next.warn && "border-[var(--ember)]")} aria-labelledby="next-title">
@@ -190,6 +200,26 @@ export default function JourneyPage() {
         </details>
       )}
 
+      {jumps.length > 1 && (
+        <nav aria-label="Nhảy tới mốc" className="flex flex-wrap gap-1.5">
+          {jumps.map((j) => {
+            const anchor = firstAnchorId(j.kind, days);
+            if (!anchor) return null;
+            const Icon = KIND_ICON[j.kind];
+            return (
+              <a
+                key={j.kind}
+                href={`#${anchor}`}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm transition-colors hover:border-primary hover:text-primary"
+              >
+                <Icon className="size-3.5" aria-hidden="true" />
+                {j.label}
+              </a>
+            );
+          })}
+        </nav>
+      )}
+
       {days.length === 0 ? (
         <p className="text-sm text-muted-foreground">Chưa có mốc nào trên hành trình.</p>
       ) : (
@@ -198,23 +228,24 @@ export default function JourneyPage() {
             <li key={day.key}>
               <h2 className="mb-2 text-sm font-medium text-muted-foreground">{day.label}</h2>
               <ul className="flex flex-col gap-2">
-                {day.items.map((item) => {
+                {day.items.map((item, i) => {
                   const Icon = KIND_ICON[item.kind];
                   const extras = item.lines.slice(1);
                   return (
                     <li key={item.id} id={item.id} className="scroll-mt-24">
                       <article
-                        className="flex cursor-pointer gap-4 rounded-2xl border border-border bg-card p-3 sm:p-4"
+                        className="flex cursor-pointer animate-in gap-3 fade-in slide-in-from-bottom-1 rounded-2xl border border-border bg-card p-3 duration-300 fill-mode-backwards sm:gap-4 sm:p-4"
+                        style={{ animationDelay: `${Math.min(i * 40, 240)}ms` }}
                         onClick={() => setOpenId((id) => (id === item.id ? null : item.id))}
                       >
-                        <p className="w-12 shrink-0 tabular text-lg font-semibold leading-none">
-                          {item.timeLabel}
-                        </p>
+                        <div className="flex shrink-0 flex-col items-center gap-1">
+                          <p className="tabular text-sm font-semibold leading-none">{item.timeLabel}</p>
+                          <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-primary">
+                            <Icon className="size-3.5" aria-hidden="true" />
+                          </span>
+                        </div>
                         <div className="min-w-0 flex-1">
-                          <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                            <Icon className="size-3" aria-hidden="true" />
-                            {KIND_LABEL[item.kind]}
-                          </p>
+                          <p className="text-[11px] text-muted-foreground">{KIND_LABEL[item.kind]}</p>
                           <h3 className="font-medium">{item.title}</h3>
                           {item.lines[0] && (
                             <p className="mt-0.5 text-sm text-muted-foreground">{item.lines[0]}</p>

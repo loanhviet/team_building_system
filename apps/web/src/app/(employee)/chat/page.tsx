@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Send, SquarePen } from "lucide-react";
+import { Send, Sparkles, SquarePen } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/domain/empty-state";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { LiteMarkdown } from "@/components/domain/lite-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,18 @@ import { useAuth } from "@/lib/auth-context";
 import { directionLabel } from "@/lib/labels";
 import { EVENT_STATUS_LABELS } from "@/lib/event-status";
 import { useEmployeeEvent } from "@/lib/use-employee-event";
+import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatSession, Citation, EventStatus, Journey } from "@/types/api";
+
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5" role="presentation">
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground" />
+    </span>
+  );
+}
 
 const TOOL_LABEL: Record<string, string> = {
   get_event_context: "Đang xem trạng thái sự kiện…",
@@ -229,12 +241,13 @@ export default function ChatPage() {
             </p>
             <p className="text-sm font-medium">Gợi ý</p>
             <div className="grid gap-2 sm:grid-cols-2">
-              {suggestions.map((s) => (
+              {suggestions.map((s, i) => (
                 <button
                   key={s}
                   type="button"
                   onClick={() => handleSend(s)}
-                  className="min-h-11 cursor-pointer border border-border bg-background px-3 py-2 text-left text-sm hover:border-primary"
+                  className="min-h-11 animate-in cursor-pointer fade-in slide-in-from-bottom-1 rounded-xl border border-border bg-background px-3 py-2 text-left text-sm transition-colors duration-200 fill-mode-backwards hover:border-primary hover:bg-primary/5"
+                  style={{ animationDelay: `${i * 50}ms` }}
                 >
                   {s}
                 </button>
@@ -245,30 +258,51 @@ export default function ChatPage() {
         {messages?.map((m) => (
           <div
             key={m.id}
-            className={`max-w-[85%] px-3 py-2 text-sm ${
-              m.role === "user"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
+            className={cn(
+              "flex animate-in gap-2 fade-in slide-in-from-bottom-1 items-start duration-200",
+              m.role === "user" && "flex-row-reverse",
+            )}
           >
             {m.role === "assistant" ? (
-              <LiteMarkdown text={m.content} className="flex flex-col gap-1" />
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Sparkles className="size-4" aria-hidden="true" />
+              </span>
             ) : (
-              <p className="whitespace-pre-wrap">{m.content}</p>
+              <InitialsAvatar name={user?.full_name} className="size-8 text-[11px]" />
             )}
-            {m.citations_json && m.citations_json.length > 0 && (
-              <CitationRow citations={m.citations_json} />
-            )}
+            <div
+              className={cn(
+                "max-w-[85%] px-3 py-2 text-sm",
+                m.role === "user"
+                  ? "rounded-2xl rounded-tr-sm bg-primary text-primary-foreground"
+                  : "rounded-2xl rounded-tl-sm border border-border bg-card",
+              )}
+            >
+              {m.role === "assistant" ? (
+                <LiteMarkdown text={m.content} className="flex flex-col gap-1" />
+              ) : (
+                <p className="whitespace-pre-wrap">{m.content}</p>
+              )}
+              {m.citations_json && m.citations_json.length > 0 && (
+                <CitationRow citations={m.citations_json} />
+              )}
+            </div>
           </div>
         ))}
         {isStreaming && (
-          <div className="max-w-[85%] bg-secondary px-3 py-2 text-sm">
-            {toolHint && !streamingText && <p className="text-xs text-muted-foreground">{toolHint}</p>}
-            {streamingText ? (
-              <LiteMarkdown text={streamingText} />
-            ) : (
-              <p className="whitespace-pre-wrap">{toolHint ? "" : "…"}</p>
-            )}
+          <div className="flex animate-in items-start gap-2 fade-in duration-200">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Sparkles className="size-4" aria-hidden="true" />
+            </span>
+            <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-sm">
+              {toolHint && !streamingText && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <TypingDots />
+                  {toolHint}
+                </p>
+              )}
+              {streamingText ? <LiteMarkdown text={streamingText} /> : !toolHint ? <TypingDots /> : null}
+            </div>
           </div>
         )}
       </div>

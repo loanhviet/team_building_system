@@ -3,8 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { CapacityBar } from "@/components/domain/capacity-bar";
-import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { PersonRow } from "@/components/domain/person-row";
 import { ResourceCard } from "@/components/domain/resource-card";
@@ -30,9 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import { assignmentSourceLabel, directionLabel, flagReasonLabel } from "@/lib/labels";
+import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
 import type {
   AllocationEnqueued,
@@ -256,63 +253,6 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     return true;
   });
 
-  const assignmentColumns: DataTableColumn<FlightAssignment>[] = [
-    {
-      key: "select",
-      header: "",
-      className: "w-8",
-      cell: (a) => (
-        <Checkbox
-          checked={selected.has(a.employee_id)}
-          onCheckedChange={(checked) =>
-            setSelected((prev) => {
-              const next = new Set(prev);
-              if (checked === true) next.add(a.employee_id);
-              else next.delete(a.employee_id);
-              return next;
-            })
-          }
-        />
-      ),
-    },
-    {
-      key: "employee_code",
-      header: "Mã NV",
-      cell: (a) => a.employee_code ?? "—",
-      className: "font-mono",
-      sortValue: (a) => a.employee_code,
-    },
-    { key: "full_name", header: "Họ tên", cell: (a) => a.full_name, sortValue: (a) => a.full_name },
-    { key: "team_name", header: "Team", cell: (a) => a.team_name ?? "—", sortValue: (a) => a.team_name },
-    {
-      key: "flight",
-      header: "Chuyến",
-      cell: (a) => (
-        <>
-          {flights?.find((f) => f.id === a.flight_id)?.flight_code ?? "Chưa xếp"}
-          {a.is_locked && (
-            <Badge variant="secondary" className="ml-1">
-              Ghim
-            </Badge>
-          )}
-        </>
-      ),
-    },
-    {
-      key: "source",
-      header: "Nguồn",
-      cell: (a) => assignmentSourceLabel(a.source),
-      sortValue: (a) => a.source,
-    },
-    {
-      key: "flag",
-      header: "Ghi chú",
-      cell: (a) =>
-        a.is_flagged ? <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} /> : null,
-      sortValue: (a) => (a.is_flagged ? 1 : 0),
-    },
-  ];
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
@@ -330,8 +270,8 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             setSelected(new Set());
           }}
           options={[
-            { value: "outbound", label: "Chiều đi" },
-            { value: "inbound", label: "Chiều về" },
+            { value: "outbound", label: directionLabel("outbound") },
+            { value: "inbound", label: directionLabel("inbound") },
           ]}
         />
         </div>
@@ -439,8 +379,8 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="outbound">Chiều đi</SelectItem>
-                        <SelectItem value="inbound">Chiều về</SelectItem>
+                        <SelectItem value="outbound">{directionLabel("outbound")}</SelectItem>
+                        <SelectItem value="inbound">{directionLabel("inbound")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </FormField>
