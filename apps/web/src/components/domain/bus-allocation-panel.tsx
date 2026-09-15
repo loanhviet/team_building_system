@@ -10,6 +10,7 @@ import {
   AllocationReadiness,
 } from "@/components/domain/allocation-workbench";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { ResourceCard } from "@/components/domain/resource-card";
@@ -36,7 +37,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
-import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import {
+  addMinutesToDatetimeLocal,
+  durationLabel,
+  eventDateOptions,
+  fromDatetimeLocal,
+  toDatetimeLocal,
+} from "@/lib/datetime";
 import { formatTime } from "@/lib/format";
 import { flagReasonLabel } from "@/lib/labels";
 import type {
@@ -46,6 +53,7 @@ import type {
   AllocationRun,
   Bus,
   BusAssignment,
+  Event,
   Job,
   PickupPoint,
   Team,
@@ -89,6 +97,10 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const { data: legs } = useQuery({
     queryKey: ["events", eventId, "transport-legs"],
     queryFn: () => apiFetch<TransportLeg[]>(`/api/events/${eventId}/transport-legs`),
+  });
+  const { data: event } = useQuery({
+    queryKey: ["events", eventId],
+    queryFn: () => apiFetch<Event>(`/api/events/${eventId}`),
   });
 
   const currentLegId = legId ?? legs?.[0]?.id ?? null;
@@ -166,6 +178,18 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       note: bus.note ?? "",
     });
     setBusDialogOpen(true);
+  };
+  const busDateOptions = eventDateOptions(event?.start_date, event?.end_date);
+  const gatherLead = durationLabel(busForm.gather_at, busForm.depart_at);
+  const setGatherLead = (minutes: number) => {
+    if (!busForm.depart_at) {
+      toast.error("Hãy chọn giờ khởi hành trước khi đặt giờ tập trung");
+      return;
+    }
+    setBusForm((current) => ({
+      ...current,
+      gather_at: addMinutesToDatetimeLocal(current.depart_at, -minutes),
+    }));
   };
 
   const saveBusMutation = useMutation({
@@ -462,6 +486,34 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
                     placeholder="Họ tên"
                   />
                 </FormField>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Giờ tập trung" hint={gatherLead ? `Trước giờ khởi hành ${gatherLead}.` : "Có thể chọn nhanh theo khoảng đệm."}>
+                    <EventDateTimeField
+                      ariaLabel="Giờ tập trung"
+                      value={busForm.gather_at}
+                      onChange={(gatherAt) => setBusForm({ ...busForm, gather_at: gatherAt })}
+                      dateOptions={busDateOptions}
+                      defaultDate={event?.start_date ?? undefined}
+                    />
+                  </FormField>
+                  <FormField label="Giờ khởi hành" hint="Điểm đón và giờ bay sẽ được kiểm tra khi phân xe.">
+                    <EventDateTimeField
+                      ariaLabel="Giờ khởi hành"
+                      value={busForm.depart_at}
+                      onChange={(departAt) => setBusForm({ ...busForm, depart_at: departAt })}
+                      dateOptions={busDateOptions}
+                      defaultDate={event?.start_date ?? undefined}
+                    />
+                  </FormField>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-muted/30 p-2 text-xs">
+                  <span className="mr-1 text-muted-foreground">Đặt tập trung trước:</span>
+                  {[15, 30, 45, 60].map((minutes) => (
+                    <Button key={minutes} type="button" size="sm" variant="outline" onClick={() => setGatherLead(minutes)}>
+                      {minutes} phút
+                    </Button>
+                  ))}
+                </div>
                 <MoreFields>
                   <FormField label="SĐT trưởng xe">
                     <Input
@@ -493,20 +545,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
                     <Input
                       value={busForm.destination}
                       onChange={(e) => setBusForm({ ...busForm, destination: e.target.value })}
-                    />
-                  </FormField>
-                  <FormField label="Giờ tập trung">
-                    <Input
-                      type="datetime-local"
-                      value={busForm.gather_at}
-                      onChange={(e) => setBusForm({ ...busForm, gather_at: e.target.value })}
-                    />
-                  </FormField>
-                  <FormField label="Giờ khởi hành">
-                    <Input
-                      type="datetime-local"
-                      value={busForm.depart_at}
-                      onChange={(e) => setBusForm({ ...busForm, depart_at: e.target.value })}
                     />
                   </FormField>
                   <FormField label="Ghi chú" className="sm:col-span-2">

@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import type { Hotel, ImportResult, Room, RoomAssignment, RoomType, UnassignedEmployee } from "@/types/api";
+import type { Event, Hotel, ImportResult, Room, RoomAssignment, RoomType, UnassignedEmployee } from "@/types/api";
 
 const EMPTY_HOTEL = { code: "", name: "", address: "", checkin_date: "", checkout_date: "", note: "" };
 const EMPTY_ROOM_TYPE = { name: "", capacity: "2", quantity: "0" };
@@ -57,6 +57,10 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   const { data: hotels } = useQuery({
     queryKey: ["events", eventId, "hotels"],
     queryFn: () => apiFetch<Hotel[]>(`/api/events/${eventId}/hotels`),
+  });
+  const { data: event } = useQuery({
+    queryKey: ["events", eventId],
+    queryFn: () => apiFetch<Event>(`/api/events/${eventId}`),
   });
 
   const hotelId = selectedHotelId ?? hotels?.[0]?.id ?? null;
@@ -377,8 +381,18 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                 <FormField label="Mã khách sạn" required><Input value={hotelForm.code} onChange={(e) => setHotelForm({ ...hotelForm, code: e.target.value.toUpperCase() })} placeholder="VD: KS01" /></FormField>
                 <FormField label="Tên khách sạn" required><Input value={hotelForm.name} onChange={(e) => setHotelForm({ ...hotelForm, name: e.target.value })} /></FormField>
                 <FormField label="Địa chỉ" className="sm:col-span-2"><Input value={hotelForm.address} onChange={(e) => setHotelForm({ ...hotelForm, address: e.target.value })} /></FormField>
-                <FormField label="Nhận phòng"><Input type="date" value={hotelForm.checkin_date} onChange={(e) => setHotelForm({ ...hotelForm, checkin_date: e.target.value })} /></FormField>
-                <FormField label="Trả phòng"><Input type="date" value={hotelForm.checkout_date} onChange={(e) => setHotelForm({ ...hotelForm, checkout_date: e.target.value })} /></FormField>
+                <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="mr-auto text-sm font-medium">Thời gian lưu trú</p>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setHotelForm({ ...hotelForm, checkin_date: event?.start_date ?? "", checkout_date: event?.end_date ?? event?.start_date ?? "" })} disabled={!event?.start_date}>
+                      Dùng lịch sự kiện
+                    </Button>
+                  </div>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <FormField label="Nhận phòng" hint="Mặc định theo ngày bắt đầu sự kiện."><Input type="date" value={hotelForm.checkin_date} onChange={(e) => setHotelForm({ ...hotelForm, checkin_date: e.target.value })} /></FormField>
+                    <FormField label="Trả phòng" hint="Mặc định theo ngày kết thúc sự kiện."><Input min={hotelForm.checkin_date || undefined} type="date" value={hotelForm.checkout_date} onChange={(e) => setHotelForm({ ...hotelForm, checkout_date: e.target.value })} /></FormField>
+                  </div>
+                </div>
                 <FormField label="Ghi chú" className="sm:col-span-2"><Input value={hotelForm.note} onChange={(e) => setHotelForm({ ...hotelForm, note: e.target.value })} /></FormField>
               </div>
               <DialogFooter><Button disabled={!hotelForm.code || !hotelForm.name || saveHotelMutation.isPending} onClick={() => saveHotelMutation.mutate()}>Lưu</Button></DialogFooter>

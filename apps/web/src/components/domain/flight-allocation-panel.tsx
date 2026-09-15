@@ -10,6 +10,7 @@ import {
   AllocationReadiness,
 } from "@/components/domain/allocation-workbench";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { ResourceCard } from "@/components/domain/resource-card";
@@ -36,7 +37,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import {
+  addMinutesToDatetimeLocal,
+  durationLabel,
+  eventDateOptions,
+  fromDatetimeLocal,
+  toDatetimeLocal,
+} from "@/lib/datetime";
 import { formatTime } from "@/lib/format";
 import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import type {
@@ -44,6 +51,7 @@ import type {
   AllocationPreflight,
   AllocationPreset,
   AllocationRun,
+  Event,
   Flight,
   FlightAssignment,
   Job,
@@ -92,6 +100,10 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const { data: flights } = useQuery({
     queryKey: ["events", eventId, "flights"],
     queryFn: () => apiFetch<Flight[]>(`/api/events/${eventId}/flights`),
+  });
+  const { data: event } = useQuery({
+    queryKey: ["events", eventId],
+    queryFn: () => apiFetch<Event>(`/api/events/${eventId}`),
   });
   const { data: shifts } = useQuery({
     queryKey: ["events", eventId, "shifts"],
@@ -292,6 +304,15 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     });
     setFlightOpen(true);
   };
+  const updateFlightDeparture = (departAt: string) => {
+    setFlightForm((current) => ({
+      ...current,
+      depart_at: departAt,
+      arrive_at: current.arrive_at || addMinutesToDatetimeLocal(departAt, 90),
+    }));
+  };
+  const flightDateOptions = eventDateOptions(event?.start_date, event?.end_date);
+  const flightDuration = durationLabel(flightForm.depart_at, flightForm.arrive_at);
 
   const dirFlights = flights?.filter((f) => f.direction === direction) ?? [];
   const assignedCount = (flightId: number) =>
@@ -560,10 +581,25 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                   <FormField label="Sức chứa" required>
                     <Input type="number" value={flightForm.capacity} onChange={(e) => setFlightForm({ ...flightForm, capacity: e.target.value })} />
                   </FormField>
-                  <FormField label="Khởi hành">
-                    <Input type="datetime-local" value={flightForm.depart_at} onChange={(e) => setFlightForm({ ...flightForm, depart_at: e.target.value })} />
+                  <FormField label="Khởi hành" hint="Chọn ngày chương trình rồi chọn giờ; hạ cánh tự gợi ý sau 90 phút.">
+                    <EventDateTimeField
+                      ariaLabel="Khởi hành"
+                      value={flightForm.depart_at}
+                      onChange={updateFlightDeparture}
+                      dateOptions={flightDateOptions}
+                      defaultDate={event?.start_date ?? undefined}
+                    />
                   </FormField>
                 </div>
+                <FormField label="Hạ cánh" hint={flightDuration ? `Thời lượng dự kiến: ${flightDuration}` : "Nhập giờ hạ cánh để kiểm tra thời lượng."}>
+                  <EventDateTimeField
+                    ariaLabel="Hạ cánh"
+                    value={flightForm.arrive_at}
+                    onChange={(arriveAt) => setFlightForm({ ...flightForm, arrive_at: arriveAt })}
+                    dateOptions={flightDateOptions}
+                    defaultDate={event?.start_date ?? undefined}
+                  />
+                </FormField>
                 <MoreFields>
                   <FormField label="Hãng">
                     <Input value={flightForm.airline} onChange={(e) => setFlightForm({ ...flightForm, airline: e.target.value })} />
@@ -606,9 +642,6 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                         ))}
                       </SelectContent>
                     </Select>
-                  </FormField>
-                  <FormField label="Hạ cánh">
-                    <Input type="datetime-local" value={flightForm.arrive_at} onChange={(e) => setFlightForm({ ...flightForm, arrive_at: e.target.value })} />
                   </FormField>
                   <FormField label="Điểm đi">
                     <Input value={flightForm.origin} onChange={(e) => setFlightForm({ ...flightForm, origin: e.target.value })} />

@@ -5,6 +5,7 @@ import { CalendarDays, Download, Eye, Info, MapPin, Megaphone, Pencil, Pin, Plus
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { LiteMarkdown } from "@/components/domain/lite-markdown";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,14 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
-import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import {
+  addMinutesToDatetimeLocal,
+  durationLabel as timeDurationLabel,
+  eventDateOptions,
+  fromDatetimeLocal,
+  splitDatetimeLocal,
+  toDatetimeLocal,
+} from "@/lib/datetime";
 import { formatDate, formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Announcement, Dashboard, Event, ScheduleItem, Shift, Team } from "@/types/api";
@@ -101,7 +109,12 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
 
   const openCreateSchedule = () => {
     setEditingSchedule(null);
-    setScheduleForm(EMPTY_SCHEDULE);
+    setScheduleForm({
+      ...EMPTY_SCHEDULE,
+      day_date: event?.start_date ?? "",
+      start_at: event?.start_date ? `${event.start_date}T09:00` : "",
+      end_at: event?.start_date ? `${event.start_date}T10:00` : "",
+    });
     setScheduleOpen(true);
   };
   const openEditSchedule = (item: ScheduleItem) => {
@@ -117,6 +130,26 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
       audience_ref_id: item.audience_ref_id ? String(item.audience_ref_id) : "",
     });
     setScheduleOpen(true);
+  };
+  const scheduleDateOptions = eventDateOptions(event?.start_date, event?.end_date);
+  const scheduleDuration = timeDurationLabel(scheduleForm.start_at, scheduleForm.end_at);
+  const updateScheduleStart = (startAt: string) => {
+    setScheduleForm((current) => ({
+      ...current,
+      start_at: startAt,
+      day_date: splitDatetimeLocal(startAt).date || current.day_date,
+      end_at: current.end_at || addMinutesToDatetimeLocal(startAt, 60),
+    }));
+  };
+  const setScheduleDuration = (minutes: number) => {
+    if (!scheduleForm.start_at) {
+      toast.error("Hãy chọn giờ bắt đầu trước");
+      return;
+    }
+    setScheduleForm((current) => ({
+      ...current,
+      end_at: addMinutesToDatetimeLocal(current.start_at, minutes),
+    }));
   };
 
   const saveScheduleMutation = useMutation({
@@ -363,20 +396,37 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
                   <Input value={scheduleForm.title} onChange={(e) => setScheduleForm({ ...scheduleForm, title: e.target.value })} />
                 </FormField>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <FormField label="Bắt đầu">
-                    <Input type="datetime-local" value={scheduleForm.start_at} onChange={(e) => setScheduleForm({ ...scheduleForm, start_at: e.target.value })} />
+                  <FormField label="Bắt đầu" hint="Chọn ngày thuộc chương trình và giờ bắt đầu.">
+                    <EventDateTimeField
+                      ariaLabel="Bắt đầu hoạt động"
+                      value={scheduleForm.start_at}
+                      onChange={updateScheduleStart}
+                      dateOptions={scheduleDateOptions}
+                      defaultDate={event?.start_date ?? undefined}
+                    />
                   </FormField>
                   <FormField label="Địa điểm">
                     <Input value={scheduleForm.location} onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })} />
                   </FormField>
                 </div>
+                <FormField label="Kết thúc" hint={scheduleDuration ? `Thời lượng: ${scheduleDuration}.` : "Chọn giờ kết thúc hoặc dùng nút thời lượng nhanh."}>
+                  <EventDateTimeField
+                    ariaLabel="Kết thúc hoạt động"
+                    value={scheduleForm.end_at}
+                    onChange={(endAt) => setScheduleForm({ ...scheduleForm, end_at: endAt })}
+                    dateOptions={scheduleDateOptions}
+                    defaultDate={splitDatetimeLocal(scheduleForm.start_at).date || event?.start_date || undefined}
+                  />
+                </FormField>
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-muted/30 p-2 text-xs">
+                  <span className="mr-1 text-muted-foreground">Thời lượng nhanh:</span>
+                  {[30, 60, 90, 120].map((minutes) => (
+                    <Button key={minutes} type="button" size="sm" variant="outline" onClick={() => setScheduleDuration(minutes)}>
+                      {minutes < 60 ? `${minutes} phút` : `+${minutes / 60} giờ`}
+                    </Button>
+                  ))}
+                </div>
                 <MoreFields>
-                  <FormField label="Ngày">
-                    <Input type="date" value={scheduleForm.day_date} onChange={(e) => setScheduleForm({ ...scheduleForm, day_date: e.target.value })} />
-                  </FormField>
-                  <FormField label="Kết thúc">
-                    <Input type="datetime-local" value={scheduleForm.end_at} onChange={(e) => setScheduleForm({ ...scheduleForm, end_at: e.target.value })} />
-                  </FormField>
                   <FormField label="Đối tượng">
                     <Select value={scheduleForm.audience} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience: (v ?? "all") as typeof scheduleForm.audience, audience_ref_id: "" })}>
                       <SelectTrigger>

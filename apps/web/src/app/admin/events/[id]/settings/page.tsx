@@ -4,13 +4,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { use, useState } from "react";
 import { toast } from "sonner";
 import { EntityCrudTable } from "@/components/domain/entity-crud-table";
+import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, ApiError } from "@/lib/api";
-import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import {
+  addDaysToDate,
+  eventDateOptions,
+  fromDatetimeLocal,
+  joinDatetimeLocal,
+  nowDatetimeLocal,
+  toDatetimeLocal,
+} from "@/lib/datetime";
 import type { Event, EventSettings, Site } from "@/types/api";
 
 export default function EventSettingsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -146,6 +154,20 @@ function EventMetaForm({ event }: { event: Event }) {
   const [endDate, setEndDate] = useState(event.end_date ?? "");
   const [openAt, setOpenAt] = useState(toDatetimeLocal(event.registration_open_at));
   const [closeAt, setCloseAt] = useState(toDatetimeLocal(event.registration_close_at));
+  const dateOptions = eventDateOptions(startDate, endDate);
+
+  const applyRegistrationPreset = (kind: "open_now" | "close_7_days" | "close_48_hours") => {
+    if (kind === "open_now") {
+      setOpenAt(nowDatetimeLocal());
+      return;
+    }
+    if (!startDate) {
+      toast.error("Hãy chọn ngày bắt đầu sự kiện trước");
+      return;
+    }
+    const days = kind === "close_7_days" ? -7 : -2;
+    setCloseAt(joinDatetimeLocal(addDaysToDate(startDate, days), "18:00"));
+  };
 
   const saveEvent = useMutation({
     mutationFn: () =>
@@ -182,21 +204,36 @@ function EventMetaForm({ event }: { event: Event }) {
           <Label htmlFor="ev-dest">Điểm đến</Label>
           <Input id="ev-dest" value={destination} onChange={(e) => setDestination(e.target.value)} />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="ev-start">Ngày bắt đầu</Label>
-          <Input id="ev-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-3">
+          <p className="text-sm font-medium">Thời gian chương trình</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ev-start">Ngày bắt đầu</Label>
+              <Input id="ev-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ev-end">Ngày kết thúc</Label>
+              <Input id="ev-end" min={startDate || undefined} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="ev-end">Ngày kết thúc</Label>
-          <Input id="ev-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="ev-open">Mở đăng ký</Label>
-          <Input id="ev-open" type="datetime-local" value={openAt} onChange={(e) => setOpenAt(e.target.value)} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="ev-close">Đóng đăng ký</Label>
-          <Input id="ev-close" type="datetime-local" value={closeAt} onChange={(e) => setCloseAt(e.target.value)} />
+        <div className="sm:col-span-2 rounded-xl border border-border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="mr-auto text-sm font-medium">Cửa sổ đăng ký</p>
+            <Button type="button" size="sm" variant="outline" onClick={() => applyRegistrationPreset("open_now")}>Mở ngay</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => applyRegistrationPreset("close_7_days")}>Đóng trước 7 ngày</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => applyRegistrationPreset("close_48_hours")}>Đóng trước 48 giờ</Button>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Mở đăng ký</Label>
+              <EventDateTimeField ariaLabel="Mở đăng ký" value={openAt} onChange={setOpenAt} dateOptions={dateOptions} constrainToDateOptions={false} defaultDate={startDate || undefined} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Đóng đăng ký</Label>
+              <EventDateTimeField ariaLabel="Đóng đăng ký" value={closeAt} onChange={setCloseAt} dateOptions={dateOptions} constrainToDateOptions={false} defaultDate={startDate || undefined} />
+            </div>
+          </div>
         </div>
         <div className="flex flex-col gap-1.5 sm:col-span-2">
           <Label htmlFor="ev-desc">Mô tả</Label>
