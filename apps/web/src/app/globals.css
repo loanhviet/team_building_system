@@ -239,6 +239,7 @@
   border-radius: 0.7rem;
   font-size: 0.9rem;
   color: var(--sidebar-foreground);
+  transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 .nav-link:hover {
   background: var(--sidebar-accent);
@@ -279,6 +280,7 @@
   border-radius: 0.65rem;
   font-size: 0.875rem;
   color: var(--muted-foreground);
+  transition: background-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
 }
 .seg button[aria-pressed="true"] {
   background: var(--card);

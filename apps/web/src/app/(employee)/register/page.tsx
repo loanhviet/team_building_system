@@ -401,6 +401,7 @@ function RegistrationForm({
         </div>
       )}
 
+      <div key={readOnly ? "review-all" : currentStep?.id} className="flex animate-in flex-col gap-4 fade-in slide-in-from-right-2 duration-200">
       {show("profile") && (
         <ProfileCard controlledPhone={readOnly ? undefined : { value: phone, onChange: setPhone }} />
       )}
@@ -593,6 +594,7 @@ function RegistrationForm({
           </CardContent>
         </Card>
       )}
+      </div>
 
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-2">

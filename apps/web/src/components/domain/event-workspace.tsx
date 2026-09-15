@@ -172,7 +172,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
                 key={href}
                 href={href}
                 className={cn(
-                  "shrink-0 rounded-full border px-3 py-2 text-sm",
+                  "shrink-0 rounded-full border px-3 py-2 text-sm transition-colors duration-150",
                   active
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-card",
@@ -244,7 +244,9 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
             </details>
           )}
         </header>
-        {children}
+        <div key={pathname} className="animate-in fade-in duration-200">
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -174,7 +174,7 @@ export function GalaSeatMap({
                       aria-label={label}
                       aria-pressed={mineHeld || mineConfirmed}
                       className={cn(
-                        "absolute grid place-items-center border text-[11px] font-medium",
+                        "absolute grid place-items-center border text-[11px] font-medium transition-colors duration-300",
                         table.shape === "round" ? "rounded-full" : "rounded-sm",
                         SEAT_TONE[seat.status],
                         // own team's confirmed seats get a distinct fill, not

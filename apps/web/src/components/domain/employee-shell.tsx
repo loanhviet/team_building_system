@@ -216,7 +216,9 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
             !isChat && dock.length > 0 ? "pb-24 md:pb-8" : "pb-8",
           )}
         >
-          {children}
+          <div key={pathname} className={cn("flex min-h-0 flex-1 flex-col animate-in fade-in duration-200", isChat && "min-h-0")}>
+            {children}
+          </div>
         </main>
         {dock.length > 0 && (
           <nav

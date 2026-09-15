@@ -51,7 +51,7 @@ export default function LoginPage() {
 
   return (
     <div className="grid min-h-svh flex-1 lg:grid-cols-[minmax(16rem,28rem)_1fr]">
-      <aside className="hidden flex-col justify-between bg-[var(--night)] p-8 text-[var(--on-night)] lg:flex">
+      <aside className="login-panel hidden flex-col justify-between p-8 lg:flex">
         <BrandMark light />
         <ul className="flex flex-col gap-5 text-sm leading-relaxed text-[var(--on-night)]/85">
           <li>
@@ -69,7 +69,7 @@ export default function LoginPage() {
       <main className="flex items-center justify-center bg-background p-6">
         <form
           onSubmit={handleSubmit(onSubmit)}
-          className="flex w-full max-w-sm flex-col gap-5"
+          className="flex w-full max-w-sm animate-in flex-col gap-5 fade-in slide-in-from-bottom-2 duration-300"
         >
           <div className="lg:hidden">
             <BrandMark />
@@ -83,7 +83,7 @@ export default function LoginPage() {
           {loginError && (
             <div
               role="alert"
-              className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              className="animate-in rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive fade-in slide-in-from-top-1 duration-200"
             >
               {loginError}
             </div>

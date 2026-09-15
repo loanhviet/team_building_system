@@ -16,7 +16,7 @@ export function StepIndicator({
           <li key={label} className="flex items-center gap-2 text-sm">
             <span
               className={cn(
-                "grid size-7 place-items-center text-xs font-semibold",
+                "grid size-7 place-items-center rounded-full text-xs font-semibold transition-colors duration-200",
                 active && "bg-primary text-primary-foreground",
                 done && "bg-secondary text-foreground",
                 !active && !done && "border border-border text-muted-foreground",
@@ -25,7 +25,7 @@ export function StepIndicator({
             >
               {i + 1}
             </span>
-            <span className={cn(active ? "font-medium text-foreground" : "text-muted-foreground")}>
+            <span className={cn("transition-colors duration-200", active ? "font-medium text-foreground" : "text-muted-foreground")}>
               {label}
             </span>
             {i < steps.length - 1 && (

@@ -48,9 +48,38 @@ export function EventDashboard({ eventId }: { eventId: number }) {
   ].filter((t): t is { href: string; title: string; hint: string } => !!t);
 
   const shiftLine = dashboard.by_shift.map((s) => `${s.shift_name} ${s.count}`).join(" · ");
+  const flaggedTotal = dashboard.flights_flagged_count + dashboard.buses_flagged_count;
 
   return (
     <div className="flex max-w-xl flex-col gap-8">
+      <section
+        className="board animate-in grid-cols-3 overflow-hidden rounded-2xl fade-in duration-300"
+        aria-label="Chỉ số nhanh"
+      >
+        <Link href={`${base}/registrations`} className="board-cell transition-colors hover:bg-white/5">
+          <p className="board-n">
+            {dashboard.registered_count}
+            <span className="text-base font-normal text-[var(--on-night)]/60">
+              /{dashboard.total_employees}
+            </span>
+          </p>
+          <p className="mt-1 text-xs text-[var(--on-night)]/70">Đã gửi đăng ký</p>
+        </Link>
+        <Link href={`${base}/hotels`} className="board-cell transition-colors hover:bg-white/5">
+          <p className="board-n">
+            {dashboard.rooms_assigned}
+            <span className="text-base font-normal text-[var(--on-night)]/60">
+              /{dashboard.rooms_total_capacity}
+            </span>
+          </p>
+          <p className="mt-1 text-xs text-[var(--on-night)]/70">Phòng đã gán</p>
+        </Link>
+        <div className="board-cell">
+          <p className="board-n">{flaggedTotal}</p>
+          <p className="mt-1 text-xs text-[var(--on-night)]/70">Ca cần xử lý</p>
+        </div>
+      </section>
+
       <section>
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Cần xử lý</h2>
         {tasks.length === 0 ? (
@@ -59,11 +88,12 @@ export function EventDashboard({ eventId }: { eventId: number }) {
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {tasks.map((t) => (
+            {tasks.map((t, i) => (
               <li key={t.title}>
                 <Link
                   href={t.href}
-                  className="flex items-center gap-3 rounded-2xl border border-[var(--status-flag-border)] bg-[var(--status-flag-bg)] px-4 py-3 text-[var(--status-flag-fg)] hover:brightness-[0.98]"
+                  style={{ animationDelay: `${i * 40}ms` }}
+                  className="flex animate-in items-center gap-3 rounded-2xl border border-[var(--status-flag-border)] bg-[var(--status-flag-bg)] px-4 py-3 text-[var(--status-flag-fg)] fade-in slide-in-from-bottom-1 duration-300 fill-mode-backwards hover:brightness-[0.98]"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block font-medium">{t.title}</span>
@@ -80,10 +110,6 @@ export function EventDashboard({ eventId }: { eventId: number }) {
       <section>
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Đăng ký</h2>
         <div className="rounded-2xl border border-border bg-card px-4 py-4">
-          <p className="text-lg">
-            <span className="font-display text-2xl tabular">{dashboard.registered_count}</span>
-            <span className="text-muted-foreground"> / {dashboard.total_employees} đã gửi</span>
-          </p>
           <p className="mt-1 text-sm text-muted-foreground">
             {dashboard.not_registered_count} chưa gửi · {dashboard.participating_count} tham gia
             {shiftLine ? ` · ${shiftLine}` : ""}

@@ -153,7 +153,7 @@ export default function JourneyPage() {
       />
 
       {next && (
-        <section className={cn("rounded-2xl border border-border bg-card p-4", next.warn && "border-[var(--ember)]")} aria-labelledby="next-title">
+        <section className={cn("next-panel", next.warn && "next-panel-warn")} aria-labelledby="next-title">
           <p className="text-xs font-medium text-muted-foreground">Việc tiếp theo</p>
           <p id="next-title" className="mt-1 font-display text-xl font-semibold">
             {next.label}
@@ -201,17 +201,13 @@ export default function JourneyPage() {
       )}
 
       {jumps.length > 1 && (
-        <nav aria-label="Nhảy tới mốc" className="flex flex-wrap gap-1.5">
+        <nav aria-label="Nhảy tới mốc" className="jump-nav">
           {jumps.map((j) => {
             const anchor = firstAnchorId(j.kind, days);
             if (!anchor) return null;
             const Icon = KIND_ICON[j.kind];
             return (
-              <a
-                key={j.kind}
-                href={`#${anchor}`}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm transition-colors hover:border-primary hover:text-primary"
-              >
+              <a key={j.kind} href={`#${anchor}`} className="gap-1.5">
                 <Icon className="size-3.5" aria-hidden="true" />
                 {j.label}
               </a>
@@ -223,16 +219,17 @@ export default function JourneyPage() {
       {days.length === 0 ? (
         <p className="text-sm text-muted-foreground">Chưa có mốc nào trên hành trình.</p>
       ) : (
-        <ol className="flex flex-col gap-6">
+        <ol className="timeline">
           {days.map((day) => (
-            <li key={day.key}>
+            <li key={day.key} className="timeline-day">
               <h2 className="mb-2 text-sm font-medium text-muted-foreground">{day.label}</h2>
-              <ul className="flex flex-col gap-2">
+              <ul>
                 {day.items.map((item, i) => {
                   const Icon = KIND_ICON[item.kind];
                   const extras = item.lines.slice(1);
                   return (
-                    <li key={item.id} id={item.id} className="scroll-mt-24">
+                    <li key={item.id} id={item.id} className="timeline-item scroll-mt-24">
+                      <span className="timeline-dot" aria-hidden="true" />
                       <article
                         className="flex cursor-pointer animate-in gap-3 fade-in slide-in-from-bottom-1 rounded-2xl border border-border bg-card p-3 duration-300 fill-mode-backwards sm:gap-4 sm:p-4"
                         style={{ animationDelay: `${Math.min(i * 40, 240)}ms` }}
