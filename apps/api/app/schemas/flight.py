@@ -58,6 +58,10 @@ class FlightAssignmentOut(BaseModel):
     employee_code: str | None
     full_name: str
     team_name: str | None
+    # the shift the employee registered for (their "nguyện vọng") -- shown
+    # next to the flight they actually got so BTC can see a shift_mismatch
+    # flag's requested-vs-actual at a glance instead of digging per row
+    requested_shift_name: str | None = None
 
 
 class AllocationRequest(BaseModel):

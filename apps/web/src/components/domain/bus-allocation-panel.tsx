@@ -555,25 +555,42 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           }
           return (
             <ul className="flex flex-col gap-2">
-              {people.map((a) => (
-                <li key={a.employee_id}>
-                  <PersonRow
-                    name={a.full_name}
-                    code={a.employee_code}
-                    team={a.team_name}
-                    selected={selected.has(a.employee_id)}
-                    onSelect={(next) =>
-                      setSelected((prev) => {
-                        const copy = new Set(prev);
-                        if (next) copy.add(a.employee_id);
-                        else copy.delete(a.employee_id);
-                        return copy;
-                      })
-                    }
-                    flag={a.is_flagged ? flagReasonLabel(a.flag_reason) : null}
-                  />
-                </li>
-              ))}
+              {people.map((a) => {
+                const assignedBus = buses?.find((b) => b.id === a.bus_id);
+                const pickup = pickupPoints?.find((p) => p.id === assignedBus?.pickup_point_id);
+                return (
+                  <li key={a.employee_id}>
+                    <PersonRow
+                      name={a.full_name}
+                      code={a.employee_code}
+                      team={a.team_name}
+                      selected={selected.has(a.employee_id)}
+                      onSelect={(next) =>
+                        setSelected((prev) => {
+                          const copy = new Set(prev);
+                          if (next) copy.add(a.employee_id);
+                          else copy.delete(a.employee_id);
+                          return copy;
+                        })
+                      }
+                      flag={a.is_flagged ? flagReasonLabel(a.flag_reason) : null}
+                      extra={
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                          {assignedBus ? (
+                            <Badge variant="outline" className="font-mono">
+                              Xe {assignedBus.code}
+                              {pickup ? ` · ${pickup.name}` : ""}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">Chưa xếp xe</span>
+                          )}
+                          {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
+                        </div>
+                      }
+                    />
+                  </li>
+                );
+              })}
             </ul>
           );
         })()}

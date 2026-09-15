@@ -499,6 +499,7 @@ export type FlightAssignment = {
   employee_code: string | null;
   full_name: string;
   team_name: string | null;
+  requested_shift_name: string | null;
 };
 
 export type AllocationRun = {

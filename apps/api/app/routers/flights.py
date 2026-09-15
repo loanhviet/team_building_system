@@ -14,7 +14,7 @@ from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
-from app.models.event import Event
+from app.models.event import Event, Shift
 from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration
@@ -219,8 +219,19 @@ async def list_flight_assignments(
     if direction:
         stmt = stmt.where(FlightAssignment.direction == direction)
     result = await db.execute(stmt)
+    assignments = result.scalars().all()
+
+    shift_by_employee: dict[int, str] = {}
+    if assignments:
+        reg_rows = await db.execute(
+            select(Registration.employee_id, Shift.name)
+            .join(Shift, Shift.id == Registration.shift_id)
+            .where(Registration.event_id == event_id)
+        )
+        shift_by_employee = dict(reg_rows.all())
+
     out = []
-    for a in result.scalars().all():
+    for a in assignments:
         out.append(
             FlightAssignmentOut(
                 id=a.id,
@@ -234,6 +245,7 @@ async def list_flight_assignments(
                 employee_code=a.employee.employee_code,
                 full_name=a.employee.full_name,
                 team_name=a.employee.team.name if a.employee.team else None,
+                requested_shift_name=shift_by_employee.get(a.employee_id),
             )
         )
     return out

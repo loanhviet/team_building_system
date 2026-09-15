@@ -31,6 +31,7 @@ import {
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
 import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import { cn } from "@/lib/utils";
 import type {
   AllocationEnqueued,
   AllocationRun,
@@ -588,30 +589,49 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {visibleAssignments.map((a) => (
-              <li key={a.employee_id}>
-                <PersonRow
-                  name={a.full_name}
-                  code={a.employee_code}
-                  team={a.team_name}
-                  selected={selected.has(a.employee_id)}
-                  onSelect={(next) =>
-                    setSelected((prev) => {
-                      const copy = new Set(prev);
-                      if (next) copy.add(a.employee_id);
-                      else copy.delete(a.employee_id);
-                      return copy;
-                    })
-                  }
-                  flag={a.is_flagged ? flagReasonLabel(a.flag_reason) : null}
-                  extra={
-                    a.is_locked ? (
-                      <p className="text-xs text-muted-foreground">Đã ghim chuyến</p>
-                    ) : undefined
-                  }
-                />
-              </li>
-            ))}
+            {visibleAssignments.map((a) => {
+              const assignedFlight = flights?.find((f) => f.id === a.flight_id);
+              const assignedShift = shifts?.find((s) => s.id === assignedFlight?.shift_id);
+              const mismatch =
+                !!a.requested_shift_name && !!assignedShift && a.requested_shift_name !== assignedShift.name;
+              return (
+                <li key={a.employee_id}>
+                  <PersonRow
+                    name={a.full_name}
+                    code={a.employee_code}
+                    team={a.team_name}
+                    selected={selected.has(a.employee_id)}
+                    onSelect={(next) =>
+                      setSelected((prev) => {
+                        const copy = new Set(prev);
+                        if (next) copy.add(a.employee_id);
+                        else copy.delete(a.employee_id);
+                        return copy;
+                      })
+                    }
+                    flag={a.is_flagged ? flagReasonLabel(a.flag_reason) : null}
+                    extra={
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        {assignedFlight ? (
+                          <Badge variant="outline" className="font-mono">
+                            {assignedFlight.flight_code}
+                            {assignedShift ? ` · ${assignedShift.name}` : ""}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">Chưa xếp chuyến</span>
+                        )}
+                        {a.requested_shift_name && (
+                          <span className={cn(mismatch ? "font-medium text-[var(--ember)]" : "text-muted-foreground")}>
+                            Đăng ký: {a.requested_shift_name}
+                          </span>
+                        )}
+                        {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
+                      </div>
+                    }
+                  />
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
