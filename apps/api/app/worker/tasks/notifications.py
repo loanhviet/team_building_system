@@ -7,7 +7,11 @@ from app.db.session import AsyncSessionLocal
 from app.models.event import Event
 from app.models.organization import Employee
 from app.models.registration import Registration
-from app.services.notification.email_service import dispatch_emails, enqueue_email
+from app.services.notification.email_service import (
+    build_email_context,
+    dispatch_emails,
+    enqueue_email,
+)
 
 logger = logging.getLogger("worker")
 settings = get_settings()
@@ -17,7 +21,10 @@ async def send_bulk_emails_task(
     ctx: dict, event_id: int, template_code: str, dedupe_suffix: str = ""
 ) -> None:
     """Fan-out: one send_email job per submitted+participating employee, each
-    deduped so re-running this (e.g. a retried publish) never double-sends."""
+    deduped so re-running this (e.g. a retried publish) never double-sends.
+    Both callers (info_published, schedule_changed) only ever fire once the
+    event is already published, so journey data always exists to build
+    per-employee context from — see build_email_context."""
     async with AsyncSessionLocal() as db:
         event = await db.get(Event, event_id)
         if event is None:
@@ -37,12 +44,10 @@ async def send_bulk_emails_task(
 
         outbox_ids = []
         for employee in employees:
+            context = await build_email_context(db, event, employee)
             outbox_id = await enqueue_email(
                 db, event_id=event_id, to_email=employee.email, template_code=template_code,
-                payload={
-                    "full_name": employee.full_name, "event_name": event.name,
-                    "app_url": settings.app_base_url,
-                },
+                payload=context,
                 dedupe_key=f"{template_code}:{event_id}:{employee.id}:{dedupe_suffix}".rstrip(":"),
             )
             outbox_ids.append(outbox_id)

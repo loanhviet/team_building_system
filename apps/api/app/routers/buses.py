@@ -8,7 +8,6 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.config import get_settings
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
@@ -34,16 +33,11 @@ from app.services import master_data
 from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
-from app.services.notification.email_service import (
-    PUBLISHED_STATUSES,
-    dispatch_email,
-    enqueue_email,
-)
+from app.services.notification.email_service import PUBLISHED_STATUSES, notify_employees
 
 router = APIRouter(prefix="/events/{event_id}", tags=["buses"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
-settings = get_settings()
 
 
 async def _flight_times_by_employee(
@@ -126,25 +120,15 @@ async def update_bus(
     changed_passenger_fields = any(before.get(f) != after.get(f) for f in PASSENGER_FACING_BUS_FIELDS)
     if changed_passenger_fields and event.status.value in PUBLISHED_STATUSES:
         result = await db.execute(
-            select(Employee).join(
-                BusAssignment, BusAssignment.employee_id == Employee.id
-            ).where(BusAssignment.event_id == event_id, BusAssignment.bus_id == bus_id)
-        )
-        outbox_ids = []
-        for employee in result.scalars().all():
-            outbox_id = await enqueue_email(
-                db, event_id=event_id, to_email=employee.email,
-                template_code="bus_changed",
-                payload={
-                    "full_name": employee.full_name, "event_name": event.name,
-                    "bus_code": bus.code, "app_url": settings.app_base_url,
-                },
-                dedupe_key=f"bus_changed:{event_id}:{employee.id}:{bus_id}:{utcnow().isoformat()}",
+            select(BusAssignment.employee_id).where(
+                BusAssignment.event_id == event_id, BusAssignment.bus_id == bus_id
             )
-            outbox_ids.append(outbox_id)
-        await db.commit()
-        for outbox_id in outbox_ids:
-            await dispatch_email(queue, outbox_id)
+        )
+        employee_ids = [row[0] for row in result.all()]
+        await notify_employees(
+            db, queue, event, employee_ids, "bus_changed",
+            dedupe_suffix=f"{bus_id}:{utcnow().isoformat()}",
+        )
 
     return bus
 
@@ -417,25 +401,10 @@ async def adjust_bus_assignments(
 
     await db.commit()
     if event.status.value in ("information_published", "event_started"):
-        outbox_ids = []
-        for employee_id in employee_ids:
-            employee = await db.get(Employee, employee_id)
-            if employee is None:
-                continue
-            outbox_id = await enqueue_email(
-                db, event_id=event_id, to_email=employee.email,
-                template_code="bus_changed",
-                payload={
-                    "full_name": employee.full_name, "event_name": event.name,
-                    "app_url": settings.app_base_url,
-                },
-                dedupe_key=f"bus_changed:{event_id}:{employee_id}:{utcnow().isoformat()}",
-            )
-            outbox_ids.append(outbox_id)
-        await db.commit()
-        # dispatch only after commit — see enqueue_email's docstring
-        for outbox_id in outbox_ids:
-            await dispatch_email(queue, outbox_id)
+        await notify_employees(
+            db, queue, event, list(employee_ids), "bus_changed",
+            dedupe_suffix=utcnow().isoformat(),
+        )
 
     return {"moved": len(employee_ids), "warnings": warnings}
 

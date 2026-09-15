@@ -3,6 +3,7 @@ from typing import Annotated
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
@@ -10,7 +11,8 @@ from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
 from app.models.event import Event
-from app.schemas.notification import EmailTemplateOut, EmailTemplateUpdate
+from app.models.notification import EmailOutbox
+from app.schemas.notification import EmailOutboxOut, EmailTemplateOut, EmailTemplateUpdate
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.notification.email_service import (
@@ -23,6 +25,7 @@ from app.services.notification.email_service import (
 )
 
 router = APIRouter(prefix="/events/{event_id}/email-templates", tags=["email-templates"])
+outbox_router = APIRouter(prefix="/events/{event_id}/email-outbox", tags=["email-outbox"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
 
@@ -122,3 +125,49 @@ async def send_test_email(
     await db.commit()
     await dispatch_email(queue, outbox_id)
     return {"to": user.email}
+
+
+@outbox_router.get("", response_model=list[EmailOutboxOut])
+async def list_outbox(
+    event_id: int,
+    db: DbSession,
+    _user: AdminUser,
+    status_filter: str | None = None,
+    template_code: str | None = None,
+) -> list[EmailOutbox]:
+    """Nhật ký gửi — trước R7 một mail kẹt `queued`/`failed` vô hình với BTC,
+    không có cách xem hay gửi lại."""
+    await master_data.get_or_404(db, Event, event_id)
+    stmt = select(EmailOutbox).where(EmailOutbox.event_id == event_id)
+    if status_filter:
+        stmt = stmt.where(EmailOutbox.status == status_filter)
+    if template_code:
+        stmt = stmt.where(EmailOutbox.template_code == template_code)
+    result = await db.execute(stmt.order_by(EmailOutbox.created_at.desc()).limit(500))
+    return list(result.scalars().all())
+
+
+@outbox_router.post("/{outbox_id}/retry", response_model=EmailOutboxOut)
+async def retry_outbox(
+    event_id: int,
+    outbox_id: int,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> EmailOutbox:
+    outbox = await db.get(EmailOutbox, outbox_id)
+    if outbox is None or outbox.event_id != event_id:
+        raise AppError("not_found", "Không tìm thấy email trong nhật ký", status.HTTP_404_NOT_FOUND)
+    if outbox.status == "sent":
+        raise AppError("already_sent", "Email này đã gửi thành công, không cần gửi lại", status.HTTP_400_BAD_REQUEST)
+    outbox.status = "queued"
+    outbox.attempts = 0
+    outbox.last_error = None
+    await record_audit(
+        db, actor_user_id=user.id, action="retry", entity_type="email_outbox", entity_id=outbox_id,
+        event_id=event_id,
+    )
+    await db.commit()
+    await dispatch_email(queue, outbox_id)
+    await db.refresh(outbox)
+    return outbox

@@ -5,6 +5,7 @@ import { Copy, Eye, Mail, RotateCcw, Save, Send } from "lucide-react";
 import { use, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { EmailOutboxPanel } from "@/components/domain/email-outbox-panel";
 import { EmptyState } from "@/components/domain/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,14 +47,13 @@ const TITLE_OF: Record<string, string> = {
 const VARS = [
   ["full_name", "Họ và tên"],
   ["event_name", "Tên sự kiện"],
-  ["team_name", "Team"],
-  ["shift_name", "Ca"],
-  ["participating_label", "Tham gia"],
-  ["transport_summary", "Nhu cầu xe"],
+  ["team_name", "Team (chỉ mẫu Xác nhận đăng ký)"],
+  ["shift_name", "Ca (chỉ mẫu Xác nhận đăng ký)"],
+  ["participating_label", "Tham gia (chỉ mẫu Xác nhận đăng ký)"],
+  ["transport_summary", "Nhu cầu xe (chỉ mẫu Xác nhận đăng ký)"],
   ["app_url", "Cổng thông tin"],
-  ["flight_code", "Mã chuyến bay"],
-  ["bus_number", "Số xe"],
-  ["table_number", "Số bàn"],
+  ["journey.room.hotel_name", "Tên khách sạn"],
+  ["journey.room.room_number", "Số phòng"],
 ];
 
 export default function EmailTemplatesPage({ params }: { params: Promise<{ id: string }> }) {
@@ -313,6 +313,12 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Chuyến bay/xe/Gala là danh sách — dùng vòng lặp Jinja, ví dụ:{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono">
+                  {"{% for f in journey.flights %}{{ f.flight_code }}{% endfor %}"}
+                </code>
+              </p>
             </div>
 
             {mode === "html" ? (
@@ -409,6 +415,8 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
           <p className="text-sm text-muted-foreground">Chọn một mẫu bên trái để sửa.</p>
         )}
       </div>
+
+      <EmailOutboxPanel eventId={eventId} templateTitleOf={(code) => TITLE_OF[code] ?? code} />
 
       <Dialog open={!!preview && mode === "html"} onOpenChange={(open) => !open && setPreview(null)}>
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">

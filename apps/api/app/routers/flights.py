@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.core.config import get_settings
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
@@ -33,17 +32,12 @@ from app.schemas.flight import (
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
-from app.services.notification.email_service import (
-    PUBLISHED_STATUSES,
-    dispatch_email,
-    enqueue_email,
-)
+from app.services.notification.email_service import PUBLISHED_STATUSES, notify_employees
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
-settings = get_settings()
 
 REQUIRED_IMPORT_HEADERS = {"flight_code", "direction", "capacity"}
 
@@ -122,25 +116,15 @@ async def update_flight(
     changed_passenger_fields = any(before.get(f) != after.get(f) for f in PASSENGER_FACING_FIELDS)
     if changed_passenger_fields and event.status.value in PUBLISHED_STATUSES:
         result = await db.execute(
-            select(Employee).join(
-                FlightAssignment, FlightAssignment.employee_id == Employee.id
-            ).where(FlightAssignment.event_id == event_id, FlightAssignment.flight_id == flight_id)
-        )
-        outbox_ids = []
-        for employee in result.scalars().all():
-            outbox_id = await enqueue_email(
-                db, event_id=event_id, to_email=employee.email,
-                template_code="flight_changed",
-                payload={
-                    "full_name": employee.full_name, "event_name": event.name,
-                    "flight_code": flight.flight_code, "app_url": settings.app_base_url,
-                },
-                dedupe_key=f"flight_changed:{event_id}:{employee.id}:{flight_id}:{utcnow().isoformat()}",
+            select(FlightAssignment.employee_id).where(
+                FlightAssignment.event_id == event_id, FlightAssignment.flight_id == flight_id
             )
-            outbox_ids.append(outbox_id)
-        await db.commit()
-        for outbox_id in outbox_ids:
-            await dispatch_email(queue, outbox_id)
+        )
+        employee_ids = [row[0] for row in result.all()]
+        await notify_employees(
+            db, queue, event, employee_ids, "flight_changed",
+            dedupe_suffix=f"{flight_id}:{utcnow().isoformat()}",
+        )
 
     return flight
 
@@ -502,26 +486,10 @@ async def adjust_flight_assignments(
     await db.commit()
 
     if event.status.value in ("information_published", "event_started"):
-        outbox_ids = []
-        for employee_id in employee_ids:
-            employee = await db.get(Employee, employee_id)
-            if employee is None:
-                continue
-            outbox_id = await enqueue_email(
-                db, event_id=event_id, to_email=employee.email,
-                template_code="flight_changed",
-                payload={
-                    "full_name": employee.full_name, "event_name": event.name,
-                    "app_url": settings.app_base_url,
-                },
-                dedupe_key=f"flight_changed:{event_id}:{employee_id}:{utcnow().isoformat()}",
-            )
-            outbox_ids.append(outbox_id)
-        await db.commit()
-        # dispatch only after commit — the worker loads each row on its own
-        # connection and won't see it until this transaction is durable
-        for outbox_id in outbox_ids:
-            await dispatch_email(queue, outbox_id)
+        await notify_employees(
+            db, queue, event, list(employee_ids), "flight_changed",
+            dedupe_suffix=utcnow().isoformat(),
+        )
 
     return {"moved": len(employee_ids), "warnings": warnings}
 

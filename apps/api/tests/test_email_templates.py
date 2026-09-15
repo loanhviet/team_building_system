@@ -55,6 +55,75 @@ async def test_send_test_email_is_admin_only(client, world, auth_headers):
     assert ok.json()["to"] == world.organizer_user.email
 
 
+async def test_build_email_context_includes_journey_data(world, db_session):
+    from app.models.enums import EventStatus
+    from app.models.flight import Flight, FlightAssignment
+    from app.services.notification.email_service import build_email_context
+
+    world.event.status = EventStatus.information_published
+    flight = Flight(
+        event_id=world.event.id, flight_code="VN900", direction="outbound",
+        origin="HAN", destination="DAD", capacity=5,
+    )
+    db_session.add(flight)
+    await db_session.flush()
+    db_session.add(
+        FlightAssignment(
+            event_id=world.event.id, flight_id=flight.id, employee_id=world.employee.id,
+            direction="outbound", source="auto",
+        )
+    )
+    await db_session.commit()
+
+    context = await build_email_context(db_session, world.event, world.employee)
+
+    assert context["full_name"] == world.employee.full_name
+    assert context["journey"]["flights"][0]["flight_code"] == "VN900"
+
+
+async def test_notify_employees_renders_flight_changed_with_flight_code(world, db_session):
+    """Regression for E4: before this, flight_changed/bus_changed/info_published
+    payloads carried no flight/bus data at all, so the template could reference
+    a flight code but the real email never had one to show."""
+    from app.models.enums import EventStatus
+    from app.models.flight import Flight, FlightAssignment
+    from app.services.notification.email_service import notify_employees, render_email
+    from tests.conftest import FakeQueue
+
+    world.event.status = EventStatus.information_published
+    flight = Flight(
+        event_id=world.event.id, flight_code="VN901", direction="outbound",
+        origin="HAN", destination="DAD", capacity=5,
+    )
+    db_session.add(flight)
+    await db_session.flush()
+    db_session.add(
+        FlightAssignment(
+            event_id=world.event.id, flight_id=flight.id, employee_id=world.employee.id,
+            direction="outbound", source="auto",
+        )
+    )
+    await db_session.commit()
+
+    queue = FakeQueue()
+    await notify_employees(
+        db_session, queue, world.event, [world.employee.id], "flight_changed", dedupe_suffix="t1",
+    )
+    assert any(job[0] == "send_email" for job in queue.jobs)
+
+    from sqlalchemy import select
+
+    from app.models.notification import EmailOutbox
+
+    outbox = (
+        await db_session.execute(
+            select(EmailOutbox).where(EmailOutbox.template_code == "flight_changed")
+        )
+    ).scalar_one()
+    _subject, body = await render_email(db_session, world.event.id, "flight_changed", outbox.payload_json)
+    assert "VN901" in body
+
+
 def test_upsert_rejects_unknown_code():
     import asyncio
 

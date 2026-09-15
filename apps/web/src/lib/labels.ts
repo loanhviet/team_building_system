@@ -38,6 +38,13 @@ export const jobStatusLabel = makeLookup({
   failed: "Thất bại",
 });
 
+export const emailOutboxStatusLabel = makeLookup({
+  queued: "Đang chờ gửi",
+  sending: "Đang gửi",
+  sent: "Đã gửi",
+  failed: "Gửi thất bại",
+});
+
 export const jobTypeLabel = makeLookup({
   flight_allocation: "Phân bổ chuyến bay",
   bus_allocation: "Phân bổ xe",

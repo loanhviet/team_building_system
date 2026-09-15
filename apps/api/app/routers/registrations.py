@@ -1,3 +1,4 @@
+import hashlib
 import io
 from collections import defaultdict
 from typing import Annotated
@@ -200,10 +201,14 @@ async def submit_my_registration(
     needed_count = sum(1 for n in needs if n.is_needed)
     transport_summary = f"{needed_count} chặng" if needed_count else "Không có nhu cầu"
 
-    # dedupe key is per-registration, not per-submission: submit_registration()
-    # bumps submitted_at on every resubmit, so keying on it would send a fresh
-    # "confirmed" email every time someone edits and resubmits before the
-    # registration deadline instead of only once
+    # dedupe key is per-registration *content*, not just per-registration id:
+    # keying on reg.id alone (the previous behavior) meant editing and
+    # resubmitting with a different Ca or transport needs before the deadline
+    # never sent an updated confirmation — CBNV kept the first email forever,
+    # even if it no longer matched what they'd actually submitted
+    content_fingerprint = hashlib.sha1(
+        f"{reg.is_participating}:{reg.shift_id}:{sorted(n.leg_id for n in needs if n.is_needed)}".encode()
+    ).hexdigest()[:10]
     outbox_id = await enqueue_email(
         db,
         event_id=event_id,
@@ -218,7 +223,7 @@ async def submit_my_registration(
             "transport_summary": transport_summary,
             "app_url": settings.app_base_url,
         },
-        dedupe_key=f"registration_confirmed:{reg.id}",
+        dedupe_key=f"registration_confirmed:{reg.id}:{content_fingerprint}",
     )
 
     await record_audit(

@@ -143,3 +143,65 @@ async def test_remind_unsubmitted_is_admin_only_and_queues(client, world, auth_h
     )
     assert ok.status_code == 202
     assert ok.json()["queued"] >= 1
+
+
+async def test_registration_confirmed_dedupes_by_content_not_just_registration_id(
+    client, world, auth_headers, db_session,
+):
+    """R7 E5: resubmitting with the same content must not re-send; resubmitting
+    with *different* content (a different Ca here) must send an updated email —
+    the old dedupe key was `registration_confirmed:{reg.id}` alone, so a
+    changed resubmission silently never got a fresh confirmation."""
+    from sqlalchemy import select
+
+    from app.models.event import Shift
+    from app.models.notification import EmailOutbox
+
+    shift2 = Shift(event_id=world.event.id, code="CA2", name="Ca 2", sort_order=2)
+    db_session.add(shift2)
+    await db_session.commit()
+
+    await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"shift_id": world.shift.id},
+    )
+    resp = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/submit",
+        headers=auth_headers(world.employee_user),
+        json={"is_participating": True, "agreed_terms": True, "terms_version": "v1"},
+    )
+    assert resp.status_code == 200
+
+    # identical resubmit — no new outbox row
+    resp = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/submit",
+        headers=auth_headers(world.employee_user),
+        json={"is_participating": True, "agreed_terms": True, "terms_version": "v1"},
+    )
+    assert resp.status_code == 200
+    rows = (
+        await db_session.execute(
+            select(EmailOutbox).where(EmailOutbox.template_code == "registration_confirmed")
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+
+    # resubmit with a different Ca — content changed, a second email is queued
+    await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"shift_id": shift2.id},
+    )
+    resp = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/submit",
+        headers=auth_headers(world.employee_user),
+        json={"is_participating": True, "agreed_terms": True, "terms_version": "v1"},
+    )
+    assert resp.status_code == 200
+    rows = (
+        await db_session.execute(
+            select(EmailOutbox).where(EmailOutbox.template_code == "registration_confirmed")
+        )
+    ).scalars().all()
+    assert len(rows) == 2

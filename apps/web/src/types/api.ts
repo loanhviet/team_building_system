@@ -88,6 +88,17 @@ export type EmailTemplate = {
   is_custom: boolean;
 };
 
+export type EmailOutboxEntry = {
+  id: number;
+  to_email: string;
+  template_code: string;
+  status: "queued" | "sending" | "sent" | "failed";
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+  sent_at: string | null;
+};
+
 export type UserAdmin = {
   id: number;
   email: string;
