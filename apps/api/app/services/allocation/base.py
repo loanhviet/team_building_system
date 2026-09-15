@@ -1,12 +1,34 @@
 from dataclasses import dataclass, field
 from typing import Protocol
 
+# Percent-style defaults (sum 100) — BTC chỉnh trên Cấu hình sự kiện.
+# Scoring uses them as relative weights; split uses split_penalty / same_shift
+# as "how many shift-mismatched people we'll swallow to keep the team whole".
 DEFAULT_WEIGHTS = {
-    "same_shift": 10,  # đúng nguyện vọng ca của cá nhân
-    "team_together": 8,  # mỗi thành viên cùng Team đã ở chuyến đó
-    "fill_rate": 2,  # ưu tiên lấp đầy chuyến đang dùng dở
-    "split_penalty": 15,  # phạt mỗi lần phải tách Team
+    "same_shift": 40,
+    "team_together": 30,
+    "fill_rate": 20,
+    "split_penalty": 10,
 }
+
+DEFAULT_BUS_WEIGHTS = {
+    "same_flight": 50,
+    "team_together": 30,
+    "fill_rate": 20,
+}
+
+
+def merge_weights(stored: dict | None, defaults: dict[str, float]) -> dict[str, float]:
+    raw = stored if isinstance(stored, dict) else {}
+    out: dict[str, float] = {}
+    for key, default in defaults.items():
+        try:
+            out[key] = float(raw.get(key, default))
+        except (TypeError, ValueError):
+            out[key] = default
+        if out[key] < 0:
+            out[key] = 0.0
+    return out
 
 
 @dataclass

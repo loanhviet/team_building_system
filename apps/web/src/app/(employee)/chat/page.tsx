@@ -197,16 +197,36 @@ export default function ChatPage() {
   const empty = (messages?.length ?? 0) === 0 && !streamingText;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[16.5rem_minmax(0,1fr)]">
+      <aside className="hidden min-h-0 flex-col gap-3 overflow-y-auto lg:flex">
+        <div className="surface-card p-4">
+          <p className="text-xs font-semibold text-muted-foreground">Ngữ cảnh hành trình</p>
+          <p className="mt-1 font-semibold">{user?.full_name ?? "Bạn"}</p>
+          {chips.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-1.5">
+              {chips.map((c) => (
+                <li key={c}>
+                  <Badge variant="secondary">{c}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <p className="px-1 text-xs text-muted-foreground">
+          Trả lời từ hành trình của bạn và tài liệu BTC đã công bố. Không đoán thông tin chưa công bố.
+        </p>
+      </aside>
+
+      <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-start justify-between gap-3 pb-3">
         <div className="min-w-0">
-          <h1 className="font-display text-2xl font-semibold">Hỏi đáp</h1>
+          <h1 className="font-display text-2xl font-semibold">Trợ lý hành trình</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Tra cứu hành trình <span className="font-medium text-foreground">của bạn</span> và tài liệu
-            BTC đã đăng. Không đoán thông tin chưa công bố.
+            BTC đã đăng.
           </p>
           {chips.length > 0 && (
-            <ul className="mt-2 flex flex-wrap gap-1.5">
+            <ul className="mt-2 flex flex-wrap gap-1.5 lg:hidden">
               {chips.map((c) => (
                 <li key={c}>
                   <Badge variant="secondary">{c}</Badge>
@@ -229,7 +249,7 @@ export default function ChatPage() {
 
       <div
         ref={scroller}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto border border-border bg-card p-4"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-card)]"
         aria-live="polite"
       >
         {empty && (
@@ -333,6 +353,7 @@ export default function ChatPage() {
           <span className="hidden sm:inline">Gửi</span>
         </Button>
       </form>
+      </div>
     </div>
   );
 }

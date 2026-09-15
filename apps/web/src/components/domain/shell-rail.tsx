@@ -20,6 +20,7 @@ export type ShellGroup = {
 
 export function isNavActive(pathname: string, href: string) {
   if (href === "/admin" || href === "/journey") return pathname === href;
+  if (/^\/admin\/events\/\d+$/.test(href)) return pathname === href;
   if (href.startsWith("/gala")) return pathname.startsWith("/gala");
   return pathname === href || pathname.startsWith(`${href}/`);
 }

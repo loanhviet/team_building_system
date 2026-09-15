@@ -56,6 +56,14 @@ export type EmployeeList = {
   offset: number;
 };
 
+export type EmployeeStats = {
+  total: number;
+  active: number;
+  inactive: number;
+  accounts?: number;
+  by_site: { site_id: number; site_name: string; count: number }[];
+};
+
 export type EventSettings = {
   terms_text: string;
   terms_version: string;
@@ -64,6 +72,11 @@ export type EventSettings = {
     team_together: number;
     fill_rate: number;
     split_penalty: number;
+  } & Record<string, number>;
+  bus_allocation_weights: {
+    same_flight: number;
+    team_together: number;
+    fill_rate: number;
   } & Record<string, number>;
 };
 
@@ -174,6 +187,8 @@ export type RegistrationAdmin = Registration & {
   email: string;
   team_id: number | null;
   team_name: string | null;
+  team_code: string | null;
+  position: string | null;
   shift_name: string | null;
   transport_summary: string | null;
 };

@@ -56,6 +56,28 @@ DEFAULT_TEMPLATES = {
             "<p><a href='{{ app_url }}'>Xem lịch trình mới nhất</a></p>"
         ),
     },
+    "registration_reminder": {
+        "subject": "Nhắc đăng ký {{ event_name }}",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>Bạn chưa gửi đăng ký tham gia <b>{{ event_name }}</b>.</p>"
+            "<p>Vui lòng vào cổng nội bộ để hoàn tất trước hạn BTC đóng đăng ký.</p>"
+            "<p><a href='{{ app_url }}/register'>Mở form đăng ký</a></p>"
+        ),
+    },
+    "account_welcome": {
+        "subject": "Tài khoản cổng Team Building",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>BTC đã tạo tài khoản cổng nội bộ cho bạn.</p>"
+            "<ul>"
+            "<li>Email đăng nhập: {{ email }}</li>"
+            "<li>Mật khẩu tạm: mã nhân viên <b>{{ employee_code }}</b></li>"
+            "</ul>"
+            "<p>Đổi mật khẩu ngay lần đăng nhập đầu.</p>"
+            "<p><a href='{{ app_url }}/login'>Đăng nhập</a></p>"
+        ),
+    },
 }
 
 TEMPLATE_DESCRIPTIONS = {
@@ -64,6 +86,8 @@ TEMPLATE_DESCRIPTIONS = {
     "flight_changed": "Gửi khi BTC đổi chuyến bay của CBNV",
     "bus_changed": "Gửi khi BTC đổi xe của CBNV",
     "schedule_changed": "Gửi khi BTC sửa lịch trình (sau khi đã công bố)",
+    "registration_reminder": "Gửi khi BTC nhắc CBNV chưa gửi đăng ký",
+    "account_welcome": "Gửi khi BTC tạo CBNV mới và chọn gửi email kích hoạt",
 }
 
 PUBLISHED_STATUSES = ("information_published", "event_started", "event_completed")
@@ -88,6 +112,12 @@ async def _load_template(db: AsyncSession, event_id: int | None, code: str) -> t
 async def render_email(
     db: AsyncSession, event_id: int | None, code: str, context: dict
 ) -> tuple[str, str]:
+    # Test-send from the editor: already-rendered HTML in the payload, so BTC
+    # can mail unsaved edits without changing the live template.
+    rendered_subject = context.get("_rendered_subject")
+    rendered_html = context.get("_rendered_html")
+    if isinstance(rendered_subject, str) and isinstance(rendered_html, str):
+        return rendered_subject, rendered_html
     subject_tpl, body_tpl = await _load_template(db, event_id, code)
     return Template(subject_tpl).render(**context), Template(body_tpl).render(**context)
 
@@ -223,6 +253,11 @@ PREVIEW_CONTEXT = {
     "shift_name": "Ca 1",
     "transport_summary": "2 chặng",
     "app_url": "https://teambuilding.example.com",
+    "user_id": "NV001",
+    "flight_code": "VN1825",
+    "bus_number": "XE-03",
+    "table_number": "Bàn 08",
+    "qr_checkin_url": "https://teambuilding.example.com/journey",
 }
 
 

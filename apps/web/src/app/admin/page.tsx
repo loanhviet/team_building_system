@@ -33,7 +33,7 @@ export default function AdminHomePage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="font-display text-2xl font-semibold">Tổng quan</h1>
+        <h1 className="font-display text-2xl font-semibold">Tổng quan sự kiện</h1>
         {event ? (
           <p className="mt-1 text-sm text-muted-foreground">
             {event.name}

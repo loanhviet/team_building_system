@@ -265,7 +265,11 @@ async def _admin_list_query(
         stmt = stmt.where(Registration.status == status_filter)
     if search:
         needle = f"%{search.strip()}%"
-        stmt = stmt.where(Employee.full_name.ilike(needle) | Employee.email.ilike(needle))
+        stmt = stmt.where(
+            Employee.full_name.ilike(needle)
+            | Employee.email.ilike(needle)
+            | Employee.employee_code.ilike(needle)
+        )
     if team_id is not None:
         stmt = stmt.where(Employee.team_id == team_id)
     if shift_id is not None:
@@ -309,11 +313,49 @@ async def list_registrations(
                 email=reg.employee.email,
                 team_id=reg.employee.team_id,
                 team_name=reg.employee.team.name if reg.employee.team else None,
+                team_code=reg.employee.team.code if reg.employee.team else None,
+                position=reg.employee.position,
                 shift_name=shifts.get(reg.shift_id) if reg.shift_id else None,
                 transport_summary=", ".join(needs_by_reg.get(reg.id, [])) or None,
             )
         )
     return out
+
+
+@router.post("/remind", status_code=status.HTTP_202_ACCEPTED)
+async def remind_unsubmitted(
+    event_id: int,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> dict:
+    """Nhắc CBNV còn bản nháp chưa gửi. Gửi qua worker, không spam trùng trong ngày."""
+    await master_data.get_or_404(db, Event, event_id)
+    result = await db.execute(
+        select(Registration).where(
+            Registration.event_id == event_id,
+            Registration.status == "draft",
+        )
+    )
+    drafts = result.scalars().all()
+    if not drafts:
+        raise AppError(
+            "nothing_to_remind",
+            "Không còn hồ sơ nháp để nhắc",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    await record_audit(
+        db,
+        actor_user_id=user.id,
+        action="remind",
+        entity_type="registration",
+        entity_id=event_id,
+        after={"count": len(drafts)},
+        event_id=event_id,
+    )
+    await db.commit()
+    await queue.enqueue_job("remind_unsubmitted_task", event_id)
+    return {"queued": len(drafts)}
 
 
 @router.get("/export")

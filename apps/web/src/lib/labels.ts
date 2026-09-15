@@ -60,6 +60,8 @@ export const auditActionLabel = makeLookup({
   unblock: "Mở khoá ghế",
   confirm: "Xác nhận ghế",
   submit: "Nộp đăng ký",
+  remind: "Nhắc đăng ký",
+  test_send: "Gửi email thử",
   cancel: "Huỷ đăng ký",
   reset_password: "Reset mật khẩu",
 });

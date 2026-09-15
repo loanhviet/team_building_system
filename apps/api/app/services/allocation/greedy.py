@@ -36,11 +36,9 @@ class GreedyFlightStrategy:
     """Greedy allocator per docs/PLAN.md §7.1: place whole teams first, split the
     largest-remaining-shift-subgroup when a team can't fit, flag whatever's left over.
 
-    `split_penalty` decides whether a whole-team-fit is even taken: if forcing the
-    team onto its best-scoring flight would strand more people on the wrong shift
-    than the configured penalty is worth (`mismatch * same_shift > split_penalty`),
-    the team is deliberately split instead so those people land on a flight
-    matching their own shift."""
+    `split_penalty / same_shift` is how many shift-mismatched people we'll
+    swallow to keep a team on one flight. Above that, the team is split so
+    members can land on flights matching their own Ca."""
 
     def allocate(
         self, teams: list[TeamGroup], flights: list[FlightSlot], weights: dict[str, float]
@@ -58,7 +56,11 @@ class GreedyFlightStrategy:
             force_split = False
             if best_whole is not None:
                 mismatch = sum(1 for c in group if _is_shift_mismatch(c, best_whole))
-                if mismatch > 0 and mismatch * weights["same_shift"] > weights["split_penalty"]:
+                # scale-invariant: "mismatch people allowed" = split_penalty / same_shift
+                # (legacy 15/10 ≈ 1.5 people; mock 10/40 ≈ 0.25 → 1 mismatch splits)
+                same_shift_w = max(float(weights.get("same_shift") or 0), 1e-9)
+                threshold = float(weights.get("split_penalty") or 0) / same_shift_w
+                if mismatch > threshold:
                     force_split = True
 
             if best_whole is not None and not force_split:

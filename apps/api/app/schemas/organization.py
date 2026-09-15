@@ -53,6 +53,7 @@ class EmployeeCreate(BaseModel):
     phone: str | None = None
     gender: str | None = None
     position: str | None = None
+    send_welcome: bool = False
 
 
 class EmployeeUpdate(BaseModel):
@@ -93,6 +94,20 @@ class EmployeeListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class EmployeeStatsBySite(BaseModel):
+    site_id: int
+    site_name: str
+    count: int
+
+
+class EmployeeStatsOut(BaseModel):
+    total: int
+    active: int
+    inactive: int
+    accounts: int = 0
+    by_site: list[EmployeeStatsBySite]
 
 
 class TeamRosterMember(BaseModel):

@@ -154,6 +154,21 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     />
   );
 
+  const inEventWorkspace = /^\/admin\/events\/\d+/.test(pathname);
+
+  if (inEventWorkspace) {
+    return (
+      <div className="flex min-h-svh flex-1 bg-background">
+        <a href="#main" className="skip-link">
+          Bỏ qua điều hướng
+        </a>
+        <main id="main" className="flex min-w-0 flex-1 flex-col">
+          {children}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-svh flex-1 bg-background">
       <a href="#main" className="skip-link">
@@ -161,7 +176,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       </a>
       <ShellRail
         className="hidden md:flex"
-        eyebrow="Bàn điều hành BTC"
+        eyebrow="BTC Event Hub"
         eventSlot={<EventPicker />}
         groups={groups}
         pathname={pathname}
@@ -182,7 +197,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               </SheetHeader>
               <ShellRail
                 className="h-full w-full border-0"
-                eyebrow="Bàn điều hành BTC"
+                eyebrow="BTC Event Hub"
                 eventSlot={<EventPicker />}
                 groups={groups}
                 pathname={pathname}

@@ -1,6 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bus, ClipboardCheck, Plane, UserCheck } from "lucide-react";
+import type { ComponentType, ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/domain/callout";
@@ -38,6 +40,26 @@ import type {
   TransportLeg,
   TransportNeed,
 } from "@/types/api";
+
+function SectionTitle({
+  step,
+  icon: Icon,
+  children,
+}: {
+  step: number;
+  icon: ComponentType<{ className?: string }>;
+  children: ReactNode;
+}) {
+  return (
+    <CardTitle className="flex items-center gap-2 text-base">
+      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/12 text-xs font-semibold text-primary">
+        {step}
+      </span>
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      {children}
+    </CardTitle>
+  );
+}
 
 export default function RegisterPage() {
   const { user } = useAuth();
@@ -226,6 +248,7 @@ function RegistrationForm({
           { id: "review", label: "Xem lại" },
         ];
   const currentStep = flow[Math.min(step, flow.length - 1)];
+  const stepNumOf = (id: StepId) => flow.findIndex((s) => s.id === id) + 1;
 
   const outboundLegs = legs.filter((l) => l.direction === "outbound");
   const inboundLegs = legs.filter((l) => l.direction === "inbound");
@@ -366,13 +389,14 @@ function RegistrationForm({
   const chosenLegs = legs.filter((l) => needs[l.id]?.is_needed);
 
   return (
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
     <div className="flex flex-col gap-5">
       <PageHeader
-        title={event.name}
+        title="Phiếu đăng ký tham gia"
         description={
           event.registration_close_at && !readOnly
-            ? `Hạn chỉnh sửa: ${formatDateTime(event.registration_close_at)}`
-            : "Đăng ký tham gia"
+            ? `${event.name} · Hạn chỉnh sửa: ${formatDateTime(event.registration_close_at)}`
+            : event.name
         }
       />
 
@@ -403,13 +427,18 @@ function RegistrationForm({
 
       <div key={readOnly ? "review-all" : currentStep?.id} className="flex animate-in flex-col gap-4 fade-in slide-in-from-right-2 duration-200">
       {show("profile") && (
-        <ProfileCard controlledPhone={readOnly ? undefined : { value: phone, onChange: setPhone }} />
+        <ProfileCard
+          step={stepNumOf("profile")}
+          controlledPhone={readOnly ? undefined : { value: phone, onChange: setPhone }}
+        />
       )}
 
       {show("join") && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Bạn có tham gia không?</CardTitle>
+            <SectionTitle step={stepNumOf("join")} icon={UserCheck}>
+              Bạn có tham gia không?
+            </SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -456,7 +485,9 @@ function RegistrationForm({
       {show("shift") && isParticipating && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Ca đăng ký</CardTitle>
+            <SectionTitle step={stepNumOf("shift")} icon={Plane}>
+              Ca đăng ký
+            </SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
@@ -481,7 +512,9 @@ function RegistrationForm({
       {show("transport") && isParticipating && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Nhu cầu xe</CardTitle>
+            <SectionTitle step={stepNumOf("transport")} icon={Bus}>
+              Nhu cầu xe
+            </SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {outboundLegs.length > 0 && (
@@ -524,7 +557,9 @@ function RegistrationForm({
       {show("review") && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{readOnly ? "Thông tin đã gửi" : "Xem lại & gửi"}</CardTitle>
+            <SectionTitle step={stepNumOf("review")} icon={ClipboardCheck}>
+              {readOnly ? "Thông tin đã gửi" : "Xem lại & gửi"}
+            </SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-col gap-1 text-sm">
@@ -620,6 +655,52 @@ function RegistrationForm({
           {blocked && <p className="text-sm text-destructive">{blocked}</p>}
         </div>
       )}
+    </div>
+    <aside className="hidden lg:sticky lg:top-24 lg:block">
+      <div className="surface-card p-4">
+        <p className="text-xs font-semibold text-muted-foreground">Tóm tắt đăng ký</p>
+        {!readOnly && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Tiến trình</span>
+              <span>
+                {Math.min(step, flow.length - 1) + 1}/{flow.length} bước
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-200"
+                style={{
+                  width: `${((Math.min(step, flow.length - 1) + 1) / flow.length) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <dl className="mt-3 flex flex-col gap-2 text-sm">
+          <div>
+            <dt className="text-muted-foreground">Tham gia</dt>
+            <dd className="font-medium">
+              {isParticipating ? "Có tham gia" : isParticipating === false ? "Không tham gia" : "Chưa chọn"}
+            </dd>
+          </div>
+          {isParticipating && (
+            <>
+              <div>
+                <dt className="text-muted-foreground">Ca</dt>
+                <dd className="font-medium">{chosenShift?.name ?? "Chưa chọn"}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Xe</dt>
+                <dd className="font-medium">
+                  {chosenLegs.length > 0 ? chosenLegs.map((l) => l.name).join(", ") : "Không đăng ký xe"}
+                </dd>
+              </div>
+            </>
+          )}
+        </dl>
+      </div>
+    </aside>
     </div>
   );
 }

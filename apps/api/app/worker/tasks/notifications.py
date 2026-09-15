@@ -56,3 +56,49 @@ async def send_bulk_emails_task(
             "send_bulk_emails_task: queued %s emails (%s) for event %s",
             len(employees), template_code, event_id,
         )
+
+
+async def remind_unsubmitted_task(ctx: dict, event_id: int) -> None:
+    """One reminder per draft (not yet submitted) registration. Deduped per
+    employee per UTC day so BTC can nudge again tomorrow without spamming."""
+    from app.core.time import utcnow
+
+    async with AsyncSessionLocal() as db:
+        event = await db.get(Event, event_id)
+        if event is None:
+            logger.error("remind_unsubmitted_task: event %s not found", event_id)
+            return
+
+        result = await db.execute(
+            select(Employee)
+            .join(Registration, Registration.employee_id == Employee.id)
+            .where(
+                Registration.event_id == event_id,
+                Registration.status == "draft",
+            )
+        )
+        employees = result.scalars().all()
+        day = utcnow().date().isoformat()
+        outbox_ids = []
+        for employee in employees:
+            outbox_id = await enqueue_email(
+                db,
+                event_id=event_id,
+                to_email=employee.email,
+                template_code="registration_reminder",
+                payload={
+                    "full_name": employee.full_name,
+                    "event_name": event.name,
+                    "app_url": settings.app_base_url,
+                },
+                dedupe_key=f"registration_reminder:{event_id}:{employee.id}:{day}",
+            )
+            outbox_ids.append(outbox_id)
+        await db.commit()
+        queue = ctx["redis"]
+        await dispatch_emails(queue, [oid for oid in outbox_ids if oid is not None])
+        logger.info(
+            "remind_unsubmitted_task: queued %s reminders for event %s",
+            len(employees),
+            event_id,
+        )

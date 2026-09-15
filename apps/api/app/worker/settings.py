@@ -12,7 +12,7 @@ from app.worker.tasks.bus_allocation import run_bus_allocation_task
 from app.worker.tasks.email import send_email
 from app.worker.tasks.gala import expire_gala_holds_task
 from app.worker.tasks.imports import import_employees_task
-from app.worker.tasks.notifications import send_bulk_emails_task
+from app.worker.tasks.notifications import remind_unsubmitted_task, send_bulk_emails_task
 from app.worker.tasks.rag import reindex_rag_task
 from app.worker.tasks.system import ping
 
@@ -38,6 +38,7 @@ class WorkerSettings:
         run_flight_allocation_task,
         run_bus_allocation_task,
         send_bulk_emails_task,
+        remind_unsubmitted_task,
         reindex_rag_task,
         arq_func(send_email, max_tries=3),
     ]

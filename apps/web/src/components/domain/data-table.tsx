@@ -83,7 +83,7 @@ export function DataTable<T>({
     <div className="flex flex-col gap-3">
       {toolbar && <div className="flex flex-wrap items-center gap-2">{toolbar}</div>}
 
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
         <Table>
           <TableHeader>
             <TableRow>

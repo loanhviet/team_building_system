@@ -97,3 +97,49 @@ async def test_export_respects_active_filters(client, world, auth_headers, db_se
     wb_filtered = load_workbook(io.BytesIO(resp_filtered.content))
     assert wb_filtered.active.max_row - 1 == 1
     assert wb_filtered.active.cell(row=2, column=1).value == world.employee.employee_code
+
+
+async def test_admin_list_includes_position_and_searches_code(client, world, auth_headers, db_session):
+    world.employee.position = "Backend Eng"
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/events/{world.event.id}/registrations",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert resp.status_code == 200
+    row = next(r for r in resp.json() if r["employee_id"] == world.employee.id)
+    assert row["position"] == "Backend Eng"
+    assert row["team_code"] == world.team.code
+
+    code = world.employee.employee_code
+    resp = await client.get(
+        f"/api/events/{world.event.id}/registrations?search={code}",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert resp.status_code == 200
+    assert any(r["employee_id"] == world.employee.id for r in resp.json())
+
+
+async def test_remind_unsubmitted_is_admin_only_and_queues(client, world, auth_headers, db_session):
+    db_session.add(
+        Registration(
+            event_id=world.event.id,
+            employee_id=(await make_employee(db_session, team=world.team, site=world.site, code="NV009")).employee.id,
+            status="draft",
+        )
+    )
+    await db_session.commit()
+
+    denied = await client.post(
+        f"/api/events/{world.event.id}/registrations/remind",
+        headers=auth_headers(world.employee_user),
+    )
+    assert denied.status_code == 403
+
+    ok = await client.post(
+        f"/api/events/{world.event.id}/registrations/remind",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert ok.status_code == 202
+    assert ok.json()["queued"] >= 1

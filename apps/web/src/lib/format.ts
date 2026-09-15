@@ -17,6 +17,20 @@ export function formatDate(value: string | null | undefined): string {
   return new Date(value).toLocaleDateString("vi-VN");
 }
 
+export function formatLongDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)))
+    : new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("vi-VN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 export const ROLE_LABEL: Record<string, string> = {
   employee: "CBNV",
   team_leader: "Trưởng nhóm",

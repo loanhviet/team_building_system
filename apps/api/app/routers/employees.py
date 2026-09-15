@@ -1,4 +1,5 @@
 import io
+import re
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -9,24 +10,30 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy import func, or_, select
 
+from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.security import hash_password
 from app.models.auth import User
 from app.models.enums import ImportBatchStatus, JobStatus, UserRole
-from app.models.organization import Employee
+from app.models.organization import Employee, Site
 from app.models.system import ImportBatch, Job
 from app.schemas.organization import (
     EmployeeCreate,
     EmployeeListOut,
     EmployeeOut,
     EmployeePhoneUpdate,
+    EmployeeStatsBySite,
+    EmployeeStatsOut,
     EmployeeUpdate,
 )
 from app.schemas.system import ImportBatchOut, ImportEnqueuedOut
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.notification.email_service import dispatch_email, enqueue_email
+
+settings = get_settings()
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -65,7 +72,9 @@ def _batch_out(batch: ImportBatch) -> ImportBatchOut:
     )
 
 
-def _employee_filters(search: str | None, team_id: int | None, site_id: int | None):
+def _employee_filters(
+    search: str | None, team_id: int | None, site_id: int | None, is_active: bool | None = None
+):
     clauses = []
     if search:
         needle = f"%{search.strip()}%"
@@ -80,7 +89,19 @@ def _employee_filters(search: str | None, team_id: int | None, site_id: int | No
         clauses.append(Employee.team_id == team_id)
     if site_id is not None:
         clauses.append(Employee.site_id == site_id)
+    if is_active is not None:
+        clauses.append(Employee.is_active.is_(is_active))
     return clauses
+
+
+async def _next_employee_code(db: DbSession) -> str:
+    result = await db.execute(select(Employee.employee_code).where(Employee.employee_code.is_not(None)))
+    max_n = 0
+    for (code,) in result.all():
+        m = re.search(r"(\d+)$", code or "")
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"NV{max_n + 1:03d}"
 
 
 @router.get("", response_model=EmployeeListOut)
@@ -90,12 +111,13 @@ async def list_employees(
     search: str | None = None,
     team_id: int | None = None,
     site_id: int | None = None,
+    is_active: bool | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> EmployeeListOut:
     limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
-    clauses = _employee_filters(search, team_id, site_id)
+    clauses = _employee_filters(search, team_id, site_id, is_active)
     count_stmt = select(func.count(Employee.id))
     stmt = select(Employee).order_by(Employee.full_name, Employee.id)
     for clause in clauses:
@@ -111,6 +133,38 @@ async def list_employees(
     )
 
 
+@router.get("/stats", response_model=EmployeeStatsOut)
+async def get_employee_stats(db: DbSession, _user: AdminUser) -> EmployeeStatsOut:
+    total = (await db.execute(select(func.count(Employee.id)))).scalar_one()
+    active = (
+        await db.execute(select(func.count(Employee.id)).where(Employee.is_active.is_(True)))
+    ).scalar_one()
+    by_site_rows = (
+        await db.execute(
+            select(Site.id, Site.name, func.count(Employee.id))
+            .join(Employee, Employee.site_id == Site.id)
+            .group_by(Site.id, Site.name)
+            .order_by(func.count(Employee.id).desc())
+        )
+    ).all()
+    accounts = (await db.execute(select(func.count(User.id)).where(User.employee_id.is_not(None)))).scalar_one()
+    return EmployeeStatsOut(
+        total=total,
+        active=active,
+        inactive=total - active,
+        accounts=accounts,
+        by_site=[
+            EmployeeStatsBySite(site_id=site_id, site_name=site_name, count=count)
+            for site_id, site_name, count in by_site_rows
+        ],
+    )
+
+
+@router.get("/next-code")
+async def next_employee_code(db: DbSession, _user: AdminUser) -> dict:
+    return {"employee_code": await _next_employee_code(db)}
+
+
 @router.get("/export")
 async def export_employees(
     db: DbSession,
@@ -118,8 +172,9 @@ async def export_employees(
     search: str | None = None,
     team_id: int | None = None,
     site_id: int | None = None,
+    is_active: bool | None = None,
 ) -> StreamingResponse:
-    clauses = _employee_filters(search, team_id, site_id)
+    clauses = _employee_filters(search, team_id, site_id, is_active)
     stmt = select(Employee).order_by(Employee.full_name, Employee.id)
     for clause in clauses:
         stmt = stmt.where(clause)
@@ -127,7 +182,7 @@ async def export_employees(
     wb = Workbook()
     ws = wb.active
     ws.title = "CBNV"
-    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone"])
+    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone", "position", "is_active"])
     for emp in result.scalars().all():
         ws.append([
             emp.employee_code or "",
@@ -136,6 +191,8 @@ async def export_employees(
             emp.team.code if emp.team else "",
             emp.site.code if emp.site else "",
             emp.phone or "",
+            emp.position or "",
+            "1" if emp.is_active else "0",
         ])
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -204,9 +261,17 @@ async def update_my_phone(
 
 
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
-async def create_employee(payload: EmployeeCreate, db: DbSession, user: AdminUser) -> EmployeeOut:
+async def create_employee(
+    payload: EmployeeCreate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> EmployeeOut:
     data = payload.model_dump()
+    send_welcome = bool(data.pop("send_welcome", False))
     data["email"] = data["email"].lower()
+    if not data.get("employee_code"):
+        data["employee_code"] = await _next_employee_code(db)
     employee = await master_data.create(db, Employee, data)
     initial = employee.employee_code or "ChangeMe1"
     db.add(
@@ -222,8 +287,24 @@ async def create_employee(payload: EmployeeCreate, db: DbSession, user: AdminUse
         db, actor_user_id=user.id, action="create", entity_type="employee", entity_id=employee.id,
         after=payload.model_dump(mode="json"),
     )
+    outbox_id = None
+    if send_welcome:
+        outbox_id = await enqueue_email(
+            db,
+            event_id=None,
+            to_email=employee.email,
+            template_code="account_welcome",
+            payload={
+                "full_name": employee.full_name,
+                "email": employee.email,
+                "employee_code": employee.employee_code or "",
+                "app_url": settings.app_base_url,
+            },
+            dedupe_key=f"account_welcome:{employee.id}",
+        )
     await db.commit()
     await db.refresh(employee)
+    await dispatch_email(queue, outbox_id)
     return _employee_out(employee)
 
 

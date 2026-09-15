@@ -101,9 +101,8 @@ def test_team_together_breaks_tie_between_equally_filled_flights():
 
 def test_whole_fit_flags_shift_mismatch_without_forcing_split():
     # 2 people on shift 1, 1 on shift 2; the only flight big enough for the
-    # whole team of 3 is shift 1 — mismatch is small (1 * same_shift(10) = 10,
-    # not > split_penalty(15)) so the team stays whole and the mismatched
-    # person is flagged, rather than silently placed with no visibility.
+    # whole team of 3 is shift 1. With split_penalty/same_shift = 15/10 = 1.5,
+    # one mismatch is swallowed: team stays whole, mismatched person is flagged.
     team = TeamGroup(
         team_id=1,
         employees=[
@@ -113,8 +112,9 @@ def test_whole_fit_flags_shift_mismatch_without_forcing_split():
         ],
     )
     flights = [FlightSlot(flight_id=10, shift_id=1, capacity=3)]
+    keep_together = {**DEFAULT_WEIGHTS, "same_shift": 10, "split_penalty": 15}
 
-    result = GreedyFlightStrategy().allocate([team], flights, DEFAULT_WEIGHTS)
+    result = GreedyFlightStrategy().allocate([team], flights, keep_together)
 
     assert len(result.assignments) == 3
     assert set(result.assignments.values()) == {10}
@@ -123,11 +123,8 @@ def test_whole_fit_flags_shift_mismatch_without_forcing_split():
 
 
 def test_split_penalty_forces_split_when_mismatch_too_costly():
-    # 1 person on shift 1, 2 on shift 2; the only flight big enough for the
-    # whole team is shift 1 — mismatch would be 2 people (2 * same_shift(10) =
-    # 20 > split_penalty(15)), so the team should be split instead of forced
-    # whole, landing every member on a flight matching their own shift with
-    # nobody flagged.
+    # 1 person on shift 1, 2 on shift 2. Threshold split_penalty/same_shift =
+    # 15/10 = 1.5 people, so 2 mismatches force a split onto matching flights.
     team = TeamGroup(
         team_id=1,
         employees=[
@@ -141,7 +138,8 @@ def test_split_penalty_forces_split_when_mismatch_too_costly():
         FlightSlot(flight_id=11, shift_id=2, capacity=2),
     ]
 
-    result = GreedyFlightStrategy().allocate([team], flights, DEFAULT_WEIGHTS)
+    keep_together = {**DEFAULT_WEIGHTS, "same_shift": 10, "split_penalty": 15}
+    result = GreedyFlightStrategy().allocate([team], flights, keep_together)
 
     assert len(result.assignments) == 3
     assert result.split_team_ids == {1}
@@ -149,6 +147,25 @@ def test_split_penalty_forces_split_when_mismatch_too_costly():
     assert result.assignments[102] == 11
     assert result.assignments[103] == 11
     assert not result.flagged
+
+
+def test_default_weights_split_on_single_mismatch():
+    # Mock defaults 40/10 → threshold 0.25 people, so even 1 mismatch splits.
+    team = TeamGroup(
+        team_id=1,
+        employees=[
+            Candidate(employee_id=101, team_id=1, shift_id=1),
+            Candidate(employee_id=102, team_id=1, shift_id=1),
+            Candidate(employee_id=103, team_id=1, shift_id=2),
+        ],
+    )
+    flights = [
+        FlightSlot(flight_id=10, shift_id=1, capacity=3),
+        FlightSlot(flight_id=11, shift_id=2, capacity=2),
+    ]
+    result = GreedyFlightStrategy().allocate([team], flights, DEFAULT_WEIGHTS)
+    assert result.split_team_ids == {1}
+    assert 103 in result.assignments
 
 
 def test_flight_with_no_shift_never_flags_or_forces_split():

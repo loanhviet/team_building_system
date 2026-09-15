@@ -8,6 +8,7 @@ from app.models.flight import FlightAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.models.system import AllocationRun
+from app.services.allocation.base import DEFAULT_BUS_WEIGHTS, merge_weights
 from app.services.allocation.bus_greedy import BusCandidate, BusSlot, allocate_buses
 
 
@@ -57,10 +58,12 @@ async def run_bus_allocation(
     result = await db.execute(
         select(Bus).where(Bus.event_id == event_id, Bus.leg_id == leg_id)
     )
+    team_by_employee = {eid: tid for eid, tid in rows}
     slots = {b.id: BusSlot(bus_id=b.id, capacity=b.capacity) for b in result.scalars().all()}
     for a in locked:
         if a.bus_id in slots:
             slots[a.bus_id].assigned.append(a.employee_id)
+            slots[a.bus_id].assigned_team_ids.append(team_by_employee.get(a.employee_id))
             fid = flight_by_employee.get(a.employee_id)
             if fid is not None:
                 slots[a.bus_id].flight_ids_present.add(fid)
@@ -71,7 +74,11 @@ async def run_bus_allocation(
         if eid not in locked_employee_ids
     ]
 
-    outcome = allocate_buses(candidates, list(slots.values()))
+    from app.services.event_service import get_setting
+
+    raw = await get_setting(db, event_id, "bus_allocation_weights", {})
+    weights = merge_weights(raw if isinstance(raw, dict) else {}, DEFAULT_BUS_WEIGHTS)
+    outcome = allocate_buses(candidates, list(slots.values()), weights)
 
     await db.execute(
         delete(BusAssignment).where(

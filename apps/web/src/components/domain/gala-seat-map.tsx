@@ -1,5 +1,6 @@
 "use client";
 
+import { Ban, Circle, Lock, Star, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { galaSeatStatusLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
@@ -138,7 +139,7 @@ export function GalaSeatMap({
               >
                 <div
                   className={cn(
-                    "absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center border border-[var(--night)]/20 bg-[var(--ticket)] shadow-[inset_0_0_0_6px_rgba(14,124,134,0.12)]",
+                    "absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center border border-[var(--night)]/20 bg-[var(--ticket)] shadow-[inset_0_0_0_6px_rgb(13_148_136_/_12%)]",
                     table.shape === "round" ? "size-[72px] rounded-full" : "h-[58px] w-[86px] rounded-sm",
                   )}
                 >
@@ -203,24 +204,49 @@ export function GalaSeatMap({
   );
 }
 
+const LEGEND_ITEMS: { Icon: typeof Circle; className: string; label: string }[] = [
+  {
+    Icon: Circle,
+    className: "border-[var(--status-empty-border)] bg-[var(--status-empty-bg)] text-[var(--status-empty-fg)]",
+    label: "Trống",
+  },
+  {
+    Icon: Lock,
+    className:
+      "border-[var(--status-locking-border)] bg-[var(--status-locking-bg)] text-[var(--status-locking-fg)]",
+    label: "Đang giữ",
+  },
+  {
+    Icon: Check,
+    className:
+      "border-[var(--status-confirmed-border)] bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-fg)]",
+    label: "Đã xác nhận",
+  },
+  {
+    Icon: Ban,
+    className:
+      "border-[var(--status-unavailable-border)] bg-[var(--status-unavailable-bg)] text-[var(--status-unavailable-fg)]",
+    label: "Không khả dụng",
+  },
+  {
+    Icon: Star,
+    className: "border-[var(--lantern)] bg-[var(--lantern)]/12 text-[var(--lantern)]",
+    label: "Team bạn",
+  },
+];
+
 export function GalaLegend() {
   return (
-    <div className="flex flex-wrap gap-3 text-xs">
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 border border-[var(--status-empty-border)] bg-[var(--status-empty-bg)]" /> Trống
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 border border-[var(--status-locking-border)] bg-[var(--status-locking-bg)]" /> Đang giữ
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 border border-[var(--status-confirmed-border)] bg-[var(--status-confirmed-bg)]" /> Đã xác nhận
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 border border-[var(--status-unavailable-border)] bg-[var(--status-unavailable-bg)]" /> Không khả dụng
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 bg-[var(--lantern)] ring-2 ring-[var(--lantern)] ring-offset-1" /> Team bạn
-      </span>
+    <div className="flex flex-wrap gap-2 text-xs">
+      {LEGEND_ITEMS.map(({ Icon, className, label }) => (
+        <span
+          key={label}
+          className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium", className)}
+        >
+          <Icon className="size-3.5" aria-hidden />
+          {label}
+        </span>
+      ))}
     </div>
   );
 }

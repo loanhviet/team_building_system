@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileText, Pencil, Trash2 } from "lucide-react";
 import { use, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
-import { PageHeader } from "@/components/domain/page-header";
+import { WorkspaceHeader } from "@/components/domain/workspace-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +36,7 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
   const eventId = Number(id);
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "published" | "draft">("");
   const [editing, setEditing] = useState<KnowledgeDocument | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -138,17 +140,39 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
     setForm({ title: doc.title, body_md: doc.body_md, is_published: doc.is_published });
   };
 
+  const publishedCount = rows.filter((r) => r.is_published).length;
+  const draftCount = rows.length - publishedCount;
+
   const filtered = rows.filter((r) => {
+    if (statusFilter === "published" && !r.is_published) return false;
+    if (statusFilter === "draft" && r.is_published) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return r.title.toLowerCase().includes(q) || r.body_md.toLowerCase().includes(q);
   });
 
+  const excerpt = (body: string) => {
+    const line = body.replace(/[#*_>`-]/g, "").trim().split("\n").find(Boolean) ?? "";
+    return line.length > 80 ? `${line.slice(0, 80)}…` : line;
+  };
+
   const columns: DataTableColumn<KnowledgeDocument>[] = [
     {
       key: "title",
-      header: "Tiêu đề",
-      cell: (row) => row.title,
+      header: "Tiêu đề tài liệu",
+      cell: (row) => (
+        <div className="flex items-start gap-2.5">
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FileText className="size-4" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block font-medium">{row.title}</span>
+            {row.body_md.trim() && (
+              <span className="block truncate text-xs text-muted-foreground">{excerpt(row.body_md)}</span>
+            )}
+          </span>
+        </div>
+      ),
       sortValue: (row) => row.title,
     },
     {
@@ -163,7 +187,7 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
     },
     {
       key: "updated",
-      header: "Cập nhật",
+      header: "Cập nhật lần cuối",
       cell: (row) => new Date(row.updated_at).toLocaleString("vi-VN"),
       sortValue: (row) => row.updated_at,
     },
@@ -171,14 +195,14 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
       key: "actions",
       header: "",
       cell: (row) => (
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => openEdit(row)}>
-            Sửa
+        <div className="flex justify-end gap-1">
+          <Button size="sm" variant="ghost" onClick={() => openEdit(row)} aria-label={`Sửa ${row.title}`}>
+            <Pencil className="size-4" aria-hidden="true" />
           </Button>
           <ConfirmDialog
             trigger={
-              <Button size="sm" variant="outline">
-                Xoá
+              <Button size="sm" variant="ghost" aria-label={`Xoá ${row.title}`}>
+                <Trash2 className="size-4" aria-hidden="true" />
               </Button>
             }
             title="Xoá tài liệu hỏi đáp?"
@@ -196,27 +220,16 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
+      <WorkspaceHeader
         title="Tài liệu hỏi đáp"
         description="FAQ / handbook markdown. Chỉ bản đã đăng được trợ lý dùng. CBNV hỏi trên /chat, không thấy trang này."
-      />
-
-      <DataTable
-        columns={columns}
-        rows={filtered}
-        rowKey={(row) => row.id}
-        isLoading={isLoading}
-        onRowClick={openEdit}
-        emptyMessage="Chưa có tài liệu. Tạo FAQ về dress code, chính sách hủy, mang theo gì…"
-        toolbar={
+        stats={[
+          { label: "Tổng tài liệu", value: rows.length },
+          { label: "Đã đăng", value: publishedCount },
+          { label: "Nháp", value: draftCount, warn: draftCount > 0 },
+        ]}
+        actions={
           <>
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm tiêu đề / nội dung"
-              className="w-64"
-            />
-            <Button onClick={openCreate}>Thêm tài liệu</Button>
             <Button variant="outline" onClick={() => setCopyOpen(true)}>
               Sao chép từ sự kiện khác
             </Button>
@@ -231,16 +244,49 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
               confirmLabel="Chạy"
               onConfirm={() => reindexMutation.mutate()}
             />
-            {job && (
-              <span className="text-xs text-muted-foreground">
-                Job: {jobStatusLabel(job.status)}
-                {job.status === "succeeded" && job.result_json
-                  ? ` — ${JSON.stringify(job.result_json)}`
-                  : ""}
-              </span>
-            )}
+            <Button onClick={openCreate}>Thêm tài liệu</Button>
           </>
         }
+      />
+
+      {job && (
+        <p className="text-xs text-muted-foreground">
+          Job đánh chỉ mục: {jobStatusLabel(job.status)}
+          {job.status === "succeeded" && job.result_json ? ` — ${JSON.stringify(job.result_json)}` : ""}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-3">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Tìm tiêu đề / nội dung"
+          className="min-h-11 w-full sm:w-72"
+        />
+        <Select value={statusFilter || "__all__"} onValueChange={(v) => setStatusFilter(v === "__all__" ? "" : (v as "published" | "draft"))}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Trạng thái" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Tất cả trạng thái</SelectItem>
+            <SelectItem value="published">Đã đăng</SelectItem>
+            <SelectItem value="draft">Nháp</SelectItem>
+          </SelectContent>
+        </Select>
+        {statusFilter && (
+          <Button variant="ghost" size="sm" onClick={() => setStatusFilter("")}>
+            Xoá lọc
+          </Button>
+        )}
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={filtered}
+        rowKey={(row) => row.id}
+        isLoading={isLoading}
+        onRowClick={openEdit}
+        emptyMessage="Chưa có tài liệu. Tạo FAQ về dress code, chính sách hủy, mang theo gì…"
       />
 
       <Dialog

@@ -8,7 +8,7 @@ from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration
 from app.models.system import AllocationRun
-from app.services.allocation.base import DEFAULT_WEIGHTS, Candidate, FlightSlot, TeamGroup
+from app.services.allocation.base import DEFAULT_WEIGHTS, Candidate, FlightSlot, TeamGroup, merge_weights
 from app.services.allocation.greedy import GreedyFlightStrategy
 
 
@@ -25,7 +25,7 @@ async def run_flight_allocation(
 
         raw = await get_setting(db, event_id, "flight_allocation_weights", {})
         stored_weights = raw if isinstance(raw, dict) else {}
-    effective_weights = {**DEFAULT_WEIGHTS, **stored_weights}
+    effective_weights = merge_weights(stored_weights, DEFAULT_WEIGHTS)
 
     result = await db.execute(
         select(Registration.employee_id, Registration.shift_id, Employee.team_id)

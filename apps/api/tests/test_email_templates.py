@@ -38,6 +38,23 @@ async def test_restore_default_template_drops_event_override(client, world, auth
     assert body["subject"] != "Custom subject"
 
 
+async def test_send_test_email_is_admin_only(client, world, auth_headers):
+    denied = await client.post(
+        f"/api/events/{world.event.id}/email-templates/registration_confirmed/test",
+        headers=auth_headers(world.employee_user),
+        json={"subject": "Hi {{ full_name }}", "body_html": "<p>{{ event_name }}</p>"},
+    )
+    assert denied.status_code == 403
+
+    ok = await client.post(
+        f"/api/events/{world.event.id}/email-templates/registration_confirmed/test",
+        headers=auth_headers(world.organizer_user),
+        json={"subject": "Hi {{ full_name }}", "body_html": "<p>{{ event_name }}</p>"},
+    )
+    assert ok.status_code == 202
+    assert ok.json()["to"] == world.organizer_user.email
+
+
 def test_upsert_rejects_unknown_code():
     import asyncio
 

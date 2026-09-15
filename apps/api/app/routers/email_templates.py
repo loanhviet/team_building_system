@@ -1,15 +1,21 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from arq import ArqRedis
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
 
 from app.core.deps import DbSession, require_admin
+from app.core.errors import AppError
+from app.core.queue import get_queue
+from app.core.time import utcnow
 from app.models.auth import User
 from app.models.event import Event
 from app.schemas.notification import EmailTemplateOut, EmailTemplateUpdate
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.notification.email_service import (
+    dispatch_email,
+    enqueue_email,
     list_templates,
     preview_template,
     restore_default_template,
@@ -77,3 +83,42 @@ async def preview_template_endpoint(
     await master_data.get_or_404(db, Event, event_id)
     subject, body_html = preview_template(payload.subject, payload.body_html)
     return EmailPreviewOut(subject=subject, body_html=body_html)
+
+
+@router.post("/{code}/test", status_code=status.HTTP_202_ACCEPTED)
+async def send_test_email(
+    event_id: int,
+    code: str,
+    payload: EmailPreviewRequest,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> dict:
+    """Gửi 1 email thử tới tài khoản BTC đang đăng nhập, dùng nội dung editor (kể cả chưa lưu)."""
+    await master_data.get_or_404(db, Event, event_id)
+    if not user.email:
+        raise AppError("no_email", "Tài khoản BTC không có email để nhận thư thử", status.HTTP_400_BAD_REQUEST)
+    subject, body_html = preview_template(payload.subject, payload.body_html)
+    outbox_id = await enqueue_email(
+        db,
+        event_id=event_id,
+        to_email=user.email,
+        template_code=code,
+        payload={
+            "_rendered_subject": f"[TEST] {subject}",
+            "_rendered_html": body_html,
+        },
+        dedupe_key=f"email_test:{event_id}:{user.id}:{code}:{utcnow().isoformat()}",
+    )
+    await record_audit(
+        db,
+        actor_user_id=user.id,
+        action="test_send",
+        entity_type="email_template",
+        entity_id=code,
+        after={"test_to": user.email},
+        event_id=event_id,
+    )
+    await db.commit()
+    await dispatch_email(queue, outbox_id)
+    return {"to": user.email}

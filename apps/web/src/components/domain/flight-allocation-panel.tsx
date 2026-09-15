@@ -1,10 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeftRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
+import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
-import { PersonRow } from "@/components/domain/person-row";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { ResourceCard } from "@/components/domain/resource-card";
 import { Segmented } from "@/components/domain/segmented";
 import { StatusChip } from "@/components/domain/status-chip";
@@ -31,7 +34,6 @@ import {
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
 import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
-import { cn } from "@/lib/utils";
 import type {
   AllocationEnqueued,
   AllocationRun,
@@ -65,7 +67,8 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [moveTarget, setMoveTarget] = useState("");
   const [moveTeamId, setMoveTeamId] = useState("");
-  const [flagsOnly, setFlagsOnly] = useState(false);
+  const [filterTab, setFilterTab] = useState<"all" | "flag" | "split" | "locked">("all");
+  const [listSearch, setListSearch] = useState("");
   const [flightOpen, setFlightOpen] = useState(false);
   const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
   const [flightForm, setFlightForm] = useState(EMPTY_FLIGHT);
@@ -91,7 +94,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     queryKey: ["events", eventId, "allocations", "flight"],
     queryFn: () => apiFetch<AllocationRun[]>(`/api/events/${eventId}/allocations?type_filter=flight`),
   });
-  const { data: assignments, refetch: refetchAssignments } = useQuery({
+  const { data: assignments, isLoading: assignmentsLoading, refetch: refetchAssignments } = useQuery({
     queryKey: ["events", eventId, "flight-assignments", direction],
     queryFn: () =>
       apiFetch<FlightAssignment[]>(`/api/events/${eventId}/flight-assignments?direction=${direction}`),
@@ -248,11 +251,128 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const dirFlights = flights?.filter((f) => f.direction === direction) ?? [];
   const assignedCount = (flightId: number) =>
     (assignments ?? []).filter((a) => a.flight_id === flightId).length;
+
+  const splitTeamNames = new Set(
+    (summary?.split_team_ids ?? [])
+      .map((tid) => teams?.find((t) => t.id === tid)?.name)
+      .filter((n): n is string => !!n),
+  );
+  const flagCount = (assignments ?? []).filter((a) => a.is_flagged).length;
+  const lockedCount = (assignments ?? []).filter((a) => a.is_locked).length;
+
   const visibleAssignments = (assignments ?? []).filter((a) => {
-    if (flagsOnly && !a.is_flagged) return false;
     if (focusFlightId !== "all" && a.flight_id !== focusFlightId) return false;
+    if (filterTab === "flag" && !a.is_flagged) return false;
+    if (filterTab === "split" && !(a.team_name && splitTeamNames.has(a.team_name))) return false;
+    if (filterTab === "locked" && !a.is_locked) return false;
+    const q = listSearch.trim().toLowerCase();
+    if (q) {
+      const haystack = [a.full_name, a.employee_code, a.team_name].filter(Boolean).join(" ").toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
+  const allVisibleSelected =
+    visibleAssignments.length > 0 && visibleAssignments.every((a) => selected.has(a.employee_id));
+
+  const assignmentColumns: DataTableColumn<FlightAssignment>[] = [
+    {
+      key: "person",
+      header: "Nhân sự",
+      cell: (a) => (
+        <div className="flex items-center gap-2.5">
+          <Checkbox
+            checked={selected.has(a.employee_id)}
+            onCheckedChange={(v) =>
+              setSelected((prev) => {
+                const copy = new Set(prev);
+                if (v === true) copy.add(a.employee_id);
+                else copy.delete(a.employee_id);
+                return copy;
+              })
+            }
+            aria-label={`Chọn ${a.full_name}`}
+          />
+          <InitialsAvatar name={a.full_name} className="size-8" />
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{a.full_name}</span>
+            <span className="block truncate text-xs text-muted-foreground">{a.employee_code ?? "—"}</span>
+          </span>
+        </div>
+      ),
+      sortValue: (a) => a.full_name,
+    },
+    {
+      key: "team",
+      header: "Team / Khối",
+      cell: (a) => a.team_name ?? "—",
+      sortValue: (a) => a.team_name ?? "",
+    },
+    {
+      key: "requested",
+      header: "Nguyện vọng",
+      cell: (a) => a.requested_shift_name ?? "—",
+      sortValue: (a) => a.requested_shift_name ?? "",
+    },
+    {
+      key: "assigned",
+      header: "Chuyến xếp",
+      cell: (a) => {
+        const assignedFlight = flights?.find((f) => f.id === a.flight_id);
+        const assignedShift = shifts?.find((s) => s.id === assignedFlight?.shift_id);
+        return assignedFlight ? (
+          <Badge variant="outline" className="font-mono">
+            {assignedFlight.flight_code}
+            {assignedShift ? ` · ${assignedShift.name}` : ""}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">Chưa xếp chuyến</span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Trạng thái",
+      cell: (a) => {
+        const assignedFlight = flights?.find((f) => f.id === a.flight_id);
+        const assignedShift = shifts?.find((s) => s.id === assignedFlight?.shift_id);
+        const mismatch =
+          !!a.requested_shift_name && !!assignedShift && a.requested_shift_name !== assignedShift.name;
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {a.is_flagged ? (
+              <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} />
+            ) : assignedFlight ? (
+              <StatusChip kind="confirmed" label="Đúng ca" />
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+            {mismatch && (
+              <span className="text-xs font-medium text-[var(--ember)]">
+                Đăng ký: {a.requested_shift_name}
+              </span>
+            )}
+            {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
+          </div>
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      className: "w-10 text-right",
+      cell: (a) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setSelected(new Set([a.employee_id]))}
+          aria-label={`Chuyển ${a.full_name} sang chuyến khác`}
+        >
+          <ArrowLeftRight className="size-4" aria-hidden="true" />
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -261,6 +381,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
         <div>
           <h2 className="font-display text-lg font-semibold">Phân chuyến bay</h2>
           <p className="text-sm text-muted-foreground">Chọn chiều, xem slot, rồi chạy phân bổ hoặc kéo người sang chuyến khác.</p>
+          <AllocationWeightsHint eventId={eventId} kind="flight" />
         </div>
         <Segmented
           ariaLabel="Chiều bay"
@@ -444,119 +565,155 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
         </div>
       )}
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <ResourceCard
-          title="Tất cả"
-          subtitle={`${(assignments ?? []).length} người`}
-          selected={focusFlightId === "all"}
-          onClick={() => setFocusFlightId("all")}
-        />
-        {dirFlights.map((f) => {
-          const n = remainingByFlight.has(f.id)
-            ? f.capacity - (remainingByFlight.get(f.id) ?? 0)
-            : assignedCount(f.id);
-          return (
-            <ResourceCard
-              key={f.id}
-              title={f.flight_code}
-              subtitle={`${f.origin ?? "—"} → ${f.destination ?? "—"}${shifts?.find((s) => s.id === f.shift_id) ? ` · ${shifts.find((s) => s.id === f.shift_id)!.name}` : ""}`}
-              assigned={n}
-              capacity={f.capacity}
-              selected={focusFlightId === f.id}
-              onClick={() => setFocusFlightId(f.id)}
-              footer={
-                <Button
-                  variant="ghost"
-                  className="mt-1 h-8 px-0 text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEditFlight(f);
-                  }}
-                >
-                  Sửa chuyến
-                </Button>
-              }
-            />
-          );
-        })}
-      </div>
-
-      {job && (job.status === "queued" || job.status === "running") && (
-        <p className="text-sm text-muted-foreground">Đang chạy phân bổ...</p>
-      )}
-      {summary && (
-        <div className="rounded-md border p-4 text-sm">
-          <p>
-            Đã xếp: <b className="tabular">{summary.total_assigned}</b>/{summary.total_submitted}
-          </p>
-          {summary.total_flagged > 0 && (
-            <p className="mt-2">
-              <StatusChip kind="flag" label={`${summary.total_flagged} ca cần xử lý`} />
-            </p>
-          )}
-          {summary.split_team_ids.length > 0 && (
-            <p className="mt-2">
-              <StatusChip
-                kind="flag"
-                label={`Team bị tách: ${summary.split_team_ids.map(teamName).join(", ")}`}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr] lg:items-start">
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:sticky lg:top-4 lg:flex-col lg:overflow-visible lg:pb-0">
+          <ResourceCard
+            title="Tất cả"
+            subtitle={`${(assignments ?? []).length} người`}
+            selected={focusFlightId === "all"}
+            onClick={() => setFocusFlightId("all")}
+          />
+          {dirFlights.map((f) => {
+            const n = remainingByFlight.has(f.id)
+              ? f.capacity - (remainingByFlight.get(f.id) ?? 0)
+              : assignedCount(f.id);
+            return (
+              <ResourceCard
+                key={f.id}
+                title={f.flight_code}
+                subtitle={`${f.origin ?? "—"} → ${f.destination ?? "—"}${shifts?.find((s) => s.id === f.shift_id) ? ` · ${shifts.find((s) => s.id === f.shift_id)!.name}` : ""}`}
+                assigned={n}
+                capacity={f.capacity}
+                selected={focusFlightId === f.id}
+                onClick={() => setFocusFlightId(f.id)}
+                footer={
+                  <Button
+                    variant="ghost"
+                    className="mt-1 h-8 px-0 text-xs"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditFlight(f);
+                    }}
+                  >
+                    Sửa chuyến
+                  </Button>
+                }
               />
-            </p>
-          )}
+            );
+          })}
         </div>
-      )}
 
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-medium">Danh sách phân bổ ({direction})</p>
-          <label className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Checkbox checked={flagsOnly} onCheckedChange={(checked) => setFlagsOnly(checked === true)} />
-            Chỉ hiện flag
-          </label>
-          {selected.size > 0 && (
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{selected.size} đã chọn</span>
-              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Chuyển tới chuyến" />
-                </SelectTrigger>
-                <SelectContent>
-                  {flights
-                    ?.filter((f) => f.direction === direction)
-                    .map((f) => (
-                      <SelectItem key={f.id} value={String(f.id)}>
-                        {f.flight_code}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                disabled={!moveTarget}
-                onClick={() => {
-                  setMoveTeamId("");
-                  setOverCapacityMsg(null);
-                  setAdjustOpen(true);
-                }}
-              >
-                Chuyển
-              </Button>
+        <div className="flex flex-col gap-4">
+          {job && (job.status === "queued" || job.status === "running") && (
+            <p className="text-sm text-muted-foreground">Đang chạy phân bổ...</p>
+          )}
+          {summary && (
+            <div className="rounded-md border p-4 text-sm">
+              <p>
+                Đã xếp: <b className="tabular">{summary.total_assigned}</b>/{summary.total_submitted}
+              </p>
+              {summary.total_flagged > 0 && (
+                <p className="mt-2">
+                  <StatusChip kind="flag" label={`${summary.total_flagged} ca cần xử lý`} />
+                </p>
+              )}
+              {summary.split_team_ids.length > 0 && (
+                <p className="mt-2">
+                  <StatusChip
+                    kind="flag"
+                    label={`Team bị tách: ${summary.split_team_ids.map(teamName).join(", ")}`}
+                  />
+                </p>
+              )}
             </div>
           )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              placeholder="Tìm tên, mã NV, team..."
+              className="w-64"
+            />
+            <Segmented
+              ariaLabel="Lọc danh sách phân bổ"
+              value={filterTab}
+              onChange={setFilterTab}
+              options={[
+                { value: "all", label: `Tất cả (${(assignments ?? []).length})` },
+                { value: "flag", label: `Chỉ Flag (${flagCount})` },
+                { value: "split", label: `Team bị tách (${splitTeamNames.size})` },
+                { value: "locked", label: `Đã ghim (${lockedCount})` },
+              ]}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={() =>
+                setSelected(
+                  allVisibleSelected ? new Set() : new Set(visibleAssignments.map((a) => a.employee_id)),
+                )
+              }
+            >
+              {allVisibleSelected ? "Bỏ chọn tất cả" : `Chọn tất cả (${visibleAssignments.length})`}
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <span>Hoặc chuyển cả Team:</span>
+            <Select value={moveTeamId} onValueChange={(v) => setMoveTeamId(v ?? "")}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Chọn Team" />
+              </SelectTrigger>
+              <SelectContent>
+                {teams?.map((t) => (
+                  <SelectItem key={t.id} value={String(t.id)}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Chuyển tới chuyến" />
+              </SelectTrigger>
+              <SelectContent>
+                {flights
+                  ?.filter((f) => f.direction === direction)
+                  .map((f) => (
+                    <SelectItem key={f.id} value={String(f.id)}>
+                      {f.flight_code}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              disabled={!moveTarget || !moveTeamId}
+              onClick={() => {
+                setSelected(new Set());
+                setOverCapacityMsg(null);
+                setAdjustOpen(true);
+              }}
+            >
+              Chuyển cả Team
+            </Button>
+          </div>
+
+          <DataTable
+            columns={assignmentColumns}
+            rows={visibleAssignments}
+            rowKey={(a) => a.employee_id}
+            isLoading={assignmentsLoading}
+            emptyMessage="Chưa có người trên chuyến này — chạy phân bổ hoặc chọn “Tất cả”."
+          />
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>Hoặc chuyển cả Team:</span>
-          <Select value={moveTeamId} onValueChange={(v) => setMoveTeamId(v ?? "")}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Chọn Team" />
-            </SelectTrigger>
-            <SelectContent>
-              {teams?.map((t) => (
-                <SelectItem key={t.id} value={String(t.id)}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      </div>
+
+      {selected.size > 0 && (
+        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
+          <span className="text-sm font-medium">{selected.size} đã chọn</span>
           <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
             <SelectTrigger className="w-40">
               <SelectValue placeholder="Chuyển tới chuyến" />
@@ -573,68 +730,20 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           </Select>
           <Button
             size="sm"
-            disabled={!moveTarget || !moveTeamId}
+            disabled={!moveTarget}
             onClick={() => {
-              setSelected(new Set());
+              setMoveTeamId("");
               setOverCapacityMsg(null);
               setAdjustOpen(true);
             }}
           >
-            Chuyển cả Team
+            Chuyển
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            Bỏ chọn
           </Button>
         </div>
-        {visibleAssignments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Chưa có người trên chuyến này — chạy phân bổ hoặc chọn “Tất cả”.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {visibleAssignments.map((a) => {
-              const assignedFlight = flights?.find((f) => f.id === a.flight_id);
-              const assignedShift = shifts?.find((s) => s.id === assignedFlight?.shift_id);
-              const mismatch =
-                !!a.requested_shift_name && !!assignedShift && a.requested_shift_name !== assignedShift.name;
-              return (
-                <li key={a.employee_id}>
-                  <PersonRow
-                    name={a.full_name}
-                    code={a.employee_code}
-                    team={a.team_name}
-                    selected={selected.has(a.employee_id)}
-                    onSelect={(next) =>
-                      setSelected((prev) => {
-                        const copy = new Set(prev);
-                        if (next) copy.add(a.employee_id);
-                        else copy.delete(a.employee_id);
-                        return copy;
-                      })
-                    }
-                    flag={a.is_flagged ? flagReasonLabel(a.flag_reason) : null}
-                    extra={
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                        {assignedFlight ? (
-                          <Badge variant="outline" className="font-mono">
-                            {assignedFlight.flight_code}
-                            {assignedShift ? ` · ${assignedShift.name}` : ""}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">Chưa xếp chuyến</span>
-                        )}
-                        {a.requested_shift_name && (
-                          <span className={cn(mismatch ? "font-medium text-[var(--ember)]" : "text-muted-foreground")}>
-                            Đăng ký: {a.requested_shift_name}
-                          </span>
-                        )}
-                        {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
-                      </div>
-                    }
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+      )}
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>

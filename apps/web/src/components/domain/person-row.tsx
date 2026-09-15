@@ -26,8 +26,8 @@ export function PersonRow({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5",
-        flag && "border-[var(--status-flag-border)] bg-[var(--status-flag-bg)]",
+        "flex items-center gap-3 rounded-xl px-3 py-2.5",
+        flag && "border border-[var(--status-flag-border)] bg-[var(--status-flag-bg)]",
       )}
     >
       {onSelect && (

@@ -8,7 +8,7 @@ from app.core.errors import AppError
 from app.core.time import utcnow
 from app.models.enums import EventStatus, UserRole
 from app.models.event import Event, EventSetting
-from app.services.allocation.base import DEFAULT_WEIGHTS
+from app.services.allocation.base import DEFAULT_BUS_WEIGHTS, DEFAULT_WEIGHTS, merge_weights
 
 # Real events are expected to set their own terms on Cấu hình (or seed_knowledge
 # fills in the AI-generated demo pack for a fresh event — see docs/CHAT-RAG.md).
@@ -107,12 +107,14 @@ async def get_event_settings(db: AsyncSession, event_id: int) -> dict[str, Any]:
     terms_text = await get_setting(db, event_id, "terms_text", DEFAULT_TERMS_TEXT)
     terms_version = await get_setting(db, event_id, "terms_version", DEFAULT_TERMS_VERSION)
     weights = await get_setting(db, event_id, "flight_allocation_weights", {})
-    if not isinstance(weights, dict):
-        weights = {}
+    bus_weights = await get_setting(db, event_id, "bus_allocation_weights", {})
     return {
         "terms_text": terms_text if isinstance(terms_text, str) else DEFAULT_TERMS_TEXT,
         "terms_version": terms_version if isinstance(terms_version, str) else DEFAULT_TERMS_VERSION,
-        "flight_allocation_weights": {**DEFAULT_WEIGHTS, **weights},
+        "flight_allocation_weights": merge_weights(weights if isinstance(weights, dict) else {}, DEFAULT_WEIGHTS),
+        "bus_allocation_weights": merge_weights(
+            bus_weights if isinstance(bus_weights, dict) else {}, DEFAULT_BUS_WEIGHTS
+        ),
     }
 
 
@@ -123,6 +125,7 @@ async def save_event_settings(
     terms_text: str | None = None,
     terms_version: str | None = None,
     flight_allocation_weights: dict[str, float] | None = None,
+    bus_allocation_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     if terms_text is not None:
         await upsert_setting(db, event_id, "terms_text", terms_text)
@@ -130,4 +133,6 @@ async def save_event_settings(
         await upsert_setting(db, event_id, "terms_version", terms_version)
     if flight_allocation_weights is not None:
         await upsert_setting(db, event_id, "flight_allocation_weights", flight_allocation_weights)
+    if bus_allocation_weights is not None:
+        await upsert_setting(db, event_id, "bus_allocation_weights", bus_allocation_weights)
     return await get_event_settings(db, event_id)

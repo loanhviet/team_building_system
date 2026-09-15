@@ -194,6 +194,7 @@ async def update_settings(
         terms_text=payload.terms_text,
         terms_version=payload.terms_version,
         flight_allocation_weights=payload.flight_allocation_weights,
+        bus_allocation_weights=payload.bus_allocation_weights,
     )
     await record_audit(
         db,

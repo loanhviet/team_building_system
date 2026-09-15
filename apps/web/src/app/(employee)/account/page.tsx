@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { LogOut } from "lucide-react";
 import { Callout } from "@/components/domain/callout";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import { ROLE_LABEL } from "@/lib/format";
 import type { Employee } from "@/types/api";
 
 export default function AccountPage() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -79,7 +80,7 @@ export default function AccountPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <section className="surface-card overflow-hidden">
         <div className="bg-primary px-5 py-6 text-primary-foreground">
           <div className="flex items-center gap-4">
             <InitialsAvatar
@@ -195,6 +196,21 @@ export default function AccountPage() {
             Đổi mật khẩu
           </Button>
         </div>
+      </section>
+
+      <section className="surface-card flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Phiên đăng nhập</h2>
+          <p className="text-sm text-muted-foreground">Thoát cổng trên thiết bị này.</p>
+        </div>
+        <Button
+          variant="outline"
+          className="min-h-11 text-destructive hover:bg-destructive/10"
+          onClick={() => logout().then(() => router.push("/login"))}
+        >
+          <LogOut className="size-4" aria-hidden="true" />
+          Đăng xuất
+        </Button>
       </section>
     </div>
   );

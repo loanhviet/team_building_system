@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { PersonRow } from "@/components/domain/person-row";
 import { ResourceCard } from "@/components/domain/resource-card";
@@ -245,6 +246,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
         <div>
           <h2 className="font-display text-lg font-semibold">Phân xe</h2>
           <p className="text-sm text-muted-foreground">Chọn chặng, chỉ định trưởng xe, rồi chạy phân bổ.</p>
+          <AllocationWeightsHint eventId={eventId} kind="bus" />
         </div>
         <Select
           value={currentLegId ? String(currentLegId) : undefined}
