@@ -69,7 +69,10 @@ export function DataTable<T>({
   }, [rows, sort, columns]);
 
   const pageCount = pageSize ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
-  const paged = pageSize ? sorted.slice(page * pageSize, (page + 1) * pageSize) : sorted;
+  const safePage = Math.min(page, pageCount - 1);
+  const paged = pageSize
+    ? sorted.slice(safePage * pageSize, (safePage + 1) * pageSize)
+    : sorted;
 
   const toggleSort = (key: string) => {
     setSort((prev) => {
@@ -158,22 +161,22 @@ export function DataTable<T>({
       {pageSize && sorted.length > pageSize && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            Trang {page + 1} / {pageCount}
+            Trang {safePage + 1} / {pageCount}
           </span>
           <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
-              disabled={page === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              onClick={() => setPage(Math.max(0, safePage - 1))}
             >
               Trước
             </Button>
             <Button
               variant="outline"
               size="sm"
-              disabled={page + 1 >= pageCount}
-              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              disabled={safePage + 1 >= pageCount}
+              onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
             >
               Sau
             </Button>
@@ -183,4 +186,3 @@ export function DataTable<T>({
     </div>
   );
 }
-

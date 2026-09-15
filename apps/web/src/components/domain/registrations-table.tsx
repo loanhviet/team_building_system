@@ -80,7 +80,7 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
       apiFetch<RegistrationAdmin[]>(`/api/events/${eventId}/registrations${qs ? `?${qs}` : ""}`),
   });
 
-  const rows = data ?? [];
+  const rows = useMemo(() => data ?? [], [data]);
   const byTeam = useMemo(() => {
     const map = new Map<string, RegistrationAdmin[]>();
     for (const r of rows) {

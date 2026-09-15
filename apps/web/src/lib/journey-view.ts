@@ -51,6 +51,15 @@ export const KIND_LABEL: Record<TimelineKind, string> = {
   program: "Chương trình",
 };
 
+export function galaTableLabel(name: string | null, code: string): string {
+  const value = name ?? code;
+  return /^bàn\s/i.test(value) ? value : `Bàn ${value}`;
+}
+
+function isGenericFlightSchedule(title: string): boolean {
+  return /bay|chuyến bay/i.test(title);
+}
+
 function dayKeyFromIso(value: string | null | undefined): string | null {
   if (!value) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
@@ -162,10 +171,11 @@ export function buildTimeline(journey: Journey): TimelineDay[] {
   const galaSeatLines =
     journey.gala?.tables.map((t) => {
       const seat = t.seats.map((s) => s.label ?? s.seat_number).join(", ");
-      return `Bàn ${t.table_name ?? t.table_code}${seat ? ` · ghế ${seat}` : ""}`;
+      return `${galaTableLabel(t.table_name, t.table_code)}${seat ? ` · ghế ${seat}` : ""}`;
     }) ?? [];
 
   journey.schedule.forEach((s, i) => {
+    if (journey.flights.length > 0 && isGenericFlightSchedule(s.title)) return;
     const at = ms(s.start_at);
     const isGalaSlot = /gala/i.test(s.title);
     items.push({
@@ -355,10 +365,11 @@ export function buildJourneyStages(journey: Journey): JourneyStage[] {
   const galaSeatLines =
     journey.gala?.tables.map((t) => {
       const seat = t.seats.map((s) => s.label ?? s.seat_number).join(", ");
-      return `Bàn ${t.table_name ?? t.table_code}${seat ? ` · ghế ${seat}` : ""}`;
+      return `${galaTableLabel(t.table_name, t.table_code)}${seat ? ` · ghế ${seat}` : ""}`;
     }) ?? [];
 
   journey.schedule.forEach((s, i) => {
+    if (journey.flights.length > 0 && isGenericFlightSchedule(s.title)) return;
     const at = ms(s.start_at);
     const isGalaSlot = /gala/i.test(s.title);
     const kind: TimelineKind = isGalaSlot ? "gala" : "program";
@@ -369,7 +380,7 @@ export function buildJourneyStages(journey: Journey): JourneyStage[] {
       kind,
       dayKey: dayKeyOf(at, s.day_date),
       at,
-      kicker: isGalaSlot ? "Đêm hội doanh nghiệp" : "Hoạt động tập thể",
+      kicker: isGalaSlot ? "Đêm hội doanh nghiệp" : "Lịch trình chung",
       dateLine: [
         s.start_at ? formatTime(s.start_at) : "",
         s.end_at ? formatTime(s.end_at) : "",
@@ -496,6 +507,7 @@ export function journeyNext(journey: Journey, gaps: JourneyGap[]): JourneyNext |
     }
   }
   for (const s of journey.schedule) {
+    if (journey.flights.length > 0 && isGenericFlightSchedule(s.title)) continue;
     const at = ms(s.start_at);
     if (at != null) {
       timed.push({

@@ -3,6 +3,11 @@
 # Extra args pass through to uvicorn (dev override adds --reload).
 set -e
 
+if [ "${APP_ENV:-dev}" != "dev" ] && [ "${SEED_DEMO:-0}" = "1" ]; then
+  echo "Refusing to start a non-development environment with SEED_DEMO=1" >&2
+  exit 1
+fi
+
 alembic upgrade head
 
 # Seed is idempotent (skips when admin@teambuilding.vn exists), so a fresh

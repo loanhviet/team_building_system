@@ -10,6 +10,7 @@ from app.models.enums import UserRole
 from app.models.organization import Employee
 from app.schemas.auth import ResetPasswordOut, UserAdminOut, UserAdminUpdate
 from app.services.audit_service import record_audit
+from app.services.auth_service import revoke_all_refresh_tokens
 from app.services.user_admin_service import apply_user_update, reset_user_password
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -87,6 +88,7 @@ async def reset_password(user_id: int, db: DbSession, actor: SuperAdmin) -> Rese
     if target is None:
         raise AppError("not_found", "User not found", status.HTTP_404_NOT_FOUND)
     temporary = reset_user_password(target)
+    await revoke_all_refresh_tokens(db, target.id)
     await record_audit(
         db,
         actor_user_id=actor.id,

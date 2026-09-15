@@ -227,7 +227,7 @@ async def seed_flights(
 
 async def seed_hotel(db: AsyncSession, event: Event) -> tuple[Hotel, list[Room]]:
     hotel = Hotel(
-        event_id=event.id, name="Danang Beach Resort", address="36 Võ Nguyên Giáp, Đà Nẵng",
+        event_id=event.id, code="DBR", name="Danang Beach Resort", address="36 Võ Nguyên Giáp, Đà Nẵng",
         checkin_date=event.start_date, checkout_date=event.end_date,
     )
     db.add(hotel)

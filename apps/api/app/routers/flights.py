@@ -1,8 +1,6 @@
-import io
 from datetime import datetime
 from typing import Annotated
 
-import openpyxl
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, UploadFile, status
 from sqlalchemy import func, select
@@ -13,7 +11,8 @@ from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
-from app.models.event import Event, Shift
+from app.models.bus import Bus, BusAssignment
+from app.models.event import Event, Shift, TransportLeg
 from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee, Site
 from app.models.registration import Registration
@@ -30,8 +29,11 @@ from app.schemas.flight import (
     UnlockAssignmentRequest,
 )
 from app.services import master_data
+from app.services.allocation.base import preset_weights
+from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
+from app.services.importer.xlsx import load_xlsx, read_xlsx
 from app.services.notification.email_service import PUBLISHED_STATUSES, notify_employees
 from app.services.xlsx_export import xlsx_file
 
@@ -40,6 +42,17 @@ router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
 AdminUser = Annotated[User, Depends(require_admin)]
 
 REQUIRED_IMPORT_HEADERS = {"flight_code", "direction", "capacity"}
+
+
+async def _validate_flight_references(
+    db: DbSession, event_id: int, shift_id: int | None, site_id: int | None
+) -> None:
+    if shift_id is not None:
+        shift = await db.get(Shift, shift_id)
+        if shift is None or shift.event_id != event_id:
+            raise AppError("invalid_shift", "Ca bay không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST)
+    if site_id is not None and await db.get(Site, site_id) is None:
+        raise AppError("invalid_site", "Địa điểm làm việc không tồn tại", status.HTTP_400_BAD_REQUEST)
 
 
 @router.get("/flights", response_model=list[FlightOut])
@@ -59,6 +72,7 @@ async def create_flight(
 ) -> Flight:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
+    await _validate_flight_references(db, event_id, payload.shift_id, payload.site_id)
     flight = await master_data.create(db, Flight, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="flight", entity_id=flight.id,
@@ -89,6 +103,50 @@ async def update_flight(
     before = FlightOut.model_validate(flight).model_dump(mode="json")
     data = payload.model_dump(exclude_unset=True)
 
+    await _validate_flight_references(
+        db, event_id, data.get("shift_id", flight.shift_id), data.get("site_id", flight.site_id)
+    )
+    final_depart = data.get("depart_at", flight.depart_at)
+    final_arrive = data.get("arrive_at", flight.arrive_at)
+    if final_depart and final_arrive and final_arrive <= final_depart:
+        raise AppError(
+            "invalid_flight_time", "Giờ đến phải sau giờ khởi hành", status.HTTP_400_BAD_REQUEST
+        )
+
+    assigned_ids = [
+        row[0]
+        for row in (
+            await db.execute(
+                select(FlightAssignment.employee_id).where(
+                    FlightAssignment.flight_id == flight_id
+                )
+            )
+        ).all()
+    ]
+    if assigned_ids and data.get("direction", flight.direction) != flight.direction:
+        raise AppError(
+            "flight_direction_in_use",
+            "Không thể đổi chiều của chuyến đã có người; hãy bỏ phân bổ trước",
+            status.HTTP_409_CONFLICT,
+        )
+    final_site_id = data.get("site_id", flight.site_id)
+    if assigned_ids and final_site_id is not None:
+        mismatches = (
+            await db.execute(
+                select(func.count(Employee.id)).where(
+                    Employee.id.in_(assigned_ids),
+                    Employee.site_id.is_not(None),
+                    Employee.site_id != final_site_id,
+                )
+            )
+        ).scalar_one()
+        if mismatches:
+            raise AppError(
+                "flight_site_in_use",
+                f"Thay đổi này làm {mismatches} người ở sai site; hãy phân lại trước",
+                status.HTTP_409_CONFLICT,
+            )
+
     if data.get("capacity") is not None:
         assigned_count = (
             await db.execute(
@@ -105,6 +163,31 @@ async def update_flight(
             )
 
     await master_data.update(db, flight, data)
+
+    if assigned_ids and ("depart_at" in data or "arrive_at" in data):
+        dependent = await db.execute(
+            select(BusAssignment, Bus, TransportLeg)
+            .join(Bus, Bus.id == BusAssignment.bus_id)
+            .join(TransportLeg, TransportLeg.id == BusAssignment.leg_id)
+            .where(
+                BusAssignment.event_id == event_id,
+                BusAssignment.employee_id.in_(assigned_ids),
+                TransportLeg.direction == flight.direction,
+                TransportLeg.flight_timing.is_not(None),
+            )
+        )
+        for bus_assignment, bus, leg in dependent.all():
+            compatible = bus_compatible(
+                bus.pickup_point_id,
+                bus.depart_at,
+                None,
+                flight.depart_at,
+                flight.arrive_at,
+                leg.flight_timing,
+            )
+            if not compatible:
+                bus_assignment.is_flagged = True
+                bus_assignment.flag_reason = "flight_timing_mismatch"
     after = FlightOut.model_validate(flight).model_dump(mode="json")
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="flight", entity_id=flight_id,
@@ -136,8 +219,8 @@ async def import_flights(
     """Small dataset (a handful of flights) — parsed synchronously, no queue needed."""
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
-    content = await file.read()
-    workbook = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    content = await read_xlsx(file)
+    workbook = load_xlsx(content)
     sheet = workbook.active
     rows_iter = sheet.iter_rows(values_only=True)
     header_row = next(rows_iter, None)
@@ -293,10 +376,75 @@ async def list_flight_assignments(
                 employee_code=a.employee.employee_code,
                 full_name=a.employee.full_name,
                 team_name=a.employee.team.name if a.employee.team else None,
+                employee_site_id=a.employee.site_id,
                 requested_shift_name=shift_by_employee.get(a.employee_id),
             )
         )
     return out
+
+
+async def _flight_preflight(db: DbSession, event_id: int, direction: str) -> dict:
+    participant_rows = (
+        await db.execute(
+            select(Employee.site_id)
+            .join(Registration, Registration.employee_id == Employee.id)
+            .where(
+                Registration.event_id == event_id,
+                Registration.status == "submitted",
+                Registration.is_participating.is_(True),
+            )
+        )
+    ).all()
+    participant_sites = {row[0] for row in participant_rows if row[0] is not None}
+    flights = list(
+        (
+            await db.execute(
+                select(Flight).where(
+                    Flight.event_id == event_id, Flight.direction == direction
+                )
+            )
+        ).scalars().all()
+    )
+    blockers: list[dict] = []
+    warnings: list[dict] = []
+    if not flights:
+        blockers.append({"code": "no_flights", "message": "Chưa có chuyến bay trong chiều này"})
+    if len(participant_sites) > 1 and any(f.site_id is None for f in flights):
+        blockers.append({
+            "code": "flight_site_required",
+            "message": "Sự kiện có nhiều địa điểm; mọi chuyến bay phải được gán site",
+        })
+    for site_id in sorted(participant_sites):
+        needed = sum(1 for row in participant_rows if row[0] == site_id)
+        capacity = sum(f.capacity for f in flights if f.site_id in (None, site_id))
+        if capacity < needed:
+            blockers.append({
+                "code": "insufficient_capacity",
+                "message": f"Site #{site_id} thiếu {needed - capacity} chỗ bay",
+            })
+    if any(row[0] is None for row in participant_rows):
+        warnings.append({
+            "code": "employee_site_missing",
+            "message": "Có nhân sự chưa được gán địa điểm làm việc",
+        })
+    return {
+        "ready": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+        "eligible": len(participant_rows),
+        "capacity": sum(f.capacity for f in flights),
+        "resources": len(flights),
+    }
+
+
+@router.get("/allocations/flight/preflight")
+async def flight_allocation_preflight(
+    event_id: int, direction: str, db: DbSession, _user: AdminUser
+) -> dict:
+    if direction not in ("outbound", "inbound"):
+        raise AppError("invalid_direction", "Chiều bay không hợp lệ", status.HTTP_400_BAD_REQUEST)
+    await master_data.get_or_404(db, Event, event_id)
+    return await _flight_preflight(db, event_id, direction)
 
 
 @router.post(
@@ -311,11 +459,18 @@ async def run_flight_allocation_endpoint(
 ) -> AllocationEnqueuedOut:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_allocation_allowed(event)
+    preflight = await _flight_preflight(db, event_id, payload.direction)
+    if not preflight["ready"]:
+        raise AppError(
+            "allocation_not_ready",
+            "; ".join(item["message"] for item in preflight["blockers"]),
+            status.HTTP_409_CONFLICT,
+        )
 
     run = AllocationRun(
         event_id=event_id,
         type="flight",
-        params_json={"direction": payload.direction, "weights": payload.weights},
+        params_json={"direction": payload.direction, "preset": payload.preset},
         status="running",
         created_by=user.id,
     )
@@ -336,7 +491,8 @@ async def run_flight_allocation_endpoint(
     await db.refresh(run)
 
     arq_job = await queue.enqueue_job(
-        "run_flight_allocation_task", job.id, run.id, event_id, payload.direction, payload.weights
+        "run_flight_allocation_task", job.id, run.id, event_id, payload.direction,
+        preset_weights("flight", payload.preset),
     )
     if arq_job is not None:
         job.arq_job_id = arq_job.job_id
@@ -376,6 +532,7 @@ async def adjust_flight_assignments(
             .where(
                 Registration.event_id == event_id,
                 Registration.status == "submitted",
+                Registration.is_participating.is_(True),
                 Employee.team_id == payload.team_id,
             )
         )
@@ -395,6 +552,7 @@ async def adjust_flight_assignments(
             Registration.event_id == event_id,
             Registration.employee_id.in_(employee_ids),
             Registration.status == "submitted",
+            Registration.is_participating.is_(True),
         )
     )
     valid_ids = {row[0] for row in valid_result.all()}
@@ -407,7 +565,7 @@ async def adjust_flight_assignments(
         )
     employee_ids = valid_ids
 
-    warnings = []
+    warnings: list[str] = []
     if target_flight.site_id is not None:
         mismatch_result = await db.execute(
             select(Employee.employee_code).where(
@@ -418,14 +576,12 @@ async def adjust_flight_assignments(
         )
         mismatched_codes = [row[0] or "?" for row in mismatch_result.all()]
         if mismatched_codes:
-            if not payload.force:
-                raise AppError(
-                    "site_mismatch",
-                    f"Chuyến {target_flight.flight_code} không phục vụ địa điểm làm việc của: "
-                    f"{', '.join(sorted(mismatched_codes))}",
-                    status.HTTP_409_CONFLICT,
-                )
-            warnings.append("site_mismatch_forced")
+            raise AppError(
+                "site_mismatch",
+                f"Chuyến {target_flight.flight_code} không phục vụ địa điểm làm việc của: "
+                f"{', '.join(sorted(mismatched_codes))}",
+                status.HTTP_409_CONFLICT,
+            )
 
     result = await db.execute(
         select(FlightAssignment).where(
@@ -439,14 +595,32 @@ async def adjust_flight_assignments(
     would_be_count = len(current_on_target) + len(moving_in)
 
     if would_be_count > target_flight.capacity:
-        if not payload.force:
+        raise AppError(
+            "over_capacity",
+            f"Chuyến {target_flight.flight_code} có {target_flight.capacity} chỗ, "
+            f"sau khi chuyển sẽ có {would_be_count} người",
+            status.HTTP_409_CONFLICT,
+        )
+
+    mismatched_shift_ids: set[int] = set()
+    if target_flight.shift_id is not None:
+        shift_result = await db.execute(
+            select(Registration.employee_id).where(
+                Registration.event_id == event_id,
+                Registration.employee_id.in_(employee_ids),
+                Registration.shift_id.is_not(None),
+                Registration.shift_id != target_flight.shift_id,
+            )
+        )
+        mismatched_shift_ids = {row[0] for row in shift_result.all()}
+        if mismatched_shift_ids and not payload.accept_soft_warnings:
             raise AppError(
-                "over_capacity",
-                f"Chuyến {target_flight.flight_code} chỉ còn sức chứa {target_flight.capacity}, "
-                f"sau khi chuyển sẽ có {would_be_count} người",
+                "soft_warning_required",
+                f"Có {len(mismatched_shift_ids)} người lệch ca đăng ký. Hãy xác nhận để tiếp tục.",
                 status.HTTP_409_CONFLICT,
             )
-        warnings.append("over_capacity_forced")
+        if mismatched_shift_ids:
+            warnings.append("shift_mismatch")
 
     for employee_id in employee_ids:
         result = await db.execute(
@@ -471,8 +645,8 @@ async def adjust_flight_assignments(
         assignment.flight_id = target_flight.id
         assignment.source = "manual"
         assignment.is_locked = True
-        assignment.is_flagged = False
-        assignment.flag_reason = None
+        assignment.is_flagged = employee_id in mismatched_shift_ids
+        assignment.flag_reason = "shift_mismatch" if assignment.is_flagged else None
         assignment.assigned_by = user.id
         assignment.assigned_at = utcnow()
 

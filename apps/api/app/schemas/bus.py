@@ -1,13 +1,14 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class BusCreate(BaseModel):
     leg_id: int
-    code: str
+    code: str = Field(min_length=1, max_length=50)
     name: str | None = None
-    capacity: int = 0
+    capacity: int = Field(default=1, ge=1)
     gather_at: datetime | None = None
     depart_at: datetime | None = None
     pickup_point_id: int | None = None
@@ -16,11 +17,17 @@ class BusCreate(BaseModel):
     leader_phone: str | None = None
     note: str | None = None
 
+    @model_validator(mode="after")
+    def validate_times(self):
+        if self.gather_at and self.depart_at and self.depart_at < self.gather_at:
+            raise ValueError("depart_at không được trước gather_at")
+        return self
+
 
 class BusUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
-    capacity: int | None = None
+    capacity: int | None = Field(default=None, ge=1)
     gather_at: datetime | None = None
     depart_at: datetime | None = None
     pickup_point_id: int | None = None
@@ -29,6 +36,12 @@ class BusUpdate(BaseModel):
     leader_name: str | None = None
     leader_phone: str | None = None
     note: str | None = None
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        if self.gather_at and self.depart_at and self.depart_at < self.gather_at:
+            raise ValueError("depart_at không được trước gather_at")
+        return self
 
 
 class BusOut(BaseModel):
@@ -52,6 +65,7 @@ class BusOut(BaseModel):
 
 class BusAllocationRequest(BaseModel):
     leg_id: int
+    preset: Literal["balanced", "shift_first", "team_first"] = "balanced"
 
 
 class BusAssignmentOut(BaseModel):
@@ -74,11 +88,10 @@ class BusAssignmentOut(BaseModel):
 
 
 class BusAdjustRequest(BaseModel):
-    employee_ids: list[int] = []
+    employee_ids: list[int] = Field(default_factory=list)
     team_id: int | None = None  # move every registered member of this team, in addition to employee_ids
     bus_id: int
-    reason: str
-    force: bool = False
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class UnlockBusAssignmentRequest(BaseModel):

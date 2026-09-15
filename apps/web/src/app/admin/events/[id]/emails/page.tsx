@@ -73,7 +73,15 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
     queryFn: () => apiFetch<EmailTemplate[]>(`/api/events/${eventId}/email-templates`),
   });
 
+  function open(tpl: EmailTemplate) {
+    setSelected(tpl.code);
+    setSubject(tpl.subject);
+    setBody(tpl.body_html);
+  }
+
   useEffect(() => {
+    // Seed the editor from asynchronous server data exactly once.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!selected && data && data.length > 0) open(data[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only seed first selection
   }, [data]);
@@ -124,12 +132,6 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
     onSuccess: (res) => toast.success(`Đã xếp hàng email thử tới ${res.to}`),
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không gửi được thư thử"),
   });
-
-  const open = (tpl: EmailTemplate) => {
-    setSelected(tpl.code);
-    setSubject(tpl.subject);
-    setBody(tpl.body_html);
-  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

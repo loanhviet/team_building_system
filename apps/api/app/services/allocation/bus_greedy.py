@@ -45,27 +45,30 @@ def bus_compatible(
     flight_arrive_at: datetime | None,
     flight_timing: str | None,
 ) -> bool:
-    """Hard filter (never a score penalty) shared by the auto allocator and the
-    manual adjust endpoint. Missing data on either side (no pickup point
-    registered, no bus depart_at set, no matching flight assignment yet)
-    always passes — this only rejects a *known* mismatch, it never blocks on
-    incomplete data."""
-    if bus_pickup_point_id is not None and pickup_point_id is not None and bus_pickup_point_id != pickup_point_id:
+    """Hard physical compatibility shared by automatic and manual allocation.
+
+    Missing bus/timing data is not silently accepted when the employee's
+    registration or the leg requires it; preflight explains the same issue to
+    the organizer before a run starts.
+    """
+    if pickup_point_id is not None and bus_pickup_point_id != pickup_point_id:
         return False
 
-    if bus_depart_at is None or flight_timing not in ("before_flight", "after_flight"):
+    if flight_timing not in ("before_flight", "after_flight"):
         return True
+    if bus_depart_at is None:
+        return False
 
     if flight_timing == "before_flight":
         if flight_depart_at is None:
-            return True
+            return False
         window_start = flight_depart_at - BEFORE_FLIGHT_MIN_LEAD
         window_end = flight_depart_at - BEFORE_FLIGHT_MAX_LEAD
         return window_start <= bus_depart_at <= window_end
 
     # after_flight
     if flight_arrive_at is None:
-        return True
+        return False
     return flight_arrive_at <= bus_depart_at <= flight_arrive_at + AFTER_FLIGHT_MAX_WAIT
 
 
@@ -77,12 +80,16 @@ def _score(
     weights: dict[str, float],
 ) -> float:
     same_flight = 1.0 if flight_id is not None and flight_id in bus.flight_ids_present else 0.0
-    same_team = sum(1 for tid in bus.assigned_team_ids if tid is not None and tid == team_id)
-    fill = min(bus.remaining, len(remaining))
+    same_team = float(
+        team_id is not None and any(tid is not None and tid == team_id for tid in bus.assigned_team_ids)
+    )
+    projected_fill = min(
+        1.0, (len(bus.assigned) + min(bus.remaining, len(remaining))) / max(1, bus.capacity)
+    )
     return (
         weights["same_flight"] * same_flight
         + weights["team_together"] * same_team
-        + weights["fill_rate"] * fill
+        + weights["fill_rate"] * projected_fill
     )
 
 
@@ -135,7 +142,7 @@ def allocate_buses(
 
             best = max(
                 compatible,
-                key=lambda b: _score(b, remaining, flight_id, team_id, weights),
+                key=lambda b: (_score(b, remaining, flight_id, team_id, weights), -b.bus_id),
             )
             take, remaining = remaining[: best.remaining], remaining[best.remaining :]
             for c in take:

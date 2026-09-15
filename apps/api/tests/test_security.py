@@ -1,6 +1,8 @@
 import jwt
 import pytest
+from pydantic import ValidationError
 
+from app.core.config import Settings
 from app.core.security import (
     create_access_token,
     decode_access_token,
@@ -29,3 +31,17 @@ def test_decode_rejects_tampered_token():
     tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
     with pytest.raises(jwt.InvalidTokenError):
         decode_access_token(tampered)
+
+
+def test_production_rejects_default_jwt_secret():
+    with pytest.raises(ValidationError):
+        Settings(app_env="production", app_base_url="https://events.example.com")
+
+
+def test_production_accepts_https_and_strong_secret():
+    settings = Settings(
+        app_env="production",
+        app_base_url="https://events.example.com",
+        jwt_secret="a-strong-production-secret-that-is-over-32-characters",
+    )
+    assert settings.app_env == "production"

@@ -1,10 +1,14 @@
-"""R5 gap: hotels had no delete for rooms/room-types and no way to unassign
-a room — a wrong room assignment couldn't be corrected without raw SQL. These
-follow the same soft-delete-with-guard pattern as the Gala table guard
-(routers/gala.py's seats_in_use check) so a room/room-type still in use can't
-silently vanish while people remain assigned to it."""
+"""Hotel/room assignment integrity and correction workflows."""
 
-from app.models.hotel import Hotel, Room, RoomType
+import io
+
+from openpyxl import Workbook
+from sqlalchemy import select
+
+from app.core.time import utcnow
+from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
+from app.models.registration import Registration
+from tests.conftest import make_employee
 
 
 async def _make_hotel_with_room(db_session, event_id: int) -> tuple[Hotel, RoomType, Room]:
@@ -63,3 +67,85 @@ async def test_delete_room_type_in_use_is_blocked(client, world, auth_headers, d
     )
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "room_type_in_use"
+
+
+async def test_assign_room_rejects_non_participant(client, world, auth_headers, db_session):
+    _hotel, _room_type, room = await _make_hotel_with_room(db_session, world.event.id)
+    world.registration.is_participating = False
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_id": world.employee.id, "room_id": room.id},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_employee_id"
+
+
+async def test_room_capacity_cannot_drop_below_occupancy(
+    client, world, auth_headers, db_session
+):
+    hotel, _room_type, room = await _make_hotel_with_room(db_session, world.event.id)
+    second = await make_employee(db_session, team=world.team, site=world.site, code="NV-H02")
+    db_session.add(
+        Registration(
+            event_id=world.event.id,
+            employee_id=second.employee.id,
+            status="submitted",
+            is_participating=True,
+            agreed_terms_at=utcnow(),
+            terms_version="v1",
+            submitted_at=utcnow(),
+        )
+    )
+    await db_session.commit()
+    for employee_id in (world.employee.id, second.employee.id):
+        resp = await client.post(
+            f"/api/events/{world.event.id}/room-assignments/assign",
+            headers=auth_headers(world.organizer_user),
+            json={"employee_id": employee_id, "room_id": room.id},
+        )
+        assert resp.status_code == 200
+
+    resp = await client.patch(
+        f"/api/events/{world.event.id}/hotels/{hotel.id}/rooms/{room.id}",
+        headers=auth_headers(world.organizer_user),
+        json={"capacity": 1},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "capacity_below_assigned"
+
+
+async def test_room_import_uses_hotel_code_when_room_numbers_repeat(
+    client, world, auth_headers, db_session
+):
+    hotel_a = Hotel(event_id=world.event.id, code="HA", name="Hotel A")
+    hotel_b = Hotel(event_id=world.event.id, code="HB", name="Hotel B")
+    db_session.add_all([hotel_a, hotel_b])
+    await db_session.flush()
+    room_a = Room(hotel_id=hotel_a.id, room_number="101", capacity=2)
+    room_b = Room(hotel_id=hotel_b.id, room_number="101", capacity=2)
+    db_session.add_all([room_a, room_b])
+    await db_session.commit()
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["employee_code", "hotel_code", "room_number"])
+    sheet.append([world.employee.employee_code, "HB", "101"])
+    payload = io.BytesIO()
+    workbook.save(payload)
+
+    resp = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/import",
+        headers=auth_headers(world.organizer_user),
+        files={"file": ("rooms.xlsx", payload.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok_rows"] == 1
+    assignment = (
+        await db_session.execute(
+            select(RoomAssignment).where(RoomAssignment.employee_id == world.employee.id)
+        )
+    ).scalar_one()
+    assert assignment.room_id == room_b.id

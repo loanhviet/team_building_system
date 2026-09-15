@@ -80,6 +80,17 @@ export type EventSettings = {
   } & Record<string, number>;
 };
 
+export type AllocationPreset = "balanced" | "shift_first" | "team_first";
+
+export type AllocationPreflight = {
+  ready: boolean;
+  blockers: { code: string; message: string }[];
+  warnings: { code: string; message: string }[];
+  eligible: number;
+  capacity: number;
+  resources: number;
+};
+
 export type EmailTemplate = {
   code: string;
   subject: string;
@@ -119,6 +130,18 @@ export type EventStatus =
   | "information_published"
   | "event_started"
   | "event_completed";
+
+export type ReadinessIssue = {
+  code: string;
+  message: string;
+};
+
+export type PublishReadiness = {
+  ready: boolean;
+  requires_confirmation: boolean;
+  blockers: ReadinessIssue[];
+  warnings: ReadinessIssue[];
+};
 
 export type Event = {
   id: number;
@@ -292,6 +315,7 @@ export type TeamRoster = {
 export type Hotel = {
   id: number;
   event_id: number;
+  code: string;
   name: string;
   address: string | null;
   checkin_date: string | null;
@@ -325,6 +349,7 @@ export type RoomAssignment = {
   employee_code: string | null;
   full_name: string;
   team_name: string | null;
+  hotel_code: string;
   hotel_name: string;
   room_number: string;
   assigned_at: string | null;
@@ -334,6 +359,8 @@ export type UnassignedEmployee = {
   employee_id: number;
   employee_code: string | null;
   full_name: string;
+  team_name: string | null;
+  site_name: string | null;
 };
 
 export type ImportResult = {
@@ -532,6 +559,7 @@ export type FlightAssignment = {
   employee_code: string | null;
   full_name: string;
   team_name: string | null;
+  employee_site_id: number | null;
   requested_shift_name: string | null;
 };
 

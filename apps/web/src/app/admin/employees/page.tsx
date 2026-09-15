@@ -28,7 +28,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import type {
   Employee,
   EmployeeList,
@@ -288,7 +287,7 @@ export default function EmployeesPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -385,7 +384,7 @@ export default function EmployeesPage() {
                       onCheckedChange={(checked) => setSendWelcome(checked === true)}
                       className="mt-0.5"
                     />
-                    Gửi email kích hoạt tài khoản kèm hướng dẫn đăng nhập lần đầu (mật khẩu tạm = mã NV).
+                    Gửi email kích hoạt tài khoản kèm mật khẩu tạm ngẫu nhiên dùng cho lần đăng nhập đầu.
                   </label>
                 )}
               </div>

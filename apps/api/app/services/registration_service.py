@@ -27,6 +27,10 @@ def assert_can_edit(event: Event, reg: Registration) -> None:
         raise AppError(
             "registration_closed", "Sự kiện hiện không mở đăng ký", status.HTTP_400_BAD_REQUEST
         )
+    if event.registration_open_at and utcnow() < event.registration_open_at:
+        raise AppError(
+            "registration_not_open", "Chưa đến thời gian mở đăng ký", status.HTTP_400_BAD_REQUEST
+        )
     if event.registration_close_at and utcnow() > event.registration_close_at:
         raise AppError(
             "registration_closed", "Đã quá hạn chỉnh sửa đăng ký", status.HTTP_400_BAD_REQUEST

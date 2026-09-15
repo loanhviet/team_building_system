@@ -5,7 +5,7 @@ from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import DbSession, require_admin
@@ -30,6 +30,7 @@ from app.schemas.bus import (
 )
 from app.schemas.flight import AllocationEnqueuedOut, AllocationRunOut
 from app.services import master_data
+from app.services.allocation.base import preset_weights
 from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
@@ -38,6 +39,20 @@ from app.services.notification.email_service import PUBLISHED_STATUSES, notify_e
 router = APIRouter(prefix="/events/{event_id}", tags=["buses"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+async def _validate_bus_references(
+    db: DbSession, event_id: int, leg_id: int, pickup_point_id: int | None
+) -> None:
+    leg = await db.get(TransportLeg, leg_id)
+    if leg is None or leg.event_id != event_id:
+        raise AppError("invalid_leg", "Chặng xe không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST)
+    if pickup_point_id is not None:
+        point = await db.get(PickupPoint, pickup_point_id)
+        if point is None or point.event_id != event_id:
+            raise AppError(
+                "invalid_pickup_point", "Điểm đón không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST
+            )
 
 
 async def _flight_times_by_employee(
@@ -79,6 +94,7 @@ async def list_buses(
 async def create_bus(event_id: int, payload: BusCreate, db: DbSession, user: AdminUser) -> Bus:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
+    await _validate_bus_references(db, event_id, payload.leg_id, payload.pickup_point_id)
     bus = await master_data.create(db, Bus, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="bus", entity_id=bus.id,
@@ -108,7 +124,77 @@ async def update_bus(
     assert_event_not_completed(event)
     bus = await master_data.get_or_404(db, Bus, bus_id, event_id=event_id)
     before = BusOut.model_validate(bus).model_dump(mode="json")
-    await master_data.update(db, bus, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    await _validate_bus_references(
+        db, event_id, bus.leg_id, data.get("pickup_point_id", bus.pickup_point_id)
+    )
+    if data.get("capacity") is not None:
+        assigned_count = (
+            await db.execute(
+                select(func.count(BusAssignment.id)).where(BusAssignment.bus_id == bus_id)
+            )
+        ).scalar_one()
+        if data["capacity"] < assigned_count:
+            raise AppError(
+                "capacity_below_assigned",
+                f"Xe này đã có {assigned_count} người, không thể đặt sức chứa thấp hơn",
+                status.HTTP_409_CONFLICT,
+            )
+    final_gather = data.get("gather_at", bus.gather_at)
+    final_depart = data.get("depart_at", bus.depart_at)
+    if final_gather and final_depart and final_depart < final_gather:
+        raise AppError(
+            "invalid_bus_time", "Giờ khởi hành không được trước giờ tập trung", status.HTTP_400_BAD_REQUEST
+        )
+    assigned_ids = [
+        row[0]
+        for row in (
+            await db.execute(
+                select(BusAssignment.employee_id).where(BusAssignment.bus_id == bus_id)
+            )
+        ).all()
+    ]
+    if assigned_ids and ({"pickup_point_id", "depart_at"} & data.keys()):
+        leg = await db.get(TransportLeg, bus.leg_id)
+        needs = await db.execute(
+            select(Registration.employee_id, RegistrationTransportNeed.pickup_point_id)
+            .join(
+                RegistrationTransportNeed,
+                RegistrationTransportNeed.registration_id == Registration.id,
+            )
+            .where(
+                Registration.event_id == event_id,
+                Registration.employee_id.in_(assigned_ids),
+                RegistrationTransportNeed.leg_id == bus.leg_id,
+            )
+        )
+        pickup_by_employee = dict(needs.all())
+        flight_by_employee = (
+            await _flight_times_by_employee(db, event_id, leg.direction)
+            if leg is not None and leg.direction in ("outbound", "inbound")
+            else {}
+        )
+        incompatible = 0
+        for employee_id in assigned_ids:
+            _flight_id, _code, flight_depart, flight_arrive = flight_by_employee.get(
+                employee_id, (None, None, None, None)
+            )
+            if not bus_compatible(
+                data.get("pickup_point_id", bus.pickup_point_id),
+                final_depart,
+                pickup_by_employee.get(employee_id),
+                flight_depart,
+                flight_arrive,
+                leg.flight_timing if leg else None,
+            ):
+                incompatible += 1
+        if incompatible:
+            raise AppError(
+                "bus_change_incompatible",
+                f"Thay đổi này làm {incompatible} người sai điểm đón/giờ bay; hãy phân lại trước",
+                status.HTTP_409_CONFLICT,
+            )
+    await master_data.update(db, bus, data)
     after = BusOut.model_validate(bus).model_dump(mode="json")
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="bus", entity_id=bus_id,
@@ -201,6 +287,111 @@ async def list_bus_assignments(
     return out
 
 
+async def _bus_preflight(db: DbSession, event_id: int, leg_id: int) -> dict:
+    leg = await db.get(TransportLeg, leg_id)
+    if leg is None or leg.event_id != event_id:
+        raise AppError("invalid_leg", "Chặng xe không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST)
+    needs = (
+        await db.execute(
+            select(Registration.employee_id, RegistrationTransportNeed.pickup_point_id)
+            .join(
+                RegistrationTransportNeed,
+                RegistrationTransportNeed.registration_id == Registration.id,
+            )
+            .where(
+                Registration.event_id == event_id,
+                Registration.status == "submitted",
+                Registration.is_participating.is_(True),
+                RegistrationTransportNeed.leg_id == leg_id,
+                RegistrationTransportNeed.is_needed.is_(True),
+            )
+        )
+    ).all()
+    buses = list(
+        (
+            await db.execute(
+                select(Bus).where(Bus.event_id == event_id, Bus.leg_id == leg_id)
+            )
+        ).scalars().all()
+    )
+    blockers: list[dict] = []
+    warnings: list[dict] = []
+    if not buses:
+        blockers.append({"code": "no_buses", "message": "Chưa có xe cho chặng này"})
+    if sum(b.capacity for b in buses) < len(needs):
+        blockers.append({
+            "code": "insufficient_capacity",
+            "message": f"Chặng xe thiếu {len(needs) - sum(b.capacity for b in buses)} chỗ",
+        })
+    requested_points = {row[1] for row in needs if row[1] is not None}
+    served_points = {b.pickup_point_id for b in buses if b.pickup_point_id is not None}
+    missing_points = requested_points - served_points
+    if missing_points:
+        blockers.append({
+            "code": "pickup_not_served",
+            "message": f"Có {len(missing_points)} điểm đón chưa có xe phục vụ",
+        })
+    if leg.flight_timing and any(b.depart_at is None for b in buses):
+        blockers.append({
+            "code": "bus_departure_required",
+            "message": "Mọi xe của chặng liên quan chuyến bay phải có giờ khởi hành",
+        })
+    if leg.flight_timing:
+        flight_by_employee = await _flight_times_by_employee(db, event_id, leg.direction)
+        missing_flight_data = []
+        no_compatible_bus = []
+        for employee_id, pickup_point_id in needs:
+            flight = flight_by_employee.get(employee_id)
+            if flight is None or (
+                leg.flight_timing == "before_flight" and flight[2] is None
+            ) or (leg.flight_timing == "after_flight" and flight[3] is None):
+                missing_flight_data.append(employee_id)
+                continue
+            if buses and not any(
+                bus_compatible(
+                    bus.pickup_point_id,
+                    bus.depart_at,
+                    pickup_point_id,
+                    flight[2],
+                    flight[3],
+                    leg.flight_timing,
+                )
+                for bus in buses
+            ):
+                no_compatible_bus.append(employee_id)
+        if missing_flight_data:
+            blockers.append({
+                "code": "flight_allocation_required",
+                "message": f"Có {len(missing_flight_data)} người chưa có chuyến/giờ bay phù hợp",
+            })
+        if no_compatible_bus:
+            blockers.append({
+                "code": "no_compatible_bus",
+                "message": f"Có {len(no_compatible_bus)} người chưa có xe khớp điểm đón và giờ bay",
+            })
+    if any(row[1] is None for row in needs):
+        warnings.append({
+            "code": "pickup_missing",
+            "message": "Có nhân sự cần xe nhưng chưa chọn điểm đón",
+        })
+    return {
+        "ready": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+        "eligible": len(needs),
+        "capacity": sum(b.capacity for b in buses),
+        "resources": len(buses),
+    }
+
+
+@router.get("/allocations/bus/preflight")
+async def bus_allocation_preflight(
+    event_id: int, leg_id: int, db: DbSession, _user: AdminUser
+) -> dict:
+    await master_data.get_or_404(db, Event, event_id)
+    return await _bus_preflight(db, event_id, leg_id)
+
+
 @router.post(
     "/allocations/bus", response_model=AllocationEnqueuedOut, status_code=status.HTTP_202_ACCEPTED
 )
@@ -213,9 +404,17 @@ async def run_bus_allocation_endpoint(
 ) -> AllocationEnqueuedOut:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_allocation_allowed(event)
+    preflight = await _bus_preflight(db, event_id, payload.leg_id)
+    if not preflight["ready"]:
+        raise AppError(
+            "allocation_not_ready",
+            "; ".join(item["message"] for item in preflight["blockers"]),
+            status.HTTP_409_CONFLICT,
+        )
 
     run = AllocationRun(
-        event_id=event_id, type="bus", params_json={"leg_id": payload.leg_id},
+        event_id=event_id, type="bus",
+        params_json={"leg_id": payload.leg_id, "preset": payload.preset},
         status="running", created_by=user.id,
     )
     db.add(run)
@@ -234,7 +433,8 @@ async def run_bus_allocation_endpoint(
     await db.refresh(run)
 
     arq_job = await queue.enqueue_job(
-        "run_bus_allocation_task", job.id, run.id, event_id, payload.leg_id
+        "run_bus_allocation_task", job.id, run.id, event_id, payload.leg_id,
+        preset_weights("bus", payload.preset),
     )
     if arq_job is not None:
         job.arq_job_id = arq_job.job_id
@@ -270,9 +470,16 @@ async def adjust_bus_assignments(
         team_result = await db.execute(
             select(Registration.employee_id)
             .join(Employee, Employee.id == Registration.employee_id)
+            .join(
+                RegistrationTransportNeed,
+                RegistrationTransportNeed.registration_id == Registration.id,
+            )
             .where(
                 Registration.event_id == event_id,
                 Registration.status == "submitted",
+                Registration.is_participating.is_(True),
+                RegistrationTransportNeed.leg_id == target_bus.leg_id,
+                RegistrationTransportNeed.is_needed.is_(True),
                 Employee.team_id == payload.team_id,
             )
         )
@@ -288,10 +495,18 @@ async def adjust_bus_assignments(
     # a bogus/foreign id would hit the FK constraint on insert below and surface
     # as an unhandled 500 instead of a clear 400
     valid_result = await db.execute(
-        select(Registration.employee_id).where(
+        select(Registration.employee_id)
+        .join(
+            RegistrationTransportNeed,
+            RegistrationTransportNeed.registration_id == Registration.id,
+        )
+        .where(
             Registration.event_id == event_id,
             Registration.employee_id.in_(employee_ids),
             Registration.status == "submitted",
+            Registration.is_participating.is_(True),
+            RegistrationTransportNeed.leg_id == target_bus.leg_id,
+            RegistrationTransportNeed.is_needed.is_(True),
         )
     )
     valid_ids = {row[0] for row in valid_result.all()}
@@ -304,7 +519,7 @@ async def adjust_bus_assignments(
         )
     employee_ids = valid_ids
 
-    warnings = []
+    warnings: list[str] = []
     target_leg = await db.get(TransportLeg, target_bus.leg_id)
     if target_leg is not None:
         pickup_result = await db.execute(
@@ -339,14 +554,12 @@ async def adjust_bus_assignments(
             ):
                 incompatible_codes.append(code_by_employee.get(employee_id) or "?")
         if incompatible_codes:
-            if not payload.force:
-                raise AppError(
-                    "bus_incompatible",
-                    f"Xe {target_bus.code} không khớp điểm đón/giờ bay đã đăng ký của: "
-                    f"{', '.join(sorted(incompatible_codes))}",
-                    status.HTTP_409_CONFLICT,
-                )
-            warnings.append("bus_incompatible_forced")
+            raise AppError(
+                "bus_incompatible",
+                f"Xe {target_bus.code} không khớp điểm đón/giờ bay đã đăng ký của: "
+                f"{', '.join(sorted(incompatible_codes))}",
+                status.HTTP_409_CONFLICT,
+            )
 
     result = await db.execute(
         select(BusAssignment).where(
@@ -360,14 +573,12 @@ async def adjust_bus_assignments(
     would_be_count = len(current_on_target) + len(moving_in)
 
     if would_be_count > target_bus.capacity:
-        if not payload.force:
-            raise AppError(
-                "over_capacity",
-                f"Xe {target_bus.code} chỉ còn sức chứa {target_bus.capacity}, "
-                f"sau khi chuyển sẽ có {would_be_count} người",
-                status.HTTP_409_CONFLICT,
-            )
-        warnings.append("over_capacity_forced")
+        raise AppError(
+            "over_capacity",
+            f"Xe {target_bus.code} có {target_bus.capacity} chỗ, "
+            f"sau khi chuyển sẽ có {would_be_count} người",
+            status.HTTP_409_CONFLICT,
+        )
 
     for employee_id in employee_ids:
         result = await db.execute(

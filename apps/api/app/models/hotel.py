@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from uuid import uuid4
 
 from sqlalchemy import Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,9 +15,13 @@ RoomAssignmentSource = Enum(
 
 class Hotel(TimestampMixin, Base):
     __tablename__ = "hotels"
+    __table_args__ = (UniqueConstraint("event_id", "code", name="uq_hotel_event_code"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
+    code: Mapped[str] = mapped_column(
+        String(30), default=lambda: f"HTL-{uuid4().hex[:8].upper()}"
+    )
     name: Mapped[str] = mapped_column(String(200))
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     checkin_date: Mapped[date | None] = mapped_column(nullable=True)

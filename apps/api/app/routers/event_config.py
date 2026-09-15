@@ -3,8 +3,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 from app.core.deps import CurrentUser, DbSession, require_admin
+from app.core.errors import AppError
 from app.models.auth import User
 from app.models.event import PickupPoint, Shift, TransportLeg
+from app.models.organization import Site
 from app.schemas.event import (
     PickupPointCreate,
     PickupPointOut,
@@ -138,6 +140,8 @@ async def list_pickup_points(event_id: int, db: DbSession, _user: CurrentUser) -
 async def create_pickup_point(
     event_id: int, payload: PickupPointCreate, db: DbSession, user: AdminUser
 ) -> PickupPoint:
+    if payload.site_id is not None and await db.get(Site, payload.site_id) is None:
+        raise AppError("invalid_site", "Địa điểm làm việc không tồn tại", status.HTTP_400_BAD_REQUEST)
     point = await master_data.create(db, PickupPoint, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="pickup_point", entity_id=point.id,
@@ -153,6 +157,8 @@ async def update_pickup_point(
     event_id: int, point_id: int, payload: PickupPointUpdate, db: DbSession, user: AdminUser
 ) -> PickupPoint:
     point = await master_data.get_or_404(db, PickupPoint, point_id, event_id=event_id)
+    if payload.site_id is not None and await db.get(Site, payload.site_id) is None:
+        raise AppError("invalid_site", "Địa điểm làm việc không tồn tại", status.HTTP_400_BAD_REQUEST)
     before = PickupPointOut.model_validate(point).model_dump()
     await master_data.update(db, point, payload.model_dump(exclude_unset=True))
     await record_audit(

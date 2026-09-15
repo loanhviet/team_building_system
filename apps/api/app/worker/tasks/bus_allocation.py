@@ -10,7 +10,12 @@ logger = logging.getLogger("worker")
 
 
 async def run_bus_allocation_task(
-    ctx: dict, job_id: int, allocation_run_id: int, event_id: int, leg_id: int
+    ctx: dict,
+    job_id: int,
+    allocation_run_id: int,
+    event_id: int,
+    leg_id: int,
+    weights: dict[str, float] | None = None,
 ) -> None:
     async with AsyncSessionLocal() as db:
         job = await db.get(Job, job_id)
@@ -22,7 +27,7 @@ async def run_bus_allocation_task(
         await db.commit()
 
         try:
-            summary = await run_bus_allocation(db, event_id, leg_id, allocation_run_id)
+            summary = await run_bus_allocation(db, event_id, leg_id, allocation_run_id, weights)
             job.status = JobStatus.succeeded
             job.result_json = summary
         except Exception as exc:

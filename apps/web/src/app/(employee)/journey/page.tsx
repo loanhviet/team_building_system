@@ -32,6 +32,7 @@ import { useEmployeeEvent } from "@/lib/use-employee-event";
 import {
   buildJourneyStages,
   firstUpcomingAt,
+  galaTableLabel,
   isGalaSelectable,
   journeyGaps,
   journeyNext,
@@ -189,7 +190,7 @@ function JourneyCanvas({
   const outbound = journey.flights.find((f) => f.direction === "outbound") ?? journey.flights[0];
   const galaTable =
     journey.gala?.tables[0] != null
-      ? `Bàn ${journey.gala.tables[0].table_name ?? journey.gala.tables[0].table_code}`
+      ? galaTableLabel(journey.gala.tables[0].table_name, journey.gala.tables[0].table_code)
       : isGalaSelectable(journey)
         ? "Chưa chọn ghế"
         : journey.gala

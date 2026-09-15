@@ -2,18 +2,18 @@ from app.services.allocation.base import AllocationResult, Candidate, FlightSlot
 
 
 def _score(flight: FlightSlot, group: list[Candidate], weights: dict[str, float]) -> float:
-    same_shift = sum(1 for c in group if c.shift_id == flight.shift_id)
+    if not group:
+        return 0.0
+    same_shift = sum(1 for c in group if not _is_shift_mismatch(c, flight)) / len(group)
     team_id = group[0].team_id if group else None
-    team_together = (
-        sum(1 for tid in flight.assigned_team_ids if tid == team_id)
-        if team_id is not None
-        else 0
+    team_together = float(
+        team_id is not None and any(tid == team_id for tid in flight.assigned_team_ids)
     )
-    fill_bonus = weights["fill_rate"] * (flight.capacity - flight.remaining)
+    projected_fill = min(1.0, (len(flight.assigned) + len(group)) / max(1, flight.capacity))
     return (
         weights["same_shift"] * same_shift
         + weights["team_together"] * team_together
-        + fill_bonus
+        + weights["fill_rate"] * projected_fill
     )
 
 
@@ -61,16 +61,17 @@ class GreedyFlightStrategy:
             whole_fit = [
                 f for f in flights if f.remaining >= len(group) and _site_ok(f, team.site_id)
             ]
-            best_whole = max(whole_fit, key=lambda f: _score(f, group, weights)) if whole_fit else None
+            best_whole = max(
+                whole_fit, key=lambda f: (_score(f, group, weights), -f.flight_id)
+            ) if whole_fit else None
 
             force_split = False
             if best_whole is not None:
                 mismatch = sum(1 for c in group if _is_shift_mismatch(c, best_whole))
-                # scale-invariant: "mismatch people allowed" = split_penalty / same_shift
-                # (legacy 15/10 ≈ 1.5 people; mock 10/40 ≈ 0.25 → 1 mismatch splits)
                 same_shift_w = max(float(weights.get("same_shift") or 0), 1e-9)
-                threshold = float(weights.get("split_penalty") or 0) / same_shift_w
-                if mismatch > threshold:
+                split_w = max(float(weights.get("split_penalty") or 0), 0.0)
+                allowed_ratio = split_w / (same_shift_w + split_w)
+                if mismatch / max(1, len(group)) > allowed_ratio:
                     force_split = True
 
             if best_whole is not None and not force_split:
@@ -101,7 +102,9 @@ class GreedyFlightStrategy:
                         for c in leftover:
                             flagged[c.employee_id] = "no_slot"
                         break
-                    best = max(candidates, key=lambda f: _score(f, leftover, weights))
+                    best = max(
+                        candidates, key=lambda f: (_score(f, leftover, weights), -f.flight_id)
+                    )
                     take, leftover = leftover[: best.remaining], leftover[best.remaining :]
                     for c in take:
                         _place(best, c, assignments)

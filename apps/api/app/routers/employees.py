@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
-from app.core.security import hash_password
+from app.core.security import generate_temporary_password, hash_password
 from app.models.auth import User
 from app.models.enums import ImportBatchStatus, JobStatus, UserRole
 from app.models.organization import Employee, Site
@@ -31,6 +31,8 @@ from app.schemas.organization import (
 from app.schemas.system import ImportBatchOut, ImportEnqueuedOut
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.auth_service import revoke_all_refresh_tokens
+from app.services.importer.xlsx import read_xlsx
 from app.services.notification.email_service import dispatch_email, enqueue_email
 
 settings = get_settings()
@@ -209,8 +211,8 @@ async def download_employee_template(_user: AdminUser) -> StreamingResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "CBNV"
-    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone"])
-    ws.append(["NV999", "Nguyen Van A", "nva@company.vn", "MKT", "HN", "0901234567"])
+    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone", "position", "is_active"])
+    ws.append(["NV999", "Nguyen Van A", "nva@company.vn", "MKT", "HN", "0901234567", "Chuyên viên", 1])
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -273,7 +275,7 @@ async def create_employee(
     if not data.get("employee_code"):
         data["employee_code"] = await _next_employee_code(db)
     employee = await master_data.create(db, Employee, data)
-    initial = employee.employee_code or "ChangeMe1"
+    initial = generate_temporary_password()
     db.add(
         User(
             employee_id=employee.id,
@@ -298,6 +300,7 @@ async def create_employee(
                 "full_name": employee.full_name,
                 "email": employee.email,
                 "employee_code": employee.employee_code or "",
+                "temporary_password": initial,
                 "app_url": settings.app_base_url,
             },
             dedupe_key=f"account_welcome:{employee.id}",
@@ -314,7 +317,20 @@ async def update_employee(
 ) -> EmployeeOut:
     employee = await master_data.get_or_404(db, Employee, employee_id)
     before = _employee_out(employee).model_dump(mode="json")
-    await master_data.update(db, employee, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("email"):
+        data["email"] = data["email"].lower()
+    account = (
+        await db.execute(select(User).where(User.employee_id == employee_id))
+    ).scalar_one_or_none()
+    if account is not None:
+        if "email" in data:
+            account.email = data["email"]
+        if data.get("is_active") is not None:
+            account.is_active = data["is_active"]
+    await master_data.update(db, employee, data)
+    if account is not None and data.get("is_active") is False:
+        await revoke_all_refresh_tokens(db, account.id)
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="employee", entity_id=employee_id,
         before=before, after=_employee_out(employee).model_dump(mode="json"),
@@ -328,6 +344,12 @@ async def update_employee(
 async def deactivate_employee(employee_id: int, db: DbSession, user: AdminUser) -> None:
     employee = await master_data.get_or_404(db, Employee, employee_id)
     await master_data.soft_delete(employee)
+    account = (
+        await db.execute(select(User).where(User.employee_id == employee_id))
+    ).scalar_one_or_none()
+    if account is not None:
+        account.is_active = False
+        await revoke_all_refresh_tokens(db, account.id)
     await record_audit(
         db, actor_user_id=user.id, action="deactivate", entity_type="employee", entity_id=employee_id
     )
@@ -341,14 +363,15 @@ async def import_employees_excel(
     queue: Annotated[ArqRedis, Depends(get_queue)],
     file: UploadFile,
 ) -> ImportEnqueuedOut:
+    content = await read_xlsx(file)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    dest_path = UPLOAD_DIR / f"{uuid.uuid4().hex}_{file.filename}"
-    content = await file.read()
+    original_name = Path(file.filename or "employees.xlsx").name
+    dest_path = UPLOAD_DIR / f"{uuid.uuid4().hex}_{original_name}"
     dest_path.write_bytes(content)
 
     batch = ImportBatch(
         type="employees",
-        filename=file.filename or dest_path.name,
+        filename=original_name,
         storage_path=str(dest_path),
         status=ImportBatchStatus.queued,
         created_by=user.id,

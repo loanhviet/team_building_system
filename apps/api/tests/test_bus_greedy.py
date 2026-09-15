@@ -28,6 +28,18 @@ def test_prefers_bus_already_carrying_same_flight():
     assert result.assignments[1] == 1
 
 
+def test_nearly_full_unrelated_bus_does_not_dominate_same_flight():
+    same_flight = BusSlot(bus_id=1, capacity=20, assigned=[900], flight_ids_present={99})
+    unrelated_full = BusSlot(bus_id=2, capacity=20, assigned=list(range(19)))
+
+    result = allocate_buses(
+        [BusCandidate(employee_id=1, team_id=1, flight_id=99)],
+        [unrelated_full, same_flight],
+    )
+
+    assert result.assignments[1] == 1
+
+
 def test_overflow_candidates_are_flagged_no_slot():
     candidates = [BusCandidate(employee_id=i, team_id=1, flight_id=None) for i in range(5)]
     buses = [BusSlot(bus_id=1, capacity=3)]
@@ -98,11 +110,9 @@ def test_bus_after_flight_landing_matches_window():
     assert result.assignments[1] == 1
 
 
-def test_bus_compatible_permissive_on_missing_data():
-    # no bus depart_at set, or no flight time known yet — never blocks on
-    # incomplete data, only rejects a *known* mismatch
-    assert bus_compatible(1, None, 1, None, None, "before_flight")
-    assert bus_compatible(1, DAY.replace(hour=8), 1, None, None, "before_flight")
+def test_bus_compatible_blocks_missing_required_timing_data():
+    assert not bus_compatible(1, None, 1, None, None, "before_flight")
+    assert not bus_compatible(1, DAY.replace(hour=8), 1, None, None, "before_flight")
     # leg has no flight relationship at all (flight_timing=None) — never
     # blocked on timing regardless of what the raw times would say
-    assert bus_compatible(None, DAY.replace(hour=8), 1, DAY.replace(hour=9), None, None)
+    assert bus_compatible(1, DAY.replace(hour=8), 1, DAY.replace(hour=9), None, None)

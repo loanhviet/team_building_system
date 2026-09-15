@@ -1,16 +1,20 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Header, Response, status
+from arq import ArqRedis
+from fastapi import APIRouter, Cookie, Depends, Header, Response, status
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.errors import AppError
+from app.core.queue import get_queue
 from app.core.security import hash_password, verify_password
 from app.models.auth import User
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, UserOut
+from app.services.auth_rate_limit import check_login_rate
 from app.services.auth_service import (
     authenticate_user,
     issue_tokens,
+    revoke_all_refresh_tokens,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -58,8 +62,10 @@ async def login(
     payload: LoginRequest,
     response: Response,
     db: DbSession,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
     user_agent: str | None = Header(default=None),
 ) -> LoginResponse:
+    await check_login_rate(queue, payload.email)
     user = await authenticate_user(db, payload.email, payload.password)
     access_token, refresh_token = await issue_tokens(db, user, user_agent)
     await db.commit()
@@ -109,4 +115,5 @@ async def change_password(
         )
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False
+    await revoke_all_refresh_tokens(db, user.id)
     await db.commit()

@@ -98,7 +98,7 @@ DEFAULT_TEMPLATES = {
             "<p>BTC đã tạo tài khoản cổng nội bộ cho bạn.</p>"
             "<ul>"
             "<li>Email đăng nhập: {{ email }}</li>"
-            "<li>Mật khẩu tạm: mã nhân viên <b>{{ employee_code }}</b></li>"
+            "<li>Mật khẩu tạm: <b>{{ temporary_password }}</b></li>"
             "</ul>"
             "<p>Đổi mật khẩu ngay lần đăng nhập đầu.</p>"
             "<p><a href='{{ app_url }}/login'>Đăng nhập</a></p>"

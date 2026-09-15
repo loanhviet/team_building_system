@@ -1,7 +1,5 @@
-import io
 from typing import Annotated
 
-import openpyxl
 from fastapi import APIRouter, Depends, UploadFile, status
 from sqlalchemy import select
 
@@ -23,6 +21,7 @@ from app.schemas.hotel import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.importer.xlsx import load_xlsx, read_xlsx
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["hotels"])
@@ -37,7 +36,14 @@ async def list_hotels(event_id: int, db: DbSession, _user: AdminUser) -> list[Ho
 
 @router.post("/hotels", response_model=HotelOut, status_code=status.HTTP_201_CREATED)
 async def create_hotel(event_id: int, payload: HotelCreate, db: DbSession, user: AdminUser) -> Hotel:
-    hotel = await master_data.create(db, Hotel, payload.model_dump(), event_id=event_id)
+    data = payload.model_dump()
+    data["code"] = data["code"].upper()
+    exists = await db.execute(
+        select(Hotel.id).where(Hotel.event_id == event_id, Hotel.code == data["code"])
+    )
+    if exists.first() is not None:
+        raise AppError("hotel_code_exists", "Mã khách sạn đã tồn tại", status.HTTP_409_CONFLICT)
+    hotel = await master_data.create(db, Hotel, data, event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="hotel", entity_id=hotel.id,
         after=payload.model_dump(mode="json"), event_id=event_id,
@@ -53,7 +59,25 @@ async def update_hotel(
 ) -> Hotel:
     hotel = await master_data.get_or_404(db, Hotel, hotel_id, event_id=event_id)
     before = HotelOut.model_validate(hotel).model_dump(mode="json")
-    await master_data.update(db, hotel, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if "code" in data:
+        data["code"] = data["code"].upper()
+        exists = await db.execute(
+            select(Hotel.id).where(
+                Hotel.event_id == event_id,
+                Hotel.code == data["code"],
+                Hotel.id != hotel_id,
+            )
+        )
+        if exists.first() is not None:
+            raise AppError("hotel_code_exists", "Mã khách sạn đã tồn tại", status.HTTP_409_CONFLICT)
+    final_checkin = data.get("checkin_date", hotel.checkin_date)
+    final_checkout = data.get("checkout_date", hotel.checkout_date)
+    if final_checkin and final_checkout and final_checkout <= final_checkin:
+        raise AppError(
+            "invalid_hotel_dates", "Ngày trả phòng phải sau ngày nhận phòng", status.HTTP_400_BAD_REQUEST
+        )
+    await master_data.update(db, hotel, data)
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="hotel", entity_id=hotel_id,
         before=before, after=HotelOut.model_validate(hotel).model_dump(mode="json"),
@@ -172,6 +196,12 @@ async def create_room(
     event_id: int, hotel_id: int, payload: RoomCreate, db: DbSession, user: AdminUser
 ) -> RoomOut:
     await _get_hotel_or_404(db, event_id, hotel_id)
+    if payload.room_type_id is not None:
+        room_type = await db.get(RoomType, payload.room_type_id)
+        if room_type is None or room_type.hotel_id != hotel_id:
+            raise AppError(
+                "invalid_room_type", "Loại phòng không thuộc khách sạn này", status.HTTP_400_BAD_REQUEST
+            )
     room = Room(hotel_id=hotel_id, **payload.model_dump())
     db.add(room)
     await db.flush()
@@ -193,8 +223,28 @@ async def update_room(
 ) -> RoomOut:
     await _get_hotel_or_404(db, event_id, hotel_id)
     room = await master_data.get_or_404(db, Room, room_id)
+    if room.hotel_id != hotel_id:
+        raise AppError("not_found", "Room not found", status.HTTP_404_NOT_FOUND)
     before = {"room_number": room.room_number, "capacity": room.capacity}
-    await master_data.update(db, room, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("room_type_id") is not None:
+        room_type = await db.get(RoomType, data["room_type_id"])
+        if room_type is None or room_type.hotel_id != hotel_id:
+            raise AppError(
+                "invalid_room_type", "Loại phòng không thuộc khách sạn này", status.HTTP_400_BAD_REQUEST
+            )
+    occupied = (
+        await db.execute(
+            select(RoomAssignment.id).where(RoomAssignment.room_id == room.id)
+        )
+    ).scalars().all()
+    if data.get("capacity") is not None and data["capacity"] < len(occupied):
+        raise AppError(
+            "capacity_below_assigned",
+            f"Phòng đang có {len(occupied)} người, không thể giảm sức chứa thấp hơn",
+            status.HTTP_409_CONFLICT,
+        )
+    await master_data.update(db, room, data)
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="room", entity_id=room_id,
         before=before, after={"room_number": room.room_number, "capacity": room.capacity},
@@ -203,10 +253,10 @@ async def update_room(
     await db.commit()
     await db.refresh(room)
     result = await db.execute(select(RoomAssignment).where(RoomAssignment.room_id == room.id))
-    occupied = len(result.scalars().all())
+    occupied_count = len(result.scalars().all())
     return RoomOut(
         id=room.id, hotel_id=room.hotel_id, room_number=room.room_number,
-        room_type_id=room.room_type_id, capacity=room.capacity, note=room.note, occupied=occupied,
+        room_type_id=room.room_type_id, capacity=room.capacity, note=room.note, occupied=occupied_count,
     )
 
 
@@ -235,8 +285,8 @@ async def import_rooms(
 ) -> ImportResultOut:
     """room_number, capacity[, note] — small dataset, parsed synchronously."""
     await _get_hotel_or_404(db, event_id, hotel_id)
-    content = await file.read()
-    workbook = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    content = await read_xlsx(file)
+    workbook = load_xlsx(content)
     sheet = workbook.active
     rows_iter = sheet.iter_rows(values_only=True)
     header_row = next(rows_iter, None)

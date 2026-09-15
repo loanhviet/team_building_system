@@ -1,6 +1,4 @@
-"""Manual flight reassignment (BRD §5.5): capacity is re-validated on every
-adjust, over-capacity is refused unless the caller explicitly forces it, and
-the override is always logged with its reason (audit_service.record_audit)."""
+"""Manual flight reassignment keeps physical constraints hard and auditable."""
 
 from sqlalchemy import select
 
@@ -24,7 +22,7 @@ async def _add_second_registration(db_session, world):
     return second
 
 
-async def test_adjust_over_capacity_requires_force_then_succeeds(client, world, auth_headers, db_session):
+async def test_adjust_over_capacity_cannot_be_forced(client, world, auth_headers, db_session):
     second = await _add_second_registration(db_session, world)
     flight = Flight(event_id=world.event.id, flight_code="VN001", direction="outbound", capacity=1)
     db_session.add(flight)
@@ -47,17 +45,14 @@ async def test_adjust_over_capacity_requires_force_then_succeeds(client, world, 
         f"/api/events/{world.event.id}/flight-assignments/adjust",
         headers=auth_headers(world.organizer_user), json=payload,
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["moved"] == 2
-    assert "over_capacity_forced" in body["warnings"]
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "over_capacity"
 
     result = await db_session.execute(
         select(AuditLog).where(AuditLog.entity_type == "flight_assignment")
     )
     logs = result.scalars().all()
-    assert len(logs) == 2
-    assert all(log.reason == "ghi de vuot slot de test" for log in logs)
+    assert len(logs) == 0
 
 
 async def test_adjust_rejects_employee_not_registered_in_event(client, world, auth_headers, db_session):
@@ -74,7 +69,83 @@ async def test_adjust_rejects_employee_not_registered_in_event(client, world, au
     assert resp.json()["error"]["code"] == "invalid_employee_ids"
 
 
-async def test_adjust_rejects_wrong_site_then_succeeds_with_force(client, world, auth_headers, db_session):
+async def test_adjust_rejects_non_participant(client, world, auth_headers, db_session):
+    world.registration.is_participating = False
+    flight = Flight(
+        event_id=world.event.id, flight_code="VN-NO", direction="outbound", capacity=5
+    )
+    db_session.add(flight)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/events/{world.event.id}/flight-assignments/adjust",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_ids": [world.employee.id], "flight_id": flight.id, "reason": "test"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_employee_ids"
+
+
+async def test_shift_mismatch_requires_ack_and_stays_flagged(
+    client, world, auth_headers, db_session
+):
+    from app.models.event import Shift
+
+    other_shift = Shift(event_id=world.event.id, code="C2", name="Ca 2", sort_order=2)
+    db_session.add(other_shift)
+    await db_session.flush()
+    flight = Flight(
+        event_id=world.event.id,
+        flight_code="VN-C2",
+        direction="outbound",
+        shift_id=other_shift.id,
+        site_id=world.site.id,
+        capacity=5,
+    )
+    db_session.add(flight)
+    await db_session.commit()
+    payload = {
+        "employee_ids": [world.employee.id],
+        "flight_id": flight.id,
+        "reason": "Điều chỉnh theo yêu cầu",
+    }
+
+    resp = await client.post(
+        f"/api/events/{world.event.id}/flight-assignments/adjust",
+        headers=auth_headers(world.organizer_user),
+        json=payload,
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "soft_warning_required"
+
+    resp = await client.post(
+        f"/api/events/{world.event.id}/flight-assignments/adjust",
+        headers=auth_headers(world.organizer_user),
+        json={**payload, "accept_soft_warnings": True},
+    )
+    assert resp.status_code == 200
+    assignment = (
+        await db_session.execute(
+            select(FlightAssignment).where(
+                FlightAssignment.employee_id == world.employee.id
+            )
+        )
+    ).scalar_one()
+    assert assignment.is_flagged is True
+    assert assignment.flag_reason == "shift_mismatch"
+
+
+async def test_flight_preflight_reports_missing_resources(client, world, auth_headers):
+    resp = await client.get(
+        f"/api/events/{world.event.id}/allocations/flight/preflight?direction=outbound",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ready"] is False
+    assert any(item["code"] == "no_flights" for item in resp.json()["blockers"])
+
+
+async def test_adjust_wrong_site_cannot_be_forced(client, world, auth_headers, db_session):
     hcm_site = Site(code="HCM", name="Ho Chi Minh")
     db_session.add(hcm_site)
     await db_session.flush()
@@ -101,8 +172,8 @@ async def test_adjust_rejects_wrong_site_then_succeeds_with_force(client, world,
         f"/api/events/{world.event.id}/flight-assignments/adjust",
         headers=auth_headers(world.organizer_user), json=payload,
     )
-    assert resp.status_code == 200
-    assert "site_mismatch_forced" in resp.json()["warnings"]
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "site_mismatch"
 
 
 async def test_unlock_clears_is_locked(client, world, auth_headers, db_session):
@@ -144,8 +215,7 @@ async def test_update_flight_rejects_capacity_below_assigned(client, world, auth
         f"/api/events/{world.event.id}/flights/{flight.id}",
         headers=auth_headers(world.organizer_user), json={"capacity": 0},
     )
-    assert resp.status_code == 409
-    assert resp.json()["error"]["code"] == "capacity_below_assigned"
+    assert resp.status_code == 422
 
 
 async def test_update_flight_after_publish_emails_passengers(client, world, auth_headers, db_session):

@@ -67,6 +67,20 @@ def test_prefers_flight_matching_shift_preference():
     assert set(result.assignments.values()) == {10}
 
 
+def test_nearly_full_wrong_shift_never_outweighs_matching_shift():
+    team = make_team(1, 1, shift_id=1)
+    matching = FlightSlot(flight_id=10, shift_id=1, capacity=20)
+    wrong_but_full = FlightSlot(
+        flight_id=11, shift_id=2, capacity=20, assigned=list(range(19))
+    )
+
+    result = GreedyFlightStrategy().allocate(
+        [team], [wrong_but_full, matching], DEFAULT_WEIGHTS
+    )
+
+    assert result.assignments[100] == 10
+
+
 def test_locked_assignment_capacity_is_respected_by_caller():
     # The strategy itself doesn't know about "locked" rows — callers (the
     # runner) pre-populate FlightSlot.assigned before invoking allocate().

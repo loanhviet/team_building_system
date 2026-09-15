@@ -17,12 +17,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, ApiError } from "@/lib/api";
 
 export type FieldDef = {
   name: string;
   label: string;
   required?: boolean;
+  options?: { value: string; label: string }[];
 };
 
 type EntityRecord = Record<string, unknown> & { id: number; is_active: boolean };
@@ -60,7 +62,12 @@ export function EntityCrudTable({
   };
   const openEdit = (entity: EntityRecord) => {
     setEditingEntity(entity);
-    setValues(Object.fromEntries(fields.map((f) => [f.name, String(entity[f.name] ?? "")])));
+    setValues(Object.fromEntries(fields.map((f) => [
+      f.name,
+      entity[f.name] == null && f.options?.some((option) => option.value === "none")
+        ? "none"
+        : String(entity[f.name] ?? ""),
+    ])));
     setOpen(true);
   };
 
@@ -68,7 +75,7 @@ export function EntityCrudTable({
     mutationFn: () => {
       const payload: Record<string, unknown> = {};
       for (const f of fields) {
-        if (values[f.name]) payload[f.name] = values[f.name];
+        if (values[f.name]) payload[f.name] = values[f.name] === "none" ? null : values[f.name];
       }
       return editingEntity
         ? apiFetch(`${basePath}/${editingEntity.id}`, { method: "PATCH", body: JSON.stringify(payload) })
@@ -187,11 +194,18 @@ export function EntityCrudTable({
                   {fields.map((f) => (
                     <div key={f.name} className="flex flex-col gap-2">
                       <Label htmlFor={f.name}>{f.label}</Label>
-                      <Input
-                        id={f.name}
-                        value={values[f.name] ?? ""}
-                        onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
-                      />
+                      {f.options ? (
+                        <Select value={values[f.name] ?? ""} onValueChange={(value) => setValues((current) => ({ ...current, [f.name]: value ?? "" }))}>
+                          <SelectTrigger id={f.name}><SelectValue placeholder={`Chọn ${f.label.toLowerCase()}`} /></SelectTrigger>
+                          <SelectContent>{f.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          id={f.name}
+                          value={values[f.name] ?? ""}
+                          onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>

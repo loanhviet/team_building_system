@@ -4,7 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
+import {
+  AllocationKpiStrip,
+  AllocationPresetSelect,
+  AllocationReadiness,
+} from "@/components/domain/allocation-workbench";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
@@ -37,6 +41,8 @@ import { formatTime } from "@/lib/format";
 import { flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
+  AllocationPreflight,
+  AllocationPreset,
   AllocationRun,
   Bus,
   BusAssignment,
@@ -64,6 +70,7 @@ const EMPTY_BUS = {
 export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const [legId, setLegId] = useState<number | null>(null);
+  const [preset, setPreset] = useState<AllocationPreset>("balanced");
   const [focusBusId, setFocusBusId] = useState<number | "all">("all");
   const [busDialogOpen, setBusDialogOpen] = useState(false);
   const [editingBus, setEditingBus] = useState<Bus | null>(null);
@@ -111,6 +118,14 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
     queryKey: ["events", eventId, "bus-assignments", currentLegId],
     queryFn: () =>
       apiFetch<BusAssignment[]>(`/api/events/${eventId}/bus-assignments?leg_id=${currentLegId}`),
+    enabled: !!currentLegId,
+  });
+  const { data: preflight } = useQuery({
+    queryKey: ["events", eventId, "bus-preflight", currentLegId, buses?.length],
+    queryFn: () =>
+      apiFetch<AllocationPreflight>(
+        `/api/events/${eventId}/allocations/bus/preflight?leg_id=${currentLegId}`,
+      ),
     enabled: !!currentLegId,
   });
 
@@ -191,17 +206,18 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
     mutationFn: () =>
       apiFetch<AllocationEnqueued>(`/api/events/${eventId}/allocations/bus`, {
         method: "POST",
-        body: JSON.stringify({ leg_id: currentLegId }),
+        body: JSON.stringify({ leg_id: currentLegId, preset }),
       }),
     onSuccess: (data) => {
       toast.info("Đang chạy phân xe...");
       setActiveJobId(data.job_id);
+      setFilterTab("flag");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
   const adjustMutation = useMutation({
-    mutationFn: ({ busId, force }: { busId: number; force: boolean }) =>
+    mutationFn: ({ busId }: { busId: number }) =>
       apiFetch(`/api/events/${eventId}/bus-assignments/adjust`, {
         method: "POST",
         body: JSON.stringify({
@@ -209,7 +225,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           team_id: moveTeamId ? Number(moveTeamId) : null,
           bus_id: busId,
           reason: adjustReason,
-          force,
         }),
       }),
     onSuccess: () => {
@@ -264,6 +279,18 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const flagCount = (assignments ?? []).filter((a) => a.is_flagged).length;
   const lockedCount = (assignments ?? []).filter((a) => a.is_locked).length;
   const unassignedCount = (assignments ?? []).filter((a) => a.bus_id == null).length;
+  const canReceiveSelection = (bus: Bus) => {
+    const remaining = bus.capacity - (assignments ?? []).filter((a) => a.bus_id === bus.id).length;
+    if (selected.size > remaining) return false;
+    const pickupName = pickupPoints?.find((point) => point.id === bus.pickup_point_id)?.name;
+    return (assignments ?? [])
+      .filter((assignment) => selected.has(assignment.employee_id))
+      .every(
+        (assignment) =>
+          !assignment.requested_pickup_point_name ||
+          assignment.requested_pickup_point_name === pickupName,
+      );
+  };
 
   const visibleAssignments = (assignments ?? []).filter((a) => {
     if (focusBusId !== "all" && a.bus_id !== focusBusId) return false;
@@ -381,7 +408,9 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
         <div>
           <h2 className="font-display text-lg font-semibold">Phân xe</h2>
           <p className="text-sm text-muted-foreground">Chọn chặng, chỉ định trưởng xe, rồi chạy phân bổ.</p>
-          <AllocationWeightsHint eventId={eventId} kind="bus" />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Điểm đón, giờ bay và sức chứa luôn là ràng buộc cứng.
+          </p>
         </div>
         <Select
           value={currentLegId ? String(currentLegId) : undefined}
@@ -403,7 +432,8 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           </SelectContent>
         </Select>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <AllocationPresetSelect value={preset} onChange={setPreset} />
           <Dialog open={busDialogOpen} onOpenChange={setBusDialogOpen}>
             <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })} onClick={openCreateBus}>
               Thêm xe
@@ -495,7 +525,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             </DialogContent>
           </Dialog>
           <Button
-            disabled={!currentLegId || runAllocationMutation.isPending || job?.status === "running"}
+            disabled={!currentLegId || !preflight?.ready || runAllocationMutation.isPending || job?.status === "running"}
             onClick={() => runAllocationMutation.mutate()}
           >
             Chạy phân xe tự động
@@ -552,7 +582,19 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <AllocationReadiness data={preflight} />
+
+      <AllocationKpiStrip
+        items={[
+          { label: "Cần xe", value: preflight?.eligible ?? "—" },
+          { label: "Đã phân", value: (assignments ?? []).filter((a) => a.bus_id).length },
+          { label: "Chưa phân", value: unassignedCount, tone: "danger" },
+          { label: "Cần xử lý", value: flagCount, tone: flagCount ? "warning" : "default" },
+          { label: "Tổng chỗ", value: preflight?.capacity ?? "—" },
+        ]}
+      />
+
+      <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1 xl:grid-cols-4">
         <ResourceCard
           title="Tất cả"
           subtitle={`${(assignments ?? []).length} người`}
@@ -670,8 +712,8 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             </SelectTrigger>
             <SelectContent>
               {buses?.map((b) => (
-                <SelectItem key={b.id} value={String(b.id)}>
-                  {b.code}
+                <SelectItem key={b.id} value={String(b.id)} disabled={selected.size > 0 && !canReceiveSelection(b)}>
+                  {b.code} · còn {b.capacity - (assignments ?? []).filter((a) => a.bus_id === b.id).length}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -694,6 +736,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           rows={visibleAssignments}
           rowKey={(a) => a.employee_id}
           emptyMessage="Chưa có nhu cầu xe cho chặng này — chạy phân bổ hoặc chọn “Tất cả”."
+          pageSize={50}
         />
       </div>
 
@@ -706,8 +749,8 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             </SelectTrigger>
             <SelectContent>
               {buses?.map((b) => (
-                <SelectItem key={b.id} value={String(b.id)}>
-                  {b.code}
+                <SelectItem key={b.id} value={String(b.id)} disabled={!canReceiveSelection(b)}>
+                  {b.code} · còn {b.capacity - (assignments ?? []).filter((a) => a.bus_id === b.id).length}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -752,11 +795,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             <div className="flex flex-col gap-1.5">
               <Label>Lý do</Label>
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
-              {overCapacityMsg && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
-                <p className="text-xs text-destructive">
-                  Ghi đè cảnh báo cần lý do cụ thể, không dùng lý do mặc định.
-                </p>
-              )}
             </div>
             {overCapacityMsg && <p className="text-sm text-red-600">{overCapacityMsg}</p>}
           </div>
@@ -764,21 +802,13 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             {!overCapacityMsg ? (
               <Button
                 disabled={!adjustReason.trim() || adjustMutation.isPending}
-                onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget), force: false })}
+                onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget) })}
               >
                 Xác nhận
               </Button>
             ) : (
-              <Button
-                variant="destructive"
-                disabled={
-                  !adjustReason.trim() ||
-                  adjustReason.trim() === DEFAULT_ADJUST_REASON ||
-                  adjustMutation.isPending
-                }
-                onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget), force: true })}
-              >
-                Vẫn ghi đè cảnh báo
+              <Button variant="outline" onClick={() => setAdjustOpen(false)}>
+                Đóng để sửa dữ liệu
               </Button>
             )}
           </DialogFooter>

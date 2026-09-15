@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +34,15 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""
     dashscope_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     dashscope_model: str = "qwen3-max-preview"
+
+    @model_validator(mode="after")
+    def validate_production_security(self):
+        if self.app_env.lower() in {"prod", "production"}:
+            if self.jwt_secret == "change-me-in-prod" or len(self.jwt_secret) < 32:
+                raise ValueError("Production requires JWT_SECRET with at least 32 characters")
+            if not self.app_base_url.startswith("https://"):
+                raise ValueError("Production APP_BASE_URL must use HTTPS")
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

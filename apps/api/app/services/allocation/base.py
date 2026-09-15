@@ -17,6 +17,33 @@ DEFAULT_BUS_WEIGHTS = {
     "fill_rate": 20,
 }
 
+FLIGHT_PRESETS: dict[str, dict[str, float]] = {
+    "balanced": DEFAULT_WEIGHTS,
+    "shift_first": {
+        "same_shift": 60,
+        "team_together": 20,
+        "fill_rate": 10,
+        "split_penalty": 10,
+    },
+    "team_first": {
+        "same_shift": 30,
+        "team_together": 45,
+        "fill_rate": 10,
+        "split_penalty": 15,
+    },
+}
+
+BUS_PRESETS: dict[str, dict[str, float]] = {
+    "balanced": DEFAULT_BUS_WEIGHTS,
+    "shift_first": {"same_flight": 65, "team_together": 20, "fill_rate": 15},
+    "team_first": {"same_flight": 30, "team_together": 50, "fill_rate": 20},
+}
+
+
+def preset_weights(kind: str, preset: str) -> dict[str, float]:
+    presets = FLIGHT_PRESETS if kind == "flight" else BUS_PRESETS
+    return dict(presets.get(preset, presets["balanced"]))
+
 
 def merge_weights(stored: dict | None, defaults: dict[str, float]) -> dict[str, float]:
     raw = stored if isinstance(stored, dict) else {}

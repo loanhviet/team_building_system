@@ -1,7 +1,7 @@
 from fastapi import status
 
 from app.core.errors import AppError
-from app.core.security import hash_password
+from app.core.security import generate_temporary_password, hash_password
 from app.models.auth import User
 from app.models.enums import UserRole
 
@@ -22,8 +22,7 @@ def apply_user_update(actor: User, target: User, *, role: str | None, is_active:
 
 
 def reset_user_password(target: User) -> str:
-    code = target.employee.employee_code if target.employee and target.employee.employee_code else None
-    temporary = code or "ChangeMe1"
+    temporary = generate_temporary_password()
     target.password_hash = hash_password(temporary)
     target.must_change_password = True
     return temporary

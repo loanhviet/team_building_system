@@ -28,6 +28,8 @@ export function ConfirmDialog({
   confirmLabel = "Xác nhận",
   cancelLabel = "Huỷ",
   destructive = false,
+  confirmDisabled = false,
+  onOpen,
   onConfirm,
 }: {
   trigger: ReactElement;
@@ -36,13 +38,21 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
+  confirmDisabled?: boolean;
+  onOpen?: () => void | Promise<void>;
   onConfirm: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) void onOpen?.();
+      }}
+    >
       <AlertDialogTrigger render={trigger} />
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -53,7 +63,7 @@ export function ConfirmDialog({
           <AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             onClick={async () => {
               setPending(true);
               try {

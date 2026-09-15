@@ -42,6 +42,11 @@ def generate_refresh_token() -> str:
     return secrets.token_urlsafe(48)
 
 
+def generate_temporary_password() -> str:
+    """Cryptographically random, URL-safe and easy to copy from an email/dialog."""
+    return f"Tb!{secrets.token_urlsafe(12)}"
+
+
 def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 

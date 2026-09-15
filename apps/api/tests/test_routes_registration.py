@@ -3,9 +3,11 @@ HTTP boundary: terms gate on submit, and edits blocked once the event leaves
 registration_open (or its own record was cancelled)."""
 
 import io
+from datetime import timedelta
 
 from openpyxl import load_workbook
 
+from app.core.time import utcnow
 from app.models.enums import EventStatus
 from app.models.registration import Registration
 from tests.conftest import make_employee
@@ -42,6 +44,20 @@ async def test_edit_blocked_after_registration_closed(client, world, auth_header
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "registration_closed"
+
+
+async def test_edit_blocked_before_registration_open_time(
+    client, world, auth_headers, db_session
+):
+    world.event.registration_open_at = utcnow() + timedelta(hours=1)
+    await db_session.commit()
+    resp = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"wish_note": "too early"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "registration_not_open"
 
 
 async def test_latest_registration_survives_registration_closed(client, world, auth_headers, db_session):

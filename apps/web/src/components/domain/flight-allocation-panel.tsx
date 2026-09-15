@@ -4,7 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
+import {
+  AllocationKpiStrip,
+  AllocationPresetSelect,
+  AllocationReadiness,
+} from "@/components/domain/allocation-workbench";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
@@ -37,6 +41,8 @@ import { formatTime } from "@/lib/format";
 import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
+  AllocationPreflight,
+  AllocationPreset,
   AllocationRun,
   Flight,
   FlightAssignment,
@@ -65,6 +71,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
+  const [preset, setPreset] = useState<AllocationPreset>("balanced");
   const [focusFlightId, setFocusFlightId] = useState<number | "all">("all");
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -78,6 +85,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustReason, setAdjustReason] = useState(DEFAULT_ADJUST_REASON);
   const [overCapacityMsg, setOverCapacityMsg] = useState<string | null>(null);
+  const [softWarning, setSoftWarning] = useState(false);
   const [importErrors, setImportErrors] = useState<{ row: number; error: string }[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -105,6 +113,13 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     queryKey: ["events", eventId, "flight-assignments", direction],
     queryFn: () =>
       apiFetch<FlightAssignment[]>(`/api/events/${eventId}/flight-assignments?direction=${direction}`),
+  });
+  const { data: preflight } = useQuery({
+    queryKey: ["events", eventId, "flight-preflight", direction, flights?.length],
+    queryFn: () =>
+      apiFetch<AllocationPreflight>(
+        `/api/events/${eventId}/allocations/flight/preflight?direction=${direction}`,
+      ),
   });
   const { data: job } = useQuery({
     queryKey: ["jobs", activeJobId],
@@ -134,11 +149,12 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     mutationFn: () =>
       apiFetch<AllocationEnqueued>(`/api/events/${eventId}/allocations/flight`, {
         method: "POST",
-        body: JSON.stringify({ direction }),
+        body: JSON.stringify({ direction, preset }),
       }),
     onSuccess: (data) => {
       toast.info("Đang chạy phân bổ...");
       setActiveJobId(data.job_id);
+      setFilterTab("flag");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -178,7 +194,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   });
 
   const adjustMutation = useMutation({
-    mutationFn: ({ flightId, force }: { flightId: number; force: boolean }) =>
+    mutationFn: ({ flightId, acceptSoftWarnings }: { flightId: number; acceptSoftWarnings: boolean }) =>
       apiFetch(`/api/events/${eventId}/flight-assignments/adjust`, {
         method: "POST",
         body: JSON.stringify({
@@ -186,7 +202,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           team_id: moveTeamId ? Number(moveTeamId) : null,
           flight_id: flightId,
           reason: adjustReason,
-          force,
+          accept_soft_warnings: acceptSoftWarnings,
         }),
       }),
     onSuccess: () => {
@@ -196,10 +212,17 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       setMoveTeamId("");
       setAdjustOpen(false);
       setOverCapacityMsg(null);
+      setSoftWarning(false);
       refetchAssignments();
     },
     onError: (err) => {
+      if (err instanceof ApiError && err.code === "soft_warning_required") {
+        setSoftWarning(true);
+        setOverCapacityMsg(err.message);
+        return;
+      }
       if (err instanceof ApiError && (err.code === "over_capacity" || err.code === "site_mismatch")) {
+        setSoftWarning(false);
         setOverCapacityMsg(err.message);
         return;
       }
@@ -274,6 +297,16 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const assignedCount = (flightId: number) =>
     (assignments ?? []).filter((a) => a.flight_id === flightId).length;
   const remainingCount = (f: Flight) => f.capacity - assignedCount(f.id);
+  const canReceiveSelection = (flight: Flight) =>
+    remainingCount(flight) >= selected.size &&
+    (assignments ?? [])
+      .filter((assignment) => selected.has(assignment.employee_id))
+      .every(
+        (assignment) =>
+          flight.site_id == null ||
+          assignment.employee_site_id == null ||
+          assignment.employee_site_id === flight.site_id,
+      );
 
   const splitTeamNames = new Set(
     (summary?.split_team_ids ?? [])
@@ -376,17 +409,14 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           !!a.requested_shift_name && !!assignedShift && a.requested_shift_name !== assignedShift.name;
         return (
           <div className="flex flex-wrap items-center gap-1.5">
-            {a.is_flagged ? (
+            {mismatch ? (
+              <StatusChip kind="flag" label="Lệch ca đăng ký" />
+            ) : a.is_flagged ? (
               <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} />
             ) : assignedFlight ? (
               <StatusChip kind="confirmed" label={assignedFlight.shift_id ? "Đúng ca" : "Đã xếp"} />
             ) : (
               <span className="text-muted-foreground">—</span>
-            )}
-            {mismatch && (
-              <span className="text-xs font-medium text-[var(--ember)]">
-                Đăng ký: {a.requested_shift_name}
-              </span>
             )}
             {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
           </div>
@@ -417,7 +447,9 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
         <div>
           <h2 className="font-display text-lg font-semibold">Phân chuyến bay</h2>
           <p className="text-sm text-muted-foreground">Chọn chiều, xem slot, rồi chạy phân bổ hoặc kéo người sang chuyến khác.</p>
-          <AllocationWeightsHint eventId={eventId} kind="flight" />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Sức chứa và địa điểm phục vụ luôn là ràng buộc cứng.
+          </p>
         </div>
         <Segmented
           ariaLabel="Chiều bay"
@@ -433,11 +465,16 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           ]}
         />
         </div>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/40 p-2">
+          <span className="text-xs font-medium text-muted-foreground">Chiến lược</span>
+          <AllocationPresetSelect value={preset} onChange={setPreset} />
+          <div className="ml-auto"><AllocationReadiness data={preflight} /></div>
+        </div>
         <div className="flex flex-wrap gap-2">
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -590,7 +627,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           </Dialog>
           <Button
             onClick={() => runAllocationMutation.mutate()}
-            disabled={runAllocationMutation.isPending || job?.status === "running"}
+            disabled={!preflight?.ready || runAllocationMutation.isPending || job?.status === "running"}
           >
             Chạy phân bổ tự động
           </Button>
@@ -615,8 +652,18 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
         </div>
       )}
 
+      <AllocationKpiStrip
+        items={[
+          { label: "Đủ điều kiện", value: preflight?.eligible ?? "—" },
+          { label: "Đã phân", value: (assignments ?? []).filter((a) => a.flight_id).length },
+          { label: "Chưa phân", value: (assignments ?? []).filter((a) => !a.flight_id).length, tone: "danger" },
+          { label: "Cần xử lý", value: flagCount, tone: flagCount ? "warning" : "default" },
+          { label: "Tổng chỗ", value: preflight?.capacity ?? "—" },
+        ]}
+      />
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr] lg:items-start">
-        <div className="flex gap-2 overflow-x-auto pb-1 lg:sticky lg:top-4 lg:flex-col lg:overflow-visible lg:pb-0">
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:flex-col lg:overflow-y-auto lg:pb-0 lg:pr-1">
           <ResourceCard
             title="Tất cả"
             subtitle={`${(assignments ?? []).length} người`}
@@ -739,7 +786,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                 {flights
                   ?.filter((f) => f.direction === direction)
                   .map((f) => (
-                    <SelectItem key={f.id} value={String(f.id)}>
+                    <SelectItem key={f.id} value={String(f.id)} disabled={selected.size > 0 && !canReceiveSelection(f)}>
                       {f.flight_code} · còn {remainingCount(f)}
                     </SelectItem>
                   ))}
@@ -751,6 +798,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               onClick={() => {
                 setSelected(new Set());
                 setOverCapacityMsg(null);
+                setSoftWarning(false);
                 setAdjustOpen(true);
               }}
             >
@@ -764,6 +812,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             rowKey={(a) => a.employee_id}
             isLoading={assignmentsLoading}
             emptyMessage="Chưa có người trên chuyến này — chạy phân bổ hoặc chọn “Tất cả”."
+            pageSize={50}
           />
         </div>
       </div>
@@ -779,7 +828,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               {flights
                 ?.filter((f) => f.direction === direction)
                 .map((f) => (
-                  <SelectItem key={f.id} value={String(f.id)}>
+                  <SelectItem key={f.id} value={String(f.id)} disabled={!canReceiveSelection(f)}>
                     {f.flight_code} · còn {remainingCount(f)}
                   </SelectItem>
                 ))}
@@ -791,6 +840,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             onClick={() => {
               setMoveTeamId("");
               setOverCapacityMsg(null);
+              setSoftWarning(false);
               setAdjustOpen(true);
             }}
           >
@@ -825,7 +875,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             <div className="flex flex-col gap-1.5">
               <Label>Lý do</Label>
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
-              {overCapacityMsg && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
+              {softWarning && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
                 <p className="text-xs text-destructive">
                   Ghi đè cảnh báo cần lý do cụ thể, không dùng lý do mặc định.
                 </p>
@@ -837,21 +887,24 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             {!overCapacityMsg ? (
               <Button
                 disabled={!adjustReason.trim() || adjustMutation.isPending}
-                onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), force: false })}
+                onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), acceptSoftWarnings: false })}
               >
                 Xác nhận
               </Button>
-            ) : (
+            ) : softWarning ? (
               <Button
-                variant="destructive"
                 disabled={
                   !adjustReason.trim() ||
                   adjustReason.trim() === DEFAULT_ADJUST_REASON ||
                   adjustMutation.isPending
                 }
-                onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), force: true })}
+                onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), acceptSoftWarnings: true })}
               >
-                Vẫn ghi đè cảnh báo
+                Xác nhận lệch ca
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => setAdjustOpen(false)}>
+                Đóng để sửa dữ liệu
               </Button>
             )}
           </DialogFooter>

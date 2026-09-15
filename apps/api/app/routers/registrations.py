@@ -151,13 +151,21 @@ async def update_my_registration(
                 )
         if pickup_ids:
             result = await db.execute(
-                select(PickupPoint.id).where(
+                select(PickupPoint.id, PickupPoint.site_id).where(
                     PickupPoint.event_id == event_id, PickupPoint.id.in_(pickup_ids)
                 )
             )
-            if {row[0] for row in result.all()} != pickup_ids:
+            pickup_rows = result.all()
+            if {row[0] for row in pickup_rows} != pickup_ids:
                 raise AppError(
                     "invalid_pickup_point", "Điểm đón không thuộc sự kiện này",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            wrong_site = [point_id for point_id, site_id in pickup_rows if site_id is not None and site_id != employee.site_id]
+            if wrong_site:
+                raise AppError(
+                    "pickup_site_mismatch",
+                    "Điểm đón không phục vụ địa điểm làm việc của bạn",
                     status.HTTP_400_BAD_REQUEST,
                 )
         await replace_transport_needs(

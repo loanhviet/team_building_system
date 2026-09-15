@@ -1,34 +1,47 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class FlightCreate(BaseModel):
-    flight_code: str
+    flight_code: str = Field(min_length=1, max_length=50)
     airline: str | None = None
-    direction: str
+    direction: Literal["outbound", "inbound"]
     shift_id: int | None = None
     site_id: int | None = None
     depart_at: datetime | None = None
     arrive_at: datetime | None = None
     origin: str | None = None
     destination: str | None = None
-    capacity: int = 0
+    capacity: int = Field(default=1, ge=1)
     note: str | None = None
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        if self.depart_at and self.arrive_at and self.arrive_at <= self.depart_at:
+            raise ValueError("arrive_at phải sau depart_at")
+        return self
 
 
 class FlightUpdate(BaseModel):
     flight_code: str | None = None
     airline: str | None = None
-    direction: str | None = None
+    direction: Literal["outbound", "inbound"] | None = None
     shift_id: int | None = None
     site_id: int | None = None
     depart_at: datetime | None = None
     arrive_at: datetime | None = None
     origin: str | None = None
     destination: str | None = None
-    capacity: int | None = None
+    capacity: int | None = Field(default=None, ge=1)
     note: str | None = None
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        if self.depart_at and self.arrive_at and self.arrive_at <= self.depart_at:
+            raise ValueError("arrive_at phải sau depart_at")
+        return self
 
 
 class FlightOut(BaseModel):
@@ -61,6 +74,7 @@ class FlightAssignmentOut(BaseModel):
     employee_code: str | None
     full_name: str
     team_name: str | None
+    employee_site_id: int | None = None
     # the shift the employee registered for (their "nguyện vọng") -- shown
     # next to the flight they actually got so BTC can see a shift_mismatch
     # flag's requested-vs-actual at a glance instead of digging per row
@@ -68,8 +82,8 @@ class FlightAssignmentOut(BaseModel):
 
 
 class AllocationRequest(BaseModel):
-    direction: str
-    weights: dict[str, float] | None = None
+    direction: Literal["outbound", "inbound"]
+    preset: Literal["balanced", "shift_first", "team_first"] = "balanced"
 
 
 class AllocationRunOut(BaseModel):
@@ -91,11 +105,11 @@ class AllocationEnqueuedOut(BaseModel):
 
 
 class AdjustAssignmentRequest(BaseModel):
-    employee_ids: list[int] = []
+    employee_ids: list[int] = Field(default_factory=list)
     team_id: int | None = None  # move every registered member of this team, in addition to employee_ids
     flight_id: int
-    reason: str
-    force: bool = False
+    reason: str = Field(min_length=3, max_length=500)
+    accept_soft_warnings: bool = False
 
 
 class UnlockAssignmentRequest(BaseModel):

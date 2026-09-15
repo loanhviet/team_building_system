@@ -15,7 +15,11 @@ from app.services.allocation.bus_greedy import BusCandidate, BusSlot, allocate_b
 
 
 async def run_bus_allocation(
-    db: AsyncSession, event_id: int, leg_id: int, allocation_run_id: int
+    db: AsyncSession,
+    event_id: int,
+    leg_id: int,
+    allocation_run_id: int,
+    requested_weights: dict[str, float] | None = None,
 ) -> dict:
     leg = await db.get(TransportLeg, leg_id)
 
@@ -58,7 +62,7 @@ async def run_bus_allocation(
     # a leg that's supposed to feed/follow a specific flight can't be sanely
     # allocated before that flight's own allocation has run — every bus would
     # just fall through as "no flight timing to compare against"
-    if leg is not None and leg.flight_timing and not flight_by_employee:
+    if leg is not None and leg.flight_timing and rows and not flight_by_employee:
         raise AppError(
             "flight_allocation_required",
             f"Chặng '{leg.name}' cần đối chiếu giờ bay — hãy chạy phân bổ chuyến bay chiều "
@@ -107,7 +111,7 @@ async def run_bus_allocation(
 
     from app.services.event_service import get_setting
 
-    raw = await get_setting(db, event_id, "bus_allocation_weights", {})
+    raw = requested_weights or await get_setting(db, event_id, "bus_allocation_weights", {})
     weights = merge_weights(raw if isinstance(raw, dict) else {}, DEFAULT_BUS_WEIGHTS)
     flight_timing = leg.flight_timing if leg is not None else None
     outcome = allocate_buses(candidates, list(slots.values()), weights, flight_timing)

@@ -1,7 +1,6 @@
 import io
 from typing import Annotated
 
-import openpyxl
 from fastapi import APIRouter, Depends, UploadFile, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
@@ -13,10 +12,11 @@ from app.core.errors import AppError
 from app.core.time import utcnow
 from app.models.auth import User
 from app.models.hotel import Hotel, Room, RoomAssignment
-from app.models.organization import Employee
+from app.models.organization import Employee, Site, Team
 from app.models.registration import Registration
 from app.schemas.hotel import ImportResultOut, RoomAssignmentCreate, RoomAssignmentOut
 from app.services.audit_service import record_audit
+from app.services.importer.xlsx import load_xlsx, read_xlsx
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}/room-assignments", tags=["room-assignments"])
@@ -33,6 +33,7 @@ def _assignment_out(a: RoomAssignment, room: Room, hotel: Hotel) -> RoomAssignme
         employee_code=a.employee.employee_code,
         full_name=a.employee.full_name,
         team_name=a.employee.team.name if a.employee.team else None,
+        hotel_code=hotel.code,
         hotel_name=hotel.name,
         room_number=room.room_number,
         assigned_at=a.assigned_at,
@@ -59,8 +60,10 @@ async def list_room_assignments(event_id: int, db: DbSession, _user: AdminUser) 
 @router.get("/unassigned")
 async def list_unassigned(event_id: int, db: DbSession, _user: AdminUser) -> list[dict]:
     result = await db.execute(
-        select(Employee.id, Employee.employee_code, Employee.full_name)
+        select(Employee.id, Employee.employee_code, Employee.full_name, Team.name, Site.name)
         .join(Registration, Registration.employee_id == Employee.id)
+        .outerjoin(Team, Team.id == Employee.team_id)
+        .outerjoin(Site, Site.id == Employee.site_id)
         .outerjoin(
             RoomAssignment,
             (RoomAssignment.employee_id == Employee.id) & (RoomAssignment.event_id == event_id),
@@ -73,7 +76,13 @@ async def list_unassigned(event_id: int, db: DbSession, _user: AdminUser) -> lis
         )
     )
     return [
-        {"employee_id": row[0], "employee_code": row[1], "full_name": row[2]}
+        {
+            "employee_id": row[0],
+            "employee_code": row[1],
+            "full_name": row[2],
+            "team_name": row[3],
+            "site_name": row[4],
+        }
         for row in result.all()
     ]
 
@@ -94,6 +103,7 @@ async def assign_room(
             Registration.event_id == event_id,
             Registration.employee_id == payload.employee_id,
             Registration.status == "submitted",
+            Registration.is_participating.is_(True),
         )
     )
     if reg_result.scalar_one_or_none() is None:
@@ -161,17 +171,17 @@ async def unassign_room(event_id: int, assignment_id: int, db: DbSession, user: 
 async def download_room_assignment_template(event_id: int, _user: AdminUser) -> object:
     return xlsx_file(
         "Phan phong",
-        ["employee_code", "email", "room_number"],
-        [["NV001", "nv001@company.vn", "101"]],
+        ["employee_code", "email", "hotel_code", "room_number"],
+        [["NV001", "nv001@company.vn", "HTL-01", "101"]],
         f"room_assignments_template_event_{event_id}.xlsx",
     )
 
 
 @router.post("/import", response_model=ImportResultOut)
 async def import_room_assignments(event_id: int, db: DbSession, user: AdminUser, file: UploadFile) -> ImportResultOut:
-    """employee_code (or email), room_number — matched within this event's hotels."""
-    content = await file.read()
-    workbook = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    """Import by employee identity plus stable hotel_code and room_number."""
+    content = await read_xlsx(file)
+    workbook = load_xlsx(content)
     sheet = workbook.active
     rows_iter = sheet.iter_rows(values_only=True)
     header_row = next(rows_iter, None)
@@ -213,14 +223,33 @@ async def import_room_assignments(event_id: int, db: DbSession, user: AdminUser,
                 if employee is None:
                     raise ValueError("Không tìm thấy nhân viên")
 
-                result = await db.execute(
+                registration = await db.execute(
+                    select(Registration.id).where(
+                        Registration.event_id == event_id,
+                        Registration.employee_id == employee.id,
+                        Registration.status == "submitted",
+                        Registration.is_participating.is_(True),
+                    )
+                )
+                if registration.scalar_one_or_none() is None:
+                    raise ValueError("Nhân viên không có đăng ký tham gia hợp lệ")
+
+                room_stmt = (
                     select(Room)
                     .join(Hotel, Hotel.id == Room.hotel_id)
                     .where(Hotel.event_id == event_id, Room.room_number == str(row["room_number"]).strip())
                 )
-                room = result.scalar_one_or_none()
-                if room is None:
+                if row.get("hotel_code"):
+                    room_stmt = room_stmt.where(
+                        Hotel.code == str(row["hotel_code"]).strip().upper()
+                    )
+                result = await db.execute(room_stmt)
+                matching_rooms = list(result.scalars().all())
+                if not matching_rooms:
                     raise ValueError(f"Không tìm thấy phòng {row['room_number']}")
+                if len(matching_rooms) > 1:
+                    raise ValueError("Số phòng bị trùng; cần điền hotel_code")
+                room = matching_rooms[0]
 
                 result = await db.execute(
                     select(RoomAssignment).where(RoomAssignment.room_id == room.id)
@@ -266,10 +295,10 @@ async def export_room_assignments(event_id: int, db: DbSession, _user: AdminUser
     wb = Workbook()
     ws = wb.active
     ws.title = "Phân phòng"
-    ws.append(["Mã NV", "Họ tên", "Team", "Khách sạn", "Phòng"])
+    ws.append(["Mã NV", "Họ tên", "Team", "Mã khách sạn", "Khách sạn", "Phòng"])
     for a, r, h in rows:
         ws.append([a.employee.employee_code or "", a.employee.full_name,
-                   a.employee.team.name if a.employee.team else "", h.name, r.room_number])
+                   a.employee.team.name if a.employee.team else "", h.code, h.name, r.room_number])
 
     buffer = io.BytesIO()
     wb.save(buffer)

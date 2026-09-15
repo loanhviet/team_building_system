@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { EventStatusBadge } from "@/components/domain/status-badge";
@@ -35,7 +35,7 @@ import { useAuth } from "@/lib/auth-context";
 import { ROLE_LABEL } from "@/lib/format";
 import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS } from "@/lib/event-status";
 import { useCurrentEventId } from "@/lib/use-current-event-id";
-import type { Dashboard, Event, EventStatus } from "@/types/api";
+import type { Dashboard, Event, EventStatus, PublishReadiness } from "@/types/api";
 
 const NAV_GROUPS = [
   {
@@ -76,11 +76,17 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
   const queryClient = useQueryClient();
   const [, setCurrentEventId] = useCurrentEventId();
   const [forceStatus, setForceStatus] = useState<EventStatus | "">("");
+  const contentRef = useRef<HTMLDivElement>(null);
   const base = `/admin/events/${eventId}`;
 
   useEffect(() => {
     setCurrentEventId(eventId);
   }, [eventId, setCurrentEventId]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+    contentRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [pathname]);
 
   const { data: event, isLoading } = useQuery({
     queryKey: ["events", eventId],
@@ -93,16 +99,30 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
     enabled: !!event,
   });
 
+  const {
+    data: publishReadiness,
+    isFetching: readinessFetching,
+    refetch: refetchReadiness,
+  } = useQuery({
+    queryKey: ["events", eventId, "readiness"],
+    queryFn: () => apiFetch<PublishReadiness>(`/api/events/${eventId}/readiness`),
+    enabled: !!event,
+  });
+
   const transitionMutation = useMutation({
     mutationFn: (status: EventStatus) =>
       apiFetch<Event>(`/api/events/${eventId}/transition`, {
         method: "POST",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          confirm_warnings: status === "information_published",
+        }),
       }),
     onSuccess: (updated) => {
       toast.success(`Đã chuyển sang: ${EVENT_STATUS_LABELS[updated.status]}`);
       queryClient.setQueryData(["events", eventId], updated);
       queryClient.invalidateQueries({ queryKey: ["events"] });
+      queryClient.invalidateQueries({ queryKey: ["events", eventId, "readiness"] });
       setForceStatus("");
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
@@ -116,29 +136,44 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
   const isSuperAdmin = user?.role === "super_admin";
 
   const transitionWarning = (status: EventStatus): ReactNode => {
-    if (status !== "information_published" || !dashboard) return undefined;
-    const roomsMissing = dashboard.participating_count - dashboard.rooms_assigned;
-    const checks = [
-      { ok: dashboard.flights_flagged_count === 0, text: `${dashboard.flights_flagged_count} ca bay đang bị flag` },
-      { ok: dashboard.buses_flagged_count === 0, text: `${dashboard.buses_flagged_count} ca xe đang bị flag` },
-      { ok: dashboard.buses_without_leader_count === 0, text: `${dashboard.buses_without_leader_count} xe chưa có Trưởng xe` },
-      { ok: roomsMissing <= 0, text: `${Math.max(roomsMissing, 0)} người tham gia chưa có phòng` },
-      { ok: dashboard.gala_unseated_count === 0, text: `${dashboard.gala_unseated_count} người chưa có ghế Gala` },
-    ];
-    const problems = checks.filter((c) => !c.ok);
+    if (status !== "information_published") return undefined;
+    if (!publishReadiness || readinessFetching) {
+      return "Đang kiểm tra mức độ sẵn sàng để công bố...";
+    }
     return (
       <div className="flex flex-col gap-1 pt-1 text-left">
-        <p>
-          Sẽ gửi email công bố hành trình cho <b>{dashboard.participating_count}</b> người tham gia.
-        </p>
-        {problems.length > 0 ? (
-          <ul className="list-inside list-disc text-destructive">
-            {problems.map((p) => (
-              <li key={p.text}>{p.text}</li>
-            ))}
-          </ul>
-        ) : (
+        {dashboard && (
+          <p>
+            Sẽ gửi email công bố hành trình cho <b>{dashboard.participating_count}</b> người tham gia.
+          </p>
+        )}
+        {publishReadiness.blockers.length > 0 && (
+          <>
+            <p className="font-medium text-destructive">Lỗi bắt buộc phải xử lý:</p>
+            <ul className="list-inside list-disc text-destructive">
+              {publishReadiness.blockers.map((issue) => (
+                <li key={`${issue.code}-${issue.message}`}>{issue.message}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {publishReadiness.warnings.length > 0 && (
+          <>
+            <p className="font-medium text-amber-700">Cảnh báo cần xác nhận:</p>
+            <ul className="list-inside list-disc text-amber-700">
+              {publishReadiness.warnings.map((issue) => (
+                <li key={`${issue.code}-${issue.message}`}>{issue.message}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {publishReadiness.blockers.length === 0 && publishReadiness.warnings.length === 0 && (
           <p className="text-primary">Không có cảnh báo — dữ liệu đã đầy đủ.</p>
+        )}
+        {publishReadiness.blockers.length > 0 && (
+          <p className="pt-1 font-medium text-destructive">
+            Không thể công bố cho đến khi các lỗi bắt buộc được xử lý.
+          </p>
         )}
       </div>
     );
@@ -154,7 +189,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
   }));
 
   return (
-    <div className="flex min-h-svh flex-1 bg-background">
+    <div className="flex h-svh flex-1 overflow-hidden bg-background">
       <ShellRail
         className="hidden md:flex"
         eyebrow="BTC Event Hub"
@@ -212,6 +247,17 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
                 `Sự kiện sẽ chuyển từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[status]}".`
               }
               confirmLabel="Chuyển trạng thái"
+              confirmDisabled={
+                status === "information_published" &&
+                (readinessFetching || !publishReadiness || publishReadiness.blockers.length > 0)
+              }
+              onOpen={
+                status === "information_published"
+                  ? () => {
+                      void refetchReadiness();
+                    }
+                  : undefined
+              }
               onConfirm={() => transitionMutation.mutate(status)}
             />
           ))}
@@ -239,12 +285,25 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
                   }
                   title="Ghi đè trạng thái sự kiện?"
                   description={
-                    forceStatus
+                    forceStatus === "information_published"
+                      ? transitionWarning(forceStatus)
+                      : forceStatus
                       ? `Bỏ qua luồng chuẩn, ép từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[forceStatus]}".`
                       : undefined
                   }
                   confirmLabel="Ghi đè"
                   destructive
+                  confirmDisabled={
+                    forceStatus === "information_published" &&
+                    (readinessFetching || !publishReadiness || publishReadiness.blockers.length > 0)
+                  }
+                  onOpen={
+                    forceStatus === "information_published"
+                      ? () => {
+                          void refetchReadiness();
+                        }
+                      : undefined
+                  }
                   onConfirm={() => {
                     if (forceStatus) transitionMutation.mutate(forceStatus);
                   }}
@@ -272,7 +331,11 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
             );
           })}
         </div>
-        <div key={pathname} className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 animate-in fade-in duration-200">
+        <div
+          ref={contentRef}
+          key={pathname}
+          className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 animate-in fade-in duration-200"
+        >
           {children}
         </div>
       </div>

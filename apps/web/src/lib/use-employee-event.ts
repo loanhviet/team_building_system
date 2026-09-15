@@ -62,16 +62,14 @@ export function EmployeeEventProvider({ children }: { children: ReactNode }) {
     enabled: !!user,
   });
 
-  useEffect(() => {
-    if (mine.length === 0) return;
-    if (selectedId != null && mine.some((e) => e.id === selectedId)) return;
-    const fallback = pickDefault(mine);
-    if (fallback != null) setEventId(fallback);
-  }, [mine, selectedId, setEventId]);
+  const effectiveId =
+    selectedId != null && mine.some((event) => event.id === selectedId)
+      ? selectedId
+      : pickDefault(mine);
 
   const event = useMemo(
-    () => mine.find((e) => e.id === selectedId) ?? null,
-    [mine, selectedId],
+    () => mine.find((e) => e.id === effectiveId) ?? null,
+    [mine, effectiveId],
   );
 
   const { data: galaConfig } = useQuery({

@@ -66,3 +66,14 @@ async def revoke_refresh_token(db: AsyncSession, refresh_plain: str) -> None:
     token_row = result.scalar_one_or_none()
     if token_row is not None and token_row.revoked_at is None:
         token_row.revoked_at = utcnow()
+
+
+async def revoke_all_refresh_tokens(db: AsyncSession, user_id: int) -> None:
+    result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None)
+        )
+    )
+    now = utcnow()
+    for token in result.scalars().all():
+        token.revoked_at = now

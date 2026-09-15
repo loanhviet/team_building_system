@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, require_admin
+from app.core.errors import AppError
 from app.core.queue import get_queue
+from app.core.time import utcnow
 from app.models.auth import User
 from app.models.enums import EventStatus
 from app.models.event import Event
@@ -19,7 +21,6 @@ from app.schemas.event import (
     EventTransition,
     EventUpdate,
 )
-from app.services.journey_service import PUBLISHED_STATUSES
 from app.schemas.organization import TeamRosterOut
 from app.schemas.registration import EventTermsOut
 from app.services import master_data
@@ -32,12 +33,34 @@ from app.services.event_service import (
     save_event_settings,
     transition_event,
 )
+from app.services.journey_service import PUBLISHED_STATUSES
 from app.services.rag.enqueue import enqueue_reindex_fire_and_forget
+from app.services.readiness_service import build_publish_readiness
 from app.services.team_roster_service import build_team_roster, resolve_roster_team_id
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
+
+
+def _accepting_registration(event: Event) -> bool:
+    now = utcnow()
+    return (
+        event.status == EventStatus.registration_open
+        and (event.registration_open_at is None or event.registration_open_at <= now)
+        and (event.registration_close_at is None or now <= event.registration_close_at)
+    )
+
+
+def _validate_event_ranges(event: Event, data: dict) -> None:
+    start_date = data.get("start_date", event.start_date)
+    end_date = data.get("end_date", event.end_date)
+    open_at = data.get("registration_open_at", event.registration_open_at)
+    close_at = data.get("registration_close_at", event.registration_close_at)
+    if start_date and end_date and end_date < start_date:
+        raise AppError("invalid_event_dates", "Ngày kết thúc không được trước ngày bắt đầu", status.HTTP_400_BAD_REQUEST)
+    if open_at and close_at and close_at <= open_at:
+        raise AppError("invalid_registration_window", "Thời gian đóng đăng ký phải sau thời gian mở", status.HTTP_400_BAD_REQUEST)
 
 
 def _event_out(event: Event) -> EventOut:
@@ -85,7 +108,11 @@ async def get_current_event(db: DbSession, _user: CurrentUser) -> EventOut | Non
     one still accepting registrations. Returns null when none is open."""
     result = await db.execute(
         select(Event)
-        .where(Event.status == EventStatus.registration_open)
+        .where(
+            Event.status == EventStatus.registration_open,
+            (Event.registration_open_at.is_(None) | (Event.registration_open_at <= utcnow())),
+            (Event.registration_close_at.is_(None) | (Event.registration_close_at >= utcnow())),
+        )
         .order_by(Event.registration_open_at.desc().nulls_last(), Event.id.desc())
         .limit(1)
     )
@@ -100,7 +127,11 @@ async def list_my_events(db: DbSession, user: CurrentUser) -> list[EmployeeEvent
     by_id: dict[int, EmployeeEventOut] = {}
 
     open_result = await db.execute(
-        select(Event).where(Event.status == EventStatus.registration_open)
+        select(Event).where(
+            Event.status == EventStatus.registration_open,
+            (Event.registration_open_at.is_(None) | (Event.registration_open_at <= utcnow())),
+            (Event.registration_close_at.is_(None) | (Event.registration_close_at >= utcnow())),
+        )
     )
     for event in open_result.scalars().all():
         by_id[event.id] = EmployeeEventOut(
@@ -119,12 +150,12 @@ async def list_my_events(db: DbSession, user: CurrentUser) -> list[EmployeeEvent
         for event, reg in owned.all():
             row = by_id.get(event.id) or EmployeeEventOut(
                 **_event_out(event).model_dump(),
-                can_register=event.status == EventStatus.registration_open,
+                can_register=_accepting_registration(event),
                 has_journey=False,
                 registration_status=None,
             )
             row.registration_status = reg.status
-            row.can_register = event.status == EventStatus.registration_open
+            row.can_register = _accepting_registration(event)
             row.has_journey = (
                 reg.status == "submitted"
                 and reg.is_participating is True
@@ -155,7 +186,9 @@ async def update_event(
 ) -> EventOut:
     event = await master_data.get_or_404(db, Event, event_id)
     before = _event_out(event).model_dump(mode="json")
-    await master_data.update(db, event, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    _validate_event_ranges(event, data)
+    await master_data.update(db, event, data)
     await record_audit(
         db,
         actor_user_id=user.id,
@@ -220,6 +253,20 @@ async def transition_event_status(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> EventOut:
     event = await master_data.get_or_404(db, Event, event_id)
+    if payload.status == EventStatus.information_published:
+        readiness = await build_publish_readiness(db, event_id)
+        if not readiness["ready"]:
+            raise AppError(
+                "publish_blocked",
+                "; ".join(item["message"] for item in readiness["blockers"]),
+                status.HTTP_409_CONFLICT,
+            )
+        if readiness["requires_confirmation"] and not payload.confirm_warnings:
+            raise AppError(
+                "publish_confirmation_required",
+                "; ".join(item["message"] for item in readiness["warnings"]),
+                status.HTTP_409_CONFLICT,
+            )
     before_status = event.status.value
     transition_event(event, payload.status, user.role)
     await record_audit(
@@ -241,6 +288,12 @@ async def transition_event_status(
         # chat tools), and this transition doesn't publish any knowledge text.
 
     return _event_out(event)
+
+
+@router.get("/{event_id}/readiness")
+async def get_publish_readiness(event_id: int, db: DbSession, _user: AdminUser) -> dict:
+    await master_data.get_or_404(db, Event, event_id)
+    return await build_publish_readiness(db, event_id)
 
 
 @router.get("/{event_id}/team/roster", response_model=TeamRosterOut)
