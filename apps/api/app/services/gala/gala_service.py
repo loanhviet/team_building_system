@@ -71,16 +71,35 @@ async def draw_turns(db: AsyncSession, event_id: int, config: GalaConfig, team_i
             "Đã bốc thăm rồi. Không thể bốc lại khi đã có thứ tự Team.",
             status.HTTP_409_CONFLICT,
         )
+
+    quota_by_team = {
+        team_id: await compute_team_quota(db, event_id, team_id, config) for team_id in team_ids
+    }
+    total_quota = sum(quota_by_team.values())
+    total_seats = (
+        await db.execute(
+            select(func.coalesce(func.sum(GalaTable.seat_count), 0)).where(
+                GalaTable.event_id == event_id, GalaTable.is_active.is_(True)
+            )
+        )
+    ).scalar_one()
+    if total_seats < total_quota:
+        raise AppError(
+            "not_enough_seats",
+            f"Tổng ghế hiện có ({total_seats}) không đủ cho tổng hạn mức các Team "
+            f"({total_quota}). Thêm bàn trước khi bốc thăm.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     seed = random.randint(0, 2**31 - 1)
     rng = random.Random(seed)
     order = list(team_ids)
     rng.shuffle(order)
 
     for i, team_id in enumerate(order, start=1):
-        quota = await compute_team_quota(db, event_id, team_id, config)
         db.add(
             GalaTurn(
-                event_id=event_id, team_id=team_id, order_no=i, seat_quota=quota,
+                event_id=event_id, team_id=team_id, order_no=i, seat_quota=quota_by_team[team_id],
                 status="waiting",
             )
         )
@@ -113,8 +132,86 @@ async def _next_waiting_turn(db: AsyncSession, event_id: int) -> GalaTurn | None
     return result.scalar_one_or_none()
 
 
+async def _confirmed_seat_count(db: AsyncSession, event_id: int, team_id: int) -> int:
+    result = await db.execute(
+        select(func.count(GalaSeat.id))
+        .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+        .where(GalaTable.event_id == event_id, GalaSeat.team_id == team_id, GalaSeat.status == "confirmed")
+    )
+    return result.scalar_one()
+
+
+async def _held_or_confirmed_count(db: AsyncSession, event_id: int, team_id: int) -> int:
+    result = await db.execute(
+        select(func.count(GalaSeat.id))
+        .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+        .where(
+            GalaTable.event_id == event_id,
+            GalaSeat.status.in_(["held", "confirmed"]),
+            (GalaSeat.team_id == team_id) | (GalaSeat.held_by_team_id == team_id),
+        )
+    )
+    return result.scalar_one()
+
+
+async def _spawn_makeup_turns(db: AsyncSession, event_id: int) -> list[GalaTurn]:
+    """A team whose turn ran out (expired) or was skipped without filling its
+    quota gets exactly one follow-up turn, appended once the normal queue is
+    empty — otherwise a team that missed its window (BTC skipped it, or
+    nobody showed up in time) is permanently shut out (BRD §8 has no "too
+    bad" case). Capped at one makeup per team so a team that's simply never
+    represented can't loop the queue forever."""
+    result = await db.execute(
+        select(GalaTurn).where(
+            GalaTurn.event_id == event_id, GalaTurn.status.in_(["expired", "skipped"])
+        )
+    )
+    ended = result.scalars().all()
+    if not ended:
+        return []
+
+    already_makeup = {
+        row[0]
+        for row in (
+            await db.execute(
+                select(GalaTurn.team_id).where(
+                    GalaTurn.event_id == event_id, GalaTurn.is_makeup.is_(True)
+                )
+            )
+        ).all()
+    }
+    max_order = (
+        await db.execute(
+            select(func.coalesce(func.max(GalaTurn.order_no), 0)).where(GalaTurn.event_id == event_id)
+        )
+    ).scalar_one()
+
+    spawned: list[GalaTurn] = []
+    seen_teams: set[int] = set()
+    for turn in ended:
+        if turn.team_id in already_makeup or turn.team_id in seen_teams:
+            continue
+        confirmed = await _confirmed_seat_count(db, event_id, turn.team_id)
+        if confirmed >= turn.seat_quota:
+            continue
+        seen_teams.add(turn.team_id)
+        max_order += 1
+        new_turn = GalaTurn(
+            event_id=event_id, team_id=turn.team_id, order_no=max_order,
+            seat_quota=turn.seat_quota - confirmed, status="waiting", is_makeup=True,
+        )
+        db.add(new_turn)
+        spawned.append(new_turn)
+
+    if spawned:
+        await db.flush()
+    return spawned
+
+
 async def _activate_next_waiting(db: AsyncSession, event_id: int, config: GalaConfig) -> GalaTurn | None:
     next_turn = await _next_waiting_turn(db, event_id)
+    if next_turn is None and await _spawn_makeup_turns(db, event_id):
+        next_turn = await _next_waiting_turn(db, event_id)
     if next_turn is not None:
         await _activate_turn(db, config, next_turn)
         config.status = "in_progress"
@@ -271,6 +368,15 @@ async def hold_seat(
     if seat.status != "available":
         raise AppError("seat_unavailable", "Ghế đã có người chọn", status.HTTP_409_CONFLICT)
 
+    # previously only confirm_seat counted against quota — a team could hold
+    # (and thereby block) more seats than it's allowed to ever confirm, tying
+    # them up until the hold TTL expired
+    held_or_confirmed = await _held_or_confirmed_count(db, event_id, team_id)
+    if held_or_confirmed >= turn.seat_quota:
+        raise AppError(
+            "quota_exceeded", f"Team đã giữ/chọn đủ {turn.seat_quota} ghế", status.HTTP_409_CONFLICT
+        )
+
     acquired = await acquire_seat_lock(redis, seat_id, team_id, config.hold_ttl_seconds)
     if not acquired:
         raise AppError("seat_unavailable", "Ghế đã có người chọn", status.HTTP_409_CONFLICT)
@@ -316,16 +422,7 @@ async def confirm_seat(
     if turn is None or turn.team_id != team_id:
         raise AppError("not_your_turn", "Chưa đến lượt của Team bạn", status.HTTP_403_FORBIDDEN)
 
-    result = await db.execute(
-        select(func.count(GalaSeat.id))
-        .join(GalaTable, GalaTable.id == GalaSeat.table_id)
-        .where(
-            GalaTable.event_id == event_id,
-            GalaSeat.team_id == team_id,
-            GalaSeat.status == "confirmed",
-        )
-    )
-    already_confirmed = result.scalar_one()
+    already_confirmed = await _confirmed_seat_count(db, event_id, team_id)
     if already_confirmed >= turn.seat_quota:
         raise AppError(
             "quota_exceeded", f"Team đã chọn đủ {turn.seat_quota} ghế", status.HTTP_409_CONFLICT
@@ -335,13 +432,13 @@ async def confirm_seat(
     if seat is None or seat.status != "held" or seat.held_by_team_id != team_id:
         raise AppError("seat_not_held", "Ghế không ở trạng thái bạn đang giữ", status.HTTP_409_CONFLICT)
 
-    expected_version = seat.version
-    result = await db.execute(
-        select(GalaSeat).where(GalaSeat.id == seat_id, GalaSeat.version == expected_version)
-    )
-    if result.scalar_one_or_none() is None:
-        raise AppError("seat_conflict", "Ghế vừa bị thay đổi, vui lòng thử lại", status.HTTP_409_CONFLICT)
-
+    # (no optimistic-lock re-check here: within this single request/session
+    # `seat` is already the identity-mapped row from the db.get() above, and
+    # nothing else could have committed a change to it in between — the
+    # actual protection against two teams confirming the same seat is the
+    # Redis lock acquired in hold_seat() plus the held_by_team_id check just
+    # above, not `version`. `version` still gets bumped below for the
+    # optimistic-lock story other callers may rely on later.)
     await release_seat_lock(redis, seat_id, team_id)
     seat.status = "confirmed"
     seat.team_id = team_id

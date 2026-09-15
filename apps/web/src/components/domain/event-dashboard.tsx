@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, BedDouble, Bus, ChevronRight, Plane, Users } from "lucide-react";
+import { AlertTriangle, BedDouble, Bus, ChevronRight, PartyPopper, Plane, Users } from "lucide-react";
 import Link from "next/link";
 import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { apiFetch } from "@/lib/api";
@@ -52,6 +52,12 @@ export function EventDashboard({ eventId }: { eventId: number }) {
       title: `${roomsMissing} người tham gia chưa có phòng`,
       hint: "Mở khách sạn để gán phòng",
       Icon: BedDouble,
+    },
+    dashboard.gala_unseated_count > 0 && {
+      href: `${base}/gala`,
+      title: `${dashboard.gala_unseated_count} người chưa có ghế Gala`,
+      hint: "Team hết lượt/bị bỏ qua sẽ có lượt bù — kiểm tra sơ đồ Gala",
+      Icon: PartyPopper,
     },
   ].filter(
     (t): t is { href: string; title: string; hint: string; Icon: typeof Plane } => !!t,

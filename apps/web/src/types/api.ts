@@ -346,6 +346,7 @@ export type Dashboard = {
   buses_by_leg: { leg_name: string; needed: number; assigned: number }[];
   buses_flagged_count: number;
   buses_without_leader_count: number;
+  gala_unseated_count: number;
 };
 
 export type AuditLogEntry = {
@@ -447,6 +448,8 @@ export type GalaTurn = {
   status: "waiting" | "active" | "done" | "skipped" | "expired";
   started_at: string | null;
   expires_at: string | null;
+  is_makeup: boolean;
+  has_representative: boolean;
 };
 
 export type GalaState = {

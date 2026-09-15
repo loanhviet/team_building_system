@@ -33,7 +33,14 @@ import { useCountdown } from "@/lib/use-countdown";
 import { useGalaWebSocket } from "@/lib/use-gala-ws";
 import type { GalaConfig, GalaSeat, GalaState, GalaTable, GalaTurn } from "@/types/api";
 
-const DEFAULT_CONFIG_FORM = { name: "Gala Dinner", stageLabel: "Sân khấu", turnDuration: "60", holdTtl: "30" };
+const DEFAULT_CONFIG_FORM = {
+  name: "Gala Dinner",
+  stageLabel: "Sân khấu",
+  turnDuration: "60",
+  holdTtl: "30",
+  seatQuotaRule: "by_team_size" as "by_team_size" | "fixed",
+  fixedQuota: "",
+};
 
 export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
@@ -67,6 +74,8 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
         stageLabel: state.config.stage_label,
         turnDuration: String(state.config.turn_duration_seconds),
         holdTtl: String(state.config.hold_ttl_seconds),
+        seatQuotaRule: state.config.seat_quota_rule,
+        fixedQuota: state.config.fixed_quota != null ? String(state.config.fixed_quota) : "",
       });
     } else {
       setConfigForm(DEFAULT_CONFIG_FORM);
@@ -83,6 +92,10 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           stage_label: configForm.stageLabel,
           turn_duration_seconds: Number(configForm.turnDuration),
           hold_ttl_seconds: Number(configForm.holdTtl),
+          seat_quota_rule: configForm.seatQuotaRule,
+          fixed_quota: configForm.seatQuotaRule === "fixed" && configForm.fixedQuota
+            ? Number(configForm.fixedQuota)
+            : null,
         }),
       }),
     onSuccess: () => {
@@ -237,6 +250,34 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                   onChange={(e) => setConfigForm((f) => ({ ...f, holdTtl: e.target.value }))}
                 />
               </div>
+              <div className="flex flex-col gap-2">
+                <Label>Quy tắc hạn mức ghế</Label>
+                <Select
+                  value={configForm.seatQuotaRule}
+                  onValueChange={(v) =>
+                    setConfigForm((f) => ({ ...f, seatQuotaRule: (v as "by_team_size" | "fixed") ?? "by_team_size" }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="by_team_size">Theo số người tham gia của Team</SelectItem>
+                    <SelectItem value="fixed">Số cố định cho mọi Team</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {configForm.seatQuotaRule === "fixed" && (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="fixed-quota">Số ghế cố định mỗi Team</Label>
+                  <Input
+                    id="fixed-quota"
+                    type="number"
+                    value={configForm.fixedQuota}
+                    onChange={(e) => setConfigForm((f) => ({ ...f, fixedQuota: e.target.value }))}
+                  />
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button
@@ -327,7 +368,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           title="Bỏ qua lượt hiện tại?"
           description={
             activeTurn
-              ? `Team "${activeTurn.team_name}" sẽ mất lượt này, mọi ghế đang giữ sẽ được nhả. Chuyển sang Team tiếp theo.`
+              ? `Team "${activeTurn.team_name}" sẽ mất lượt này, mọi ghế đang giữ sẽ được nhả. Nếu chưa đủ hạn mức ghế, Team sẽ có 1 lượt bù ở cuối hàng chờ. Chuyển sang Team tiếp theo.`
               : undefined
           }
           confirmLabel="Bỏ qua"
@@ -463,6 +504,8 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                 className={t.status === "done" || t.status === "skipped" || t.status === "expired" ? "opacity-50" : undefined}
               >
                 #{t.order_no} {t.team_name} ({t.seat_quota} ghế) — {galaTurnStatusLabel(t.status)}
+                {t.is_makeup && " · Lượt bù"}
+                {!t.has_representative && " · Chưa có trưởng nhóm"}
               </Badge>
             ))}
           </CardContent>

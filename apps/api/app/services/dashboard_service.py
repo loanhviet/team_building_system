@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bus import Bus, BusAssignment
 from app.models.event import Shift, TransportLeg
 from app.models.flight import Flight, FlightAssignment
+from app.models.gala import GalaSeat, GalaTable, GalaTurn
 from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
@@ -127,6 +128,36 @@ async def build_dashboard(db: AsyncSession, event_id: int) -> DashboardOut:
         )
     ).scalar_one()
 
+    # the *original* (non-makeup) turn's seat_quota is the team's total quota
+    # — a makeup turn's seat_quota is only the remainder that was still open
+    # when it was spawned (see gala_service._spawn_makeup_turns), so summing
+    # every turn's quota would double-count a team that got a makeup turn
+    quota_by_team = dict(
+        (
+            await db.execute(
+                select(GalaTurn.team_id, GalaTurn.seat_quota).where(
+                    GalaTurn.event_id == event_id, GalaTurn.is_makeup.is_(False)
+                )
+            )
+        ).all()
+    )
+    confirmed_by_team = dict(
+        (
+            await db.execute(
+                select(GalaSeat.team_id, func.count(GalaSeat.id))
+                .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+                .where(
+                    GalaTable.event_id == event_id, GalaSeat.status == "confirmed",
+                    GalaSeat.team_id.is_not(None),
+                )
+                .group_by(GalaSeat.team_id)
+            )
+        ).all()
+    )
+    gala_unseated_count = sum(
+        max(quota - confirmed_by_team.get(team_id, 0), 0) for team_id, quota in quota_by_team.items()
+    )
+
     return DashboardOut(
         total_employees=total_employees,
         registered_count=registered_count,
@@ -142,4 +173,5 @@ async def build_dashboard(db: AsyncSession, event_id: int) -> DashboardOut:
         buses_by_leg=buses_by_leg,
         buses_flagged_count=buses_flagged_count,
         buses_without_leader_count=buses_without_leader_count,
+        gala_unseated_count=gala_unseated_count,
     )

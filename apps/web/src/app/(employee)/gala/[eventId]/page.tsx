@@ -298,6 +298,7 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
                     )}
                   >
                     {t.order_no}. {t.team_name}
+                    {t.is_makeup && " (bù)"}
                   </span>
                 ))}
               </div>

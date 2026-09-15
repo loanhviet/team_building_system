@@ -39,3 +39,7 @@ class DashboardOut(BaseModel):
     buses_by_leg: list[BusLegStatus]
     buses_flagged_count: int
     buses_without_leader_count: int
+    # sum of max(quota - confirmed, 0) over every drawn Gala turn — a team
+    # can be short of seats because its turn expired/was skipped with no
+    # makeup yet activated, or (rarer) config.fixed_quota changed after draw
+    gala_unseated_count: int

@@ -123,6 +123,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
       { ok: dashboard.buses_flagged_count === 0, text: `${dashboard.buses_flagged_count} ca xe đang bị flag` },
       { ok: dashboard.buses_without_leader_count === 0, text: `${dashboard.buses_without_leader_count} xe chưa có Trưởng xe` },
       { ok: roomsMissing <= 0, text: `${Math.max(roomsMissing, 0)} người tham gia chưa có phòng` },
+      { ok: dashboard.gala_unseated_count === 0, text: `${dashboard.gala_unseated_count} người chưa có ghế Gala` },
     ];
     const problems = checks.filter((c) => !c.ok);
     return (
