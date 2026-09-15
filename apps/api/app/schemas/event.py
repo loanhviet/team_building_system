@@ -34,12 +34,14 @@ class EventSettingsOut(BaseModel):
     terms_text: str
     terms_version: str
     flight_allocation_weights: dict[str, float]
+    bus_allocation_weights: dict[str, float]
 
 
 class EventSettingsUpdate(BaseModel):
     terms_text: str | None = None
     terms_version: str | None = None
     flight_allocation_weights: dict[str, float] | None = None
+    bus_allocation_weights: dict[str, float] | None = None
 
 
 class EventOut(BaseModel):
@@ -56,6 +58,14 @@ class EventOut(BaseModel):
     published_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class EmployeeEventOut(EventOut):
+    """Events a CBNV is allowed to see — never drafts they didn't touch."""
+
+    can_register: bool = False
+    has_journey: bool = False
+    registration_status: str | None = None
 
 
 class ShiftCreate(BaseModel):
@@ -93,6 +103,7 @@ class TransportLegCreate(BaseModel):
     name: str
     direction: str
     sort_order: int = 0
+    flight_timing: str | None = None
 
 
 class TransportLegUpdate(BaseModel):
@@ -101,6 +112,7 @@ class TransportLegUpdate(BaseModel):
     direction: str | None = None
     sort_order: int | None = None
     is_active: bool | None = None
+    flight_timing: str | None = None
 
 
 class TransportLegOut(BaseModel):
@@ -111,6 +123,7 @@ class TransportLegOut(BaseModel):
     direction: str
     sort_order: int
     is_active: bool
+    flight_timing: str | None
 
     model_config = {"from_attributes": True}
 

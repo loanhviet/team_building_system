@@ -32,15 +32,21 @@ def _is_shift_mismatch(candidate: Candidate, flight: FlightSlot) -> bool:
     return candidate.shift_id != flight.shift_id
 
 
+def _site_ok(flight: FlightSlot, site_id: int | None) -> bool:
+    # a flight with no site set serves everyone; a team/candidate with no
+    # known site is never excluded either — this is a hard filter (never a
+    # score penalty), because boarding someone on a flight from the wrong
+    # city isn't "suboptimal", it's simply wrong
+    return flight.site_id is None or site_id is None or flight.site_id == site_id
+
+
 class GreedyFlightStrategy:
     """Greedy allocator per docs/PLAN.md §7.1: place whole teams first, split the
     largest-remaining-shift-subgroup when a team can't fit, flag whatever's left over.
 
-    `split_penalty` decides whether a whole-team-fit is even taken: if forcing the
-    team onto its best-scoring flight would strand more people on the wrong shift
-    than the configured penalty is worth (`mismatch * same_shift > split_penalty`),
-    the team is deliberately split instead so those people land on a flight
-    matching their own shift."""
+    `split_penalty / same_shift` is how many shift-mismatched people we'll
+    swallow to keep a team on one flight. Above that, the team is split so
+    members can land on flights matching their own Ca."""
 
     def allocate(
         self, teams: list[TeamGroup], flights: list[FlightSlot], weights: dict[str, float]
@@ -52,13 +58,19 @@ class GreedyFlightStrategy:
         for team in sorted(teams, key=lambda t: len(t.employees), reverse=True):
             group = list(team.employees)
 
-            whole_fit = [f for f in flights if f.remaining >= len(group)]
+            whole_fit = [
+                f for f in flights if f.remaining >= len(group) and _site_ok(f, team.site_id)
+            ]
             best_whole = max(whole_fit, key=lambda f: _score(f, group, weights)) if whole_fit else None
 
             force_split = False
             if best_whole is not None:
                 mismatch = sum(1 for c in group if _is_shift_mismatch(c, best_whole))
-                if mismatch > 0 and mismatch * weights["same_shift"] > weights["split_penalty"]:
+                # scale-invariant: "mismatch people allowed" = split_penalty / same_shift
+                # (legacy 15/10 ≈ 1.5 people; mock 10/40 ≈ 0.25 → 1 mismatch splits)
+                same_shift_w = max(float(weights.get("same_shift") or 0), 1e-9)
+                threshold = float(weights.get("split_penalty") or 0) / same_shift_w
+                if mismatch > threshold:
                     force_split = True
 
             if best_whole is not None and not force_split:
@@ -82,7 +94,9 @@ class GreedyFlightStrategy:
             for subgroup in sorted(by_shift.values(), key=len, reverse=True):
                 leftover = list(subgroup)
                 while leftover:
-                    candidates = [f for f in flights if f.remaining > 0]
+                    candidates = [
+                        f for f in flights if f.remaining > 0 and _site_ok(f, team.site_id)
+                    ]
                     if not candidates:
                         for c in leftover:
                             flagged[c.employee_id] = "no_slot"

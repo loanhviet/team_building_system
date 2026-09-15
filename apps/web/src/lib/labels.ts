@@ -28,6 +28,7 @@ export const assignmentSourceLabel = makeLookup({
 export const flagReasonLabel = makeLookup({
   no_slot: "Hết chỗ",
   shift_mismatch: "Không đúng ca",
+  no_compatible_bus: "Không có xe khớp điểm đón/giờ bay",
 });
 
 export const jobStatusLabel = makeLookup({
@@ -35,6 +36,13 @@ export const jobStatusLabel = makeLookup({
   running: "Đang chạy",
   succeeded: "Thành công",
   failed: "Thất bại",
+});
+
+export const emailOutboxStatusLabel = makeLookup({
+  queued: "Đang chờ gửi",
+  sending: "Đang gửi",
+  sent: "Đã gửi",
+  failed: "Gửi thất bại",
 });
 
 export const jobTypeLabel = makeLookup({
@@ -60,6 +68,8 @@ export const auditActionLabel = makeLookup({
   unblock: "Mở khoá ghế",
   confirm: "Xác nhận ghế",
   submit: "Nộp đăng ký",
+  remind: "Nhắc đăng ký",
+  test_send: "Gửi email thử",
   cancel: "Huỷ đăng ký",
   reset_password: "Reset mật khẩu",
 });

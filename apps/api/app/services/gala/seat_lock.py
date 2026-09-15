@@ -22,10 +22,3 @@ async def acquire_seat_lock(redis: Redis, seat_id: int, team_id: int, ttl_second
 async def release_seat_lock(redis: Redis, seat_id: int, team_id: int) -> bool:
     result = await redis.eval(_RELEASE_SCRIPT, 1, _key(seat_id), str(team_id))
     return bool(result)
-
-
-async def get_seat_lock_owner(redis: Redis, seat_id: int) -> int | None:
-    value = await redis.get(_key(seat_id))
-    if value is None:
-        return None
-    return int(value)

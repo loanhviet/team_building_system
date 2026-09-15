@@ -31,11 +31,42 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <nav className="hidden w-52 shrink-0 lg:sticky lg:top-6 lg:block" aria-label="Mục cấu hình">
+        <p className="mb-2 text-[11px] font-medium text-muted-foreground">Mục cài đặt nhanh</p>
+        <ul className="flex flex-col gap-1 text-sm">
+          {[
+            ["#su-kien", "Thông tin sự kiện"],
+            ["#quy-dinh", "Quy định & trọng số"],
+            ["#ca-bay", "Ca đăng ký (nguyện vọng)"],
+            ["#chang-xe", "Chặng xe"],
+            ["#diem-don", "Điểm đón/trả"],
+          ].map(([href, label]) => (
+            <li key={href}>
+              <a href={href} className="nav-link">
+                {label}
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-3 text-[11px] leading-relaxed text-orange-900">
+          Trọng số bay/xe ở đây là đầu vào của <strong>Chạy phân bổ tự động</strong> trên màn Chuyến bay và Xe. Ca + chặng + điểm đón là dữ liệu CBNV chọn khi đăng ký.
+        </p>
+      </nav>
+      <div className="flex min-w-0 flex-1 flex-col gap-8">
+      <section id="su-kien" className="scroll-mt-6">
       <EventMetaForm key={event.id} event={event} />
-      <TermsWeightsForm key={settings.terms_version} eventId={eventId} settings={settings} />
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Ca bay</h2>
+      </section>
+      <section id="quy-dinh" className="scroll-mt-6">
+      <TermsWeightsForm key={`${settings.terms_version}-${JSON.stringify(settings.flight_allocation_weights)}`} eventId={eventId} settings={settings} />
+      </section>
+      <section id="ca-bay" className="scroll-mt-6 space-y-2">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Ca đăng ký (nguyện vọng bay)</h2>
+          <p className="text-xs text-muted-foreground">
+            CBNV chọn ca khi đăng ký. Chuyến bay gắn vào ca trên màn <strong>Chuyến bay</strong> — thuật toán ưu tiên đúng ca theo trọng số.
+          </p>
+        </div>
         <EntityCrudTable
           queryKey={["events", String(eventId), "shifts"]}
           label="ca bay"
@@ -46,9 +77,14 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
             { name: "depart_after_time", label: "Sau giờ (HH:MM)", required: false },
           ]}
         />
-      </div>
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Chặng xe</h2>
+      </section>
+      <section id="chang-xe" className="scroll-mt-6 space-y-2">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Chặng xe</h2>
+          <p className="text-xs text-muted-foreground">
+            CBNV tick nhu cầu theo từng chặng. Phân xe tự động chạy <em>từng chặng</em> với trọng số xe ở trên.
+          </p>
+        </div>
         <EntityCrudTable
           queryKey={["events", String(eventId), "transport-legs"]}
           label="chặng xe"
@@ -56,12 +92,22 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
           fields={[
             { name: "code", label: "Mã" },
             { name: "name", label: "Tên" },
-            { name: "direction", label: "Chiều di chuyển" },
+            { name: "direction", label: "Chiều (outbound/inbound/local)" },
+            {
+              name: "flight_timing",
+              label: "Ràng buộc giờ bay (before_flight/after_flight, để trống nếu không liên quan)",
+              required: false,
+            },
           ]}
         />
-      </div>
-      <div>
-        <h2 className="mb-2 text-lg font-medium">Điểm đón/trả</h2>
+      </section>
+      <section id="diem-don" className="scroll-mt-6 space-y-2">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Điểm đón / trả</h2>
+          <p className="text-xs text-muted-foreground">
+            Form đăng ký bắt chọn điểm khi tick cần xe. Xe gắn điểm đón trên màn Xe.
+          </p>
+        </div>
         <EntityCrudTable
           queryKey={["events", String(eventId), "pickup-points"]}
           label="điểm đón"
@@ -71,6 +117,7 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
             { name: "address", label: "Địa chỉ", required: false },
           ]}
         />
+      </section>
       </div>
     </div>
   );
@@ -161,6 +208,14 @@ function TermsWeightsForm({ eventId, settings }: { eventId: number; settings: Ev
     fill_rate: settings.flight_allocation_weights.fill_rate,
     split_penalty: settings.flight_allocation_weights.split_penalty,
   });
+  const [busWeights, setBusWeights] = useState({
+    same_flight: settings.bus_allocation_weights?.same_flight ?? 50,
+    team_together: settings.bus_allocation_weights?.team_together ?? 30,
+    fill_rate: settings.bus_allocation_weights?.fill_rate ?? 20,
+  });
+
+  const flightTotal = weights.same_shift + weights.team_together + weights.fill_rate + weights.split_penalty;
+  const busTotal = busWeights.same_flight + busWeights.team_together + busWeights.fill_rate;
 
   const saveSettings = useMutation({
     mutationFn: () =>
@@ -170,49 +225,75 @@ function TermsWeightsForm({ eventId, settings }: { eventId: number; settings: Ev
           terms_text: termsText,
           terms_version: termsVersion,
           flight_allocation_weights: weights,
+          bus_allocation_weights: busWeights,
         }),
       }),
     onSuccess: (updated) => {
-      toast.success("Đã lưu quy định và trọng số");
+      toast.success("Đã lưu quy định và trọng số — lần chạy phân bổ tiếp theo sẽ dùng bộ này");
       queryClient.setQueryData(["events", eventId, "settings"], updated);
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không lưu được"),
   });
 
+  const resetFlight = () => setWeights({ same_shift: 40, team_together: 30, fill_rate: 20, split_penalty: 10 });
+  const resetBus = () => setBusWeights({ same_flight: 50, team_together: 30, fill_rate: 20 });
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Quy định đăng ký &amp; trọng số phân bổ</CardTitle>
+        <CardTitle className="text-base">Quy định &amp; trọng số thuật toán phân bổ</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+      <CardContent className="flex flex-col gap-6">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="terms">Nội dung xác nhận quy định</Label>
-          <Textarea id="terms" rows={4} value={termsText} onChange={(e) => setTermsText(e.target.value)} />
+          <Label htmlFor="terms">Quy định sự kiện (CBNV phải đồng ý khi gửi đăng ký)</Label>
+          <Textarea id="terms" rows={5} value={termsText} onChange={(e) => setTermsText(e.target.value)} />
         </div>
         <div className="flex max-w-xs flex-col gap-1.5">
-          <Label htmlFor="terms-ver">Phiên bản</Label>
+          <Label htmlFor="terms-ver">Phiên bản điều khoản</Label>
           <Input id="terms-ver" value={termsVersion} onChange={(e) => setTermsVersion(e.target.value)} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-4">
-          {(
-            [
-              ["same_shift", "Đúng ca"],
-              ["team_together", "Đi cùng Team"],
-              ["fill_rate", "Lấp đầy chuyến"],
-              ["split_penalty", "Phạt tách Team"],
-            ] as const
-          ).map(([key, label]) => (
-            <div key={key} className="flex flex-col gap-1.5">
-              <Label htmlFor={`w-${key}`}>{label}</Label>
-              <Input
-                id={`w-${key}`}
-                type="number"
-                value={weights[key]}
-                onChange={(e) => setWeights((prev) => ({ ...prev, [key]: Number(e.target.value) }))}
-              />
+
+        <div className="rounded-xl border border-border p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <p className="font-semibold">Trọng số phân chuyến bay</p>
+              <p className="text-xs text-muted-foreground">
+                Dùng khi bấm “Chạy phân bổ tự động” trên màn Chuyến bay. Phạt tách: số người sai ca cho phép giữ nguyên team = phạt ÷ đúng ca.
+              </p>
             </div>
-          ))}
+            <Button type="button" variant="ghost" size="sm" onClick={resetFlight}>
+              Đặt lại mặc định
+            </Button>
+          </div>
+          <WeightRow label="1. Đúng ca mong muốn" hint="Ưu tiên chuyến khớp ca CBNV đã đăng ký" value={weights.same_shift} onChange={(v) => setWeights((p) => ({ ...p, same_shift: v }))} />
+          <WeightRow label="2. Đi cùng Team" hint="Ưu tiên chuyến đã có đồng đội" value={weights.team_together} onChange={(v) => setWeights((p) => ({ ...p, team_together: v }))} />
+          <WeightRow label="3. Lấp đầy ghế" hint="Ưu tiên chuyến đang dùng dở" value={weights.fill_rate} onChange={(v) => setWeights((p) => ({ ...p, fill_rate: v }))} />
+          <WeightRow label="4. Phạt tách Team" hint="Cao = giữ team dù lệch ca; thấp = tách để đúng ca" value={weights.split_penalty} onChange={(v) => setWeights((p) => ({ ...p, split_penalty: v }))} warn />
+          <p className={`mt-2 text-xs font-semibold ${Math.abs(flightTotal - 100) < 0.5 ? "text-emerald-700" : "text-[var(--ember)]"}`}>
+            Tổng {flightTotal}% {Math.abs(flightTotal - 100) < 0.5 ? "— tỷ lệ tương đối ổn" : "— nên chỉnh về 100% cho dễ đọc (thuật toán dùng tỷ lệ, không bắt buộc)"}
+          </p>
         </div>
+
+        <div className="rounded-xl border border-border p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <p className="font-semibold">Trọng số phân xe</p>
+              <p className="text-xs text-muted-foreground">
+                Dùng khi bấm “Chạy phân xe tự động” trên màn Xe, theo từng chặng đã cấu hình.
+              </p>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={resetBus}>
+              Đặt lại mặc định
+            </Button>
+          </div>
+          <WeightRow label="Cùng chuyến bay" hint="Người cùng flight ưu tiên lên một xe" value={busWeights.same_flight} onChange={(v) => setBusWeights((p) => ({ ...p, same_flight: v }))} />
+          <WeightRow label="Cùng Team" hint="Xe đã có đồng đội được ưu tiên" value={busWeights.team_together} onChange={(v) => setBusWeights((p) => ({ ...p, team_together: v }))} />
+          <WeightRow label="Lấp đầy xe" hint="Ưu tiên xe còn vừa nhóm" value={busWeights.fill_rate} onChange={(v) => setBusWeights((p) => ({ ...p, fill_rate: v }))} />
+          <p className={`mt-2 text-xs font-semibold ${Math.abs(busTotal - 100) < 0.5 ? "text-emerald-700" : "text-[var(--ember)]"}`}>
+            Tổng {busTotal}%
+          </p>
+        </div>
+
         <div>
           <Button disabled={saveSettings.isPending} onClick={() => saveSettings.mutate()}>
             Lưu quy định &amp; trọng số
@@ -220,5 +301,40 @@ function TermsWeightsForm({ eventId, settings }: { eventId: number; settings: Ev
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function WeightRow({
+  label,
+  hint,
+  value,
+  onChange,
+  warn,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  onChange: (v: number) => void;
+  warn?: boolean;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          <p className="text-[11px] text-muted-foreground">{hint}</p>
+        </div>
+        <span className={`tabular text-sm font-bold ${warn ? "text-[var(--ember)]" : "text-primary"}`}>{value}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-[var(--lagoon)]"
+      />
+    </div>
   );
 }

@@ -63,6 +63,15 @@ export function LiteMarkdown({ text, className }: { text: string; className?: st
     }
     flushBullets(`ul-${idx}`);
     if (line.trim() === "") return;
+    const heading = /^(#{1,3})\s+(.*)$/.exec(line.trim());
+    if (heading) {
+      blocks.push(
+        <p key={`h-${idx}`} className="font-medium">
+          {renderInline(heading[2], `h-${idx}`)}
+        </p>,
+      );
+      return;
+    }
     blocks.push(<p key={`p-${idx}`}>{renderInline(line, `p-${idx}`)}</p>);
   });
   flushBullets("ul-end");

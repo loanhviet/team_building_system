@@ -12,8 +12,10 @@ export default function MasterDataPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <p className="ticket-kicker">Dùng chung mọi kỳ</p>
-        <h1 className="font-display text-3xl font-semibold">Master Data</h1>
+        <h1 className="font-display text-3xl font-semibold">Team & địa điểm</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Master data dùng chung mọi kỳ. Tắt một team sẽ ẩn khỏi form đăng ký.
+        </p>
       </div>
       <Tabs defaultValue="teams">
         <TabsList>

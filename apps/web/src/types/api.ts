@@ -56,6 +56,14 @@ export type EmployeeList = {
   offset: number;
 };
 
+export type EmployeeStats = {
+  total: number;
+  active: number;
+  inactive: number;
+  accounts?: number;
+  by_site: { site_id: number; site_name: string; count: number }[];
+};
+
 export type EventSettings = {
   terms_text: string;
   terms_version: string;
@@ -65,6 +73,11 @@ export type EventSettings = {
     fill_rate: number;
     split_penalty: number;
   } & Record<string, number>;
+  bus_allocation_weights: {
+    same_flight: number;
+    team_together: number;
+    fill_rate: number;
+  } & Record<string, number>;
 };
 
 export type EmailTemplate = {
@@ -73,6 +86,17 @@ export type EmailTemplate = {
   body_html: string;
   description: string | null;
   is_custom: boolean;
+};
+
+export type EmailOutboxEntry = {
+  id: number;
+  to_email: string;
+  template_code: string;
+  status: "queued" | "sending" | "sent" | "failed";
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+  sent_at: string | null;
 };
 
 export type UserAdmin = {
@@ -110,6 +134,12 @@ export type Event = {
   published_at: string | null;
 };
 
+export type EmployeeEvent = Event & {
+  can_register: boolean;
+  has_journey: boolean;
+  registration_status: string | null;
+};
+
 export type Shift = {
   id: number;
   event_id: number;
@@ -129,6 +159,7 @@ export type TransportLeg = {
   direction: string;
   sort_order: number;
   is_active: boolean;
+  flight_timing: "before_flight" | "after_flight" | null;
 };
 
 export type PickupPoint = {
@@ -168,6 +199,8 @@ export type RegistrationAdmin = Registration & {
   email: string;
   team_id: number | null;
   team_name: string | null;
+  team_code: string | null;
+  position: string | null;
   shift_name: string | null;
   transport_summary: string | null;
 };
@@ -232,6 +265,7 @@ export type Journey = {
     location: string | null;
   }[];
   announcements: {
+    id: number;
     title: string;
     body_md: string;
     is_pinned: boolean;
@@ -323,6 +357,7 @@ export type Dashboard = {
   buses_by_leg: { leg_name: string; needed: number; assigned: number }[];
   buses_flagged_count: number;
   buses_without_leader_count: number;
+  gala_unseated_count: number;
 };
 
 export type AuditLogEntry = {
@@ -424,6 +459,8 @@ export type GalaTurn = {
   status: "waiting" | "active" | "done" | "skipped" | "expired";
   started_at: string | null;
   expires_at: string | null;
+  is_makeup: boolean;
+  has_representative: boolean;
 };
 
 export type GalaState = {
@@ -463,6 +500,8 @@ export type BusAssignment = {
   employee_code: string | null;
   full_name: string;
   team_name: string | null;
+  requested_pickup_point_name: string | null;
+  flight_code: string | null;
 };
 
 export type Flight = {
@@ -472,6 +511,7 @@ export type Flight = {
   airline: string | null;
   direction: "outbound" | "inbound";
   shift_id: number | null;
+  site_id: number | null;
   depart_at: string | null;
   arrive_at: string | null;
   origin: string | null;
@@ -492,6 +532,7 @@ export type FlightAssignment = {
   employee_code: string | null;
   full_name: string;
   team_name: string | null;
+  requested_shift_name: string | null;
 };
 
 export type AllocationRun = {

@@ -4,9 +4,14 @@ from jinja2 import Template
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.time import utcnow
+from app.models.event import Event
 from app.models.notification import EmailOutbox, EmailTemplate
+from app.models.organization import Employee
+
+_settings = get_settings()
 
 DEFAULT_TEMPLATES = {
     "registration_confirmed": {
@@ -29,6 +34,19 @@ DEFAULT_TEMPLATES = {
             "<p>Chào {{ full_name }},</p>"
             "<p>BTC đã công bố thông tin chuyến bay, xe đưa đón, khách sạn và lịch trình cho "
             "<b>{{ event_name }}</b>.</p>"
+            "{% if journey.flights %}<ul>"
+            "{% for f in journey.flights %}<li>Chuyến bay ({{ f.direction }}): {{ f.flight_code }} — "
+            "{{ f.origin }} → {{ f.destination }}{% if f.depart_at %}, khởi hành {{ f.depart_at }}{% endif %}"
+            "</li>{% endfor %}</ul>{% endif %}"
+            "{% if journey.buses %}<ul>"
+            "{% for b in journey.buses %}<li>Xe ({{ b.leg_name }}): {{ b.bus_code }}"
+            "{% if b.gather_at %}, tập trung {{ b.gather_at }}{% endif %}"
+            "{% if b.leader_name %}, TX {{ b.leader_name }}{% endif %}</li>{% endfor %}</ul>{% endif %}"
+            "{% if journey.room %}<p>Phòng: {{ journey.room.hotel_name }} - "
+            "{{ journey.room.room_number }}</p>{% endif %}"
+            "{% if journey.gala and journey.gala.tables %}<p>Gala: "
+            "{% for t in journey.gala.tables %}Bàn {{ t.table_code }}{% if not loop.last %}, {% endif %}"
+            "{% endfor %}</p>{% endif %}"
             "<p><a href='{{ app_url }}'>Xem hành trình của bạn</a></p>"
         ),
     },
@@ -37,6 +55,10 @@ DEFAULT_TEMPLATES = {
         "body_html": (
             "<p>Chào {{ full_name }},</p>"
             "<p>Thông tin chuyến bay của bạn cho <b>{{ event_name }}</b> vừa được BTC cập nhật.</p>"
+            "{% if journey.flights %}<ul>"
+            "{% for f in journey.flights %}<li>Chuyến bay ({{ f.direction }}): {{ f.flight_code }} — "
+            "{{ f.origin }} → {{ f.destination }}{% if f.depart_at %}, khởi hành {{ f.depart_at }}{% endif %}"
+            "</li>{% endfor %}</ul>{% endif %}"
             "<p><a href='{{ app_url }}'>Xem chi tiết mới nhất</a></p>"
         ),
     },
@@ -45,6 +67,10 @@ DEFAULT_TEMPLATES = {
         "body_html": (
             "<p>Chào {{ full_name }},</p>"
             "<p>Thông tin xe đưa đón của bạn cho <b>{{ event_name }}</b> vừa được BTC cập nhật.</p>"
+            "{% if journey.buses %}<ul>"
+            "{% for b in journey.buses %}<li>Xe ({{ b.leg_name }}): {{ b.bus_code }}"
+            "{% if b.gather_at %}, tập trung {{ b.gather_at }}{% endif %}"
+            "{% if b.leader_name %}, TX {{ b.leader_name }}{% endif %}</li>{% endfor %}</ul>{% endif %}"
             "<p><a href='{{ app_url }}'>Xem chi tiết mới nhất</a></p>"
         ),
     },
@@ -56,6 +82,28 @@ DEFAULT_TEMPLATES = {
             "<p><a href='{{ app_url }}'>Xem lịch trình mới nhất</a></p>"
         ),
     },
+    "registration_reminder": {
+        "subject": "Nhắc đăng ký {{ event_name }}",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>Bạn chưa gửi đăng ký tham gia <b>{{ event_name }}</b>.</p>"
+            "<p>Vui lòng vào cổng nội bộ để hoàn tất trước hạn BTC đóng đăng ký.</p>"
+            "<p><a href='{{ app_url }}/register'>Mở form đăng ký</a></p>"
+        ),
+    },
+    "account_welcome": {
+        "subject": "Tài khoản cổng Team Building",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>BTC đã tạo tài khoản cổng nội bộ cho bạn.</p>"
+            "<ul>"
+            "<li>Email đăng nhập: {{ email }}</li>"
+            "<li>Mật khẩu tạm: mã nhân viên <b>{{ employee_code }}</b></li>"
+            "</ul>"
+            "<p>Đổi mật khẩu ngay lần đăng nhập đầu.</p>"
+            "<p><a href='{{ app_url }}/login'>Đăng nhập</a></p>"
+        ),
+    },
 }
 
 TEMPLATE_DESCRIPTIONS = {
@@ -64,6 +112,8 @@ TEMPLATE_DESCRIPTIONS = {
     "flight_changed": "Gửi khi BTC đổi chuyến bay của CBNV",
     "bus_changed": "Gửi khi BTC đổi xe của CBNV",
     "schedule_changed": "Gửi khi BTC sửa lịch trình (sau khi đã công bố)",
+    "registration_reminder": "Gửi khi BTC nhắc CBNV chưa gửi đăng ký",
+    "account_welcome": "Gửi khi BTC tạo CBNV mới và chọn gửi email kích hoạt",
 }
 
 PUBLISHED_STATUSES = ("information_published", "event_started", "event_completed")
@@ -88,6 +138,12 @@ async def _load_template(db: AsyncSession, event_id: int | None, code: str) -> t
 async def render_email(
     db: AsyncSession, event_id: int | None, code: str, context: dict
 ) -> tuple[str, str]:
+    # Test-send from the editor: already-rendered HTML in the payload, so BTC
+    # can mail unsaved edits without changing the live template.
+    rendered_subject = context.get("_rendered_subject")
+    rendered_html = context.get("_rendered_html")
+    if isinstance(rendered_subject, str) and isinstance(rendered_html, str):
+        return rendered_subject, rendered_html
     subject_tpl, body_tpl = await _load_template(db, event_id, code)
     return Template(subject_tpl).render(**context), Template(body_tpl).render(**context)
 
@@ -134,6 +190,56 @@ async def dispatch_email(queue: ArqRedis, outbox_id: int | None) -> None:
 async def dispatch_emails(queue: ArqRedis, outbox_ids: list[int]) -> None:
     for outbox_id in outbox_ids:
         await dispatch_email(queue, outbox_id)
+
+
+async def build_email_context(db: AsyncSession, event: Event, employee: Employee) -> dict:
+    """Context for templates fired once an event is already published —
+    reuses the same live journey data (`journey_service.build_journey`) the
+    CBNV portal itself shows, instead of a hand-picked payload dict frozen
+    at the moment BTC made one specific change (previously flight_changed/
+    bus_changed/info_published carried only full_name+event_name+app_url —
+    no flight code, no bus, nothing; see docs/REBUILD-PLAN.md §R7 E4).
+    `journey.model_dump(mode="json")` so the JSON outbox column and Jinja
+    both get plain dicts/strings, not a Pydantic model. Never used for
+    registration_confirmed — that fires before any journey exists."""
+    from app.services.journey_service import (
+        build_journey,  # local: avoid a service-module import cycle
+    )
+
+    journey = await build_journey(db, event, employee)
+    return {
+        "full_name": employee.full_name,
+        "event_name": event.name,
+        "app_url": _settings.app_base_url,
+        "journey": journey.model_dump(mode="json"),
+    }
+
+
+async def notify_employees(
+    db: AsyncSession,
+    queue: ArqRedis,
+    event: Event,
+    employee_ids: list[int],
+    template_code: str,
+    dedupe_suffix: str,
+) -> None:
+    """Fan-out to a specific set of employees (not "everyone participating" —
+    that's send_bulk_emails_task) with journey-derived context. Replaces the
+    enqueue-then-commit-then-dispatch block that used to be copy-pasted
+    between flights.py's and buses.py's adjust/PATCH endpoints."""
+    result = await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))
+    employees = result.scalars().all()
+    outbox_ids: list[int | None] = []
+    for employee in employees:
+        context = await build_email_context(db, event, employee)
+        outbox_id = await enqueue_email(
+            db, event_id=event.id, to_email=employee.email, template_code=template_code,
+            payload=context, dedupe_key=f"{template_code}:{event.id}:{employee.id}:{dedupe_suffix}",
+        )
+        outbox_ids.append(outbox_id)
+    await db.commit()
+    # dispatch only after commit — see enqueue_email's docstring
+    await dispatch_emails(queue, [oid for oid in outbox_ids if oid is not None])
 
 
 async def list_templates(db: AsyncSession, event_id: int) -> list[dict]:
@@ -223,6 +329,32 @@ PREVIEW_CONTEXT = {
     "shift_name": "Ca 1",
     "transport_summary": "2 chặng",
     "app_url": "https://teambuilding.example.com",
+    # shaped like journey.model_dump(mode="json") in build_email_context —
+    # every field a real flight_changed/bus_changed/info_published render
+    # could touch, so the preview actually shows what BTC will send
+    "journey": {
+        "flights": [
+            {
+                "direction": "outbound", "flight_code": "VN1825", "airline": "Vietnam Airlines",
+                "depart_at": "2026-12-20 06:00", "arrive_at": "2026-12-20 07:20",
+                "origin": "Sân bay Nội Bài (HAN)", "destination": "Sân bay Đà Nẵng (DAD)",
+            }
+        ],
+        "buses": [
+            {
+                "leg_name": "Nhà/Văn phòng → Sân bay", "bus_code": "XE-03", "bus_name": None,
+                "gather_at": "2026-12-20 04:00", "depart_at": "2026-12-20 04:15",
+                "destination": "Sân bay Nội Bài", "pickup_name": "Toà nhà A - Cầu Giấy",
+                "pickup_address": None, "leader_name": "Nguyễn Văn Tài", "leader_phone": "0911111111",
+                "note": None,
+            }
+        ],
+        "room": {
+            "hotel_name": "Danang Beach Resort", "hotel_address": "36 Võ Nguyên Giáp, Đà Nẵng",
+            "room_number": "101", "checkin_date": "2026-12-20", "checkout_date": "2026-12-22",
+        },
+        "gala": {"status": "finished", "name": "Gala Dinner", "tables": [{"table_code": "B08", "table_name": "Bàn 08", "seats": []}]},
+    },
 }
 
 

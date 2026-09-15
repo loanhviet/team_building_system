@@ -5,12 +5,15 @@ import Link from "next/link";
 import { useState } from "react";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { EmptyState } from "@/components/domain/empty-state";
+import { PageHeader } from "@/components/domain/page-header";
+import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useEmployeeEvent } from "@/lib/use-employee-event";
+import { cn } from "@/lib/utils";
 import type { GalaConfig, TeamRoster } from "@/types/api";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -56,7 +59,7 @@ export default function TeamPage() {
     );
   }
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Đang tải danh sách Team...</p>;
+  if (isLoading) return <PageSkeleton />;
 
   if (error) {
     return (
@@ -110,20 +113,17 @@ export default function TeamPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="ticket-kicker">{eventName}</p>
-          <h1 className="font-display text-3xl font-semibold">{data.team_name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {submitted}/{data.members.length} thành viên đã gửi đăng ký
-          </p>
-        </div>
-        {canPickGalaSeats && (
-          <Link href={`/gala/${eventId}`} className={buttonVariants()}>
-            Chọn ghế Gala
-          </Link>
-        )}
-      </div>
+      <PageHeader
+        title={data.team_name}
+        description={`${eventName ? `${eventName} · ` : ""}${submitted}/${data.members.length} thành viên đã gửi đăng ký`}
+        actions={
+          canPickGalaSeats ? (
+            <Link href={`/gala/${eventId}`} className={cn(buttonVariants(), "min-h-11")}>
+              Chọn ghế Gala
+            </Link>
+          ) : undefined
+        }
+      />
 
       <DataTable
         columns={columns}

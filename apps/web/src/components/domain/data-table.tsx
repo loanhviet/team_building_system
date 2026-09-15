@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 export type DataTableColumn<T> = {
   key: string;
@@ -34,6 +35,7 @@ export function DataTable<T>({
   isLoading = false,
   emptyMessage = "Chưa có dữ liệu",
   toolbar,
+  onRowClick,
   pageSize,
 }: {
   columns: DataTableColumn<T>[];
@@ -42,6 +44,7 @@ export function DataTable<T>({
   isLoading?: boolean;
   emptyMessage?: string;
   toolbar?: ReactNode;
+  onRowClick?: (row: T) => void;
   /** When set, paginates `rows` client-side at this size. Omit when the
    * caller already paginates server-side (e.g. offset/limit query params). */
   pageSize?: number;
@@ -80,17 +83,23 @@ export function DataTable<T>({
     <div className="flex flex-col gap-3">
       {toolbar && <div className="flex flex-wrap items-center gap-2">{toolbar}</div>}
 
-      <div className="overflow-x-auto rounded-md border">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-[var(--shadow-card)]">
         <Table>
           <TableHeader>
             <TableRow>
               {columns.map((c) => (
-                <TableHead key={c.key} className={c.className}>
+                <TableHead
+                  key={c.key}
+                  className={c.className}
+                  aria-sort={
+                    sort?.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
+                  }
+                >
                   {c.sortValue ? (
                     <button
                       type="button"
                       onClick={() => toggleSort(c.key)}
-                      className="flex items-center gap-1 hover:text-foreground"
+                      className="flex min-h-8 items-center gap-1 hover:text-foreground"
                     >
                       {c.header}
                       {sort?.key === c.key ? (
@@ -127,9 +136,16 @@ export function DataTable<T>({
             )}
             {!isLoading &&
               paged.map((row) => (
-                <TableRow key={rowKey(row)}>
+                <TableRow
+                  key={rowKey(row)}
+                  className={cn(
+                    "transition-colors duration-150",
+                    onRowClick ? "cursor-pointer hover:bg-muted/70" : "hover:bg-muted/50",
+                  )}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                >
                   {columns.map((c) => (
-                    <TableCell key={c.key} className={c.className}>
+                    <TableCell key={c.key} className={c.className} onClick={c.key === "actions" ? (e) => e.stopPropagation() : undefined}>
                       {c.cell(row)}
                     </TableCell>
                   ))}

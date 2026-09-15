@@ -1,5 +1,6 @@
 "use client";
 
+import { Ban, Circle, Lock, Star, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { galaSeatStatusLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
@@ -12,10 +13,13 @@ const SEAT_SIZE = 44;
 const CLUSTER = 180;
 
 const SEAT_TONE: Record<GalaSeat["status"], string> = {
-  available: "bg-[var(--ticket)] border-[var(--lagoon)] text-[var(--night)]",
-  held: "bg-amber-300 border-amber-500 text-[var(--night)]",
-  confirmed: "bg-[var(--lagoon)] border-[var(--lagoon)] text-white",
-  blocked: "bg-[var(--night)]/25 border-[var(--night)]/40 text-[var(--night)]/50",
+  available:
+    "bg-[var(--status-empty-bg)] border-[var(--status-empty-border)] text-[var(--status-empty-fg)]",
+  held: "bg-[var(--status-locking-bg)] border-[var(--status-locking-border)] text-[var(--status-locking-fg)]",
+  confirmed:
+    "bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-fg)]",
+  blocked:
+    "bg-[var(--status-unavailable-bg)] border-[var(--status-unavailable-border)] text-[var(--status-unavailable-fg)]",
 };
 
 function seatOffset(index: number, count: number, shape: GalaTable["shape"]) {
@@ -100,9 +104,9 @@ export function GalaSeatMap({
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs text-muted-foreground sm:hidden">Vuốt ngang/dọc để xem toàn bộ sơ đồ</p>
-      <div className="overflow-auto border border-[var(--rule)] bg-[#e8eef1]">
+      <div className="overflow-auto border border-border bg-muted">
         <div className="bg-[var(--night)] px-4 py-3 text-center">
-          <p className="font-display text-sm tracking-wide text-[#fbf6ee]">
+          <p className="font-display text-sm tracking-wide text-[var(--on-night)]">
             {state.config?.stage_label ?? "Sân khấu"}
           </p>
           <div className="mx-auto mt-2 h-1.5 w-2/3 bg-[var(--lantern)]/80" />
@@ -135,7 +139,7 @@ export function GalaSeatMap({
               >
                 <div
                   className={cn(
-                    "absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center border border-[var(--night)]/20 bg-[var(--ticket)] shadow-[inset_0_0_0_6px_rgba(14,124,134,0.12)]",
+                    "absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center border border-[var(--night)]/20 bg-[var(--ticket)] shadow-[inset_0_0_0_6px_rgb(13_148_136_/_12%)]",
                     table.shape === "round" ? "size-[72px] rounded-full" : "h-[58px] w-[86px] rounded-sm",
                   )}
                 >
@@ -171,7 +175,7 @@ export function GalaSeatMap({
                       aria-label={label}
                       aria-pressed={mineHeld || mineConfirmed}
                       className={cn(
-                        "absolute grid place-items-center border text-[11px] font-medium",
+                        "absolute grid place-items-center border text-[11px] font-medium transition-colors duration-300",
                         table.shape === "round" ? "rounded-full" : "rounded-sm",
                         SEAT_TONE[seat.status],
                         // own team's confirmed seats get a distinct fill, not
@@ -200,25 +204,49 @@ export function GalaSeatMap({
   );
 }
 
+const LEGEND_ITEMS: { Icon: typeof Circle; className: string; label: string }[] = [
+  {
+    Icon: Circle,
+    className: "border-[var(--status-empty-border)] bg-[var(--status-empty-bg)] text-[var(--status-empty-fg)]",
+    label: "Trống",
+  },
+  {
+    Icon: Lock,
+    className:
+      "border-[var(--status-locking-border)] bg-[var(--status-locking-bg)] text-[var(--status-locking-fg)]",
+    label: "Đang giữ",
+  },
+  {
+    Icon: Check,
+    className:
+      "border-[var(--status-confirmed-border)] bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-fg)]",
+    label: "Đã xác nhận",
+  },
+  {
+    Icon: Ban,
+    className:
+      "border-[var(--status-unavailable-border)] bg-[var(--status-unavailable-bg)] text-[var(--status-unavailable-fg)]",
+    label: "Không khả dụng",
+  },
+  {
+    Icon: Star,
+    className: "border-[var(--lantern)] bg-[var(--lantern)]/12 text-[var(--lantern)]",
+    label: "Team bạn",
+  },
+];
+
 export function GalaLegend() {
   return (
-    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full border border-[var(--lagoon)] bg-[var(--ticket)]" /> Trống
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-amber-300" /> Đang chọn
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--lagoon)]" /> Đã xác nhận (Team khác)
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--night)]/25" /> Khoá
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--lantern)] ring-2 ring-[var(--lantern)] ring-offset-1" />{" "}
-        Team bạn
-      </span>
+    <div className="flex flex-wrap gap-2 text-xs">
+      {LEGEND_ITEMS.map(({ Icon, className, label }) => (
+        <span
+          key={label}
+          className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium", className)}
+        >
+          <Icon className="size-3.5" aria-hidden />
+          {label}
+        </span>
+      ))}
     </div>
   );
 }

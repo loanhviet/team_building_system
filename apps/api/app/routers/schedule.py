@@ -1,7 +1,10 @@
+import io
 from typing import Annotated
 
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
 
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.queue import get_queue
@@ -44,6 +47,38 @@ async def list_schedule_items(event_id: int, db: DbSession, user: CurrentUser) -
     if not _is_admin(user):
         items = [i for i in items if i.is_published]
     return items
+
+
+@router.get("/schedule-items/export")
+async def export_schedule_items(
+    event_id: int, db: DbSession, _user: AdminUser
+) -> StreamingResponse:
+    items = await master_data.list_all(
+        db, ScheduleItem, event_id=event_id, order_by=ScheduleItem.sort_order
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Lịch trình"
+    ws.append(["Ngày", "Bắt đầu", "Kết thúc", "Tiêu đề", "Địa điểm", "Đối tượng", "Công bố", "Mô tả"])
+    for item in items:
+        ws.append([
+            str(item.day_date or ""),
+            item.start_at.isoformat(sep=" ", timespec="minutes") if item.start_at else "",
+            item.end_at.isoformat(sep=" ", timespec="minutes") if item.end_at else "",
+            item.title,
+            item.location or "",
+            item.audience,
+            "Có" if item.is_published else "Nháp",
+            item.description or "",
+        ])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="schedule_event_{event_id}.xlsx"'},
+    )
 
 
 @router.post("/schedule-items", response_model=ScheduleItemOut, status_code=status.HTTP_201_CREATED)

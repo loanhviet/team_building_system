@@ -11,7 +11,7 @@ from app.core.queue import get_queue
 from app.core.security import decode_access_token
 from app.core.ws_manager import gala_manager, publish_gala_event
 from app.models.auth import User
-from app.models.enums import UserRole
+from app.models.enums import EventStatus, UserRole
 from app.models.event import Event
 from app.models.gala import GalaConfig, GalaSeat, GalaTable, GalaTurn
 from app.models.organization import Employee, Team
@@ -160,8 +160,22 @@ async def update_table(
     return table
 
 
+DRAW_ALLOWED_STATUSES = {
+    EventStatus.registration_closed, EventStatus.allocation_processing,
+    EventStatus.information_published, EventStatus.event_started,
+}
+
+
 @router.post("/draw", response_model=list[GalaTurnOut])
 async def draw(event_id: int, db: DbSession, user: AdminUser) -> list[GalaTurnOut]:
+    event = await master_data.get_or_404(db, Event, event_id)
+    if event.status not in DRAW_ALLOWED_STATUSES:
+        raise AppError(
+            "invalid_event_status",
+            f"Không thể bốc thăm khi sự kiện đang ở trạng thái '{event.status.value}'. "
+            "Cần đóng đăng ký trước — danh sách Team có thể còn thay đổi khi đăng ký vẫn mở.",
+            status.HTTP_400_BAD_REQUEST,
+        )
     config = await _get_or_create_config(db, event_id)
     result = await db.execute(
         select(Employee.team_id)
@@ -241,13 +255,27 @@ async def _turns_out(db: DbSession, event_id: int) -> list[GalaTurnOut]:
         .where(GalaTurn.event_id == event_id)
         .order_by(GalaTurn.order_no)
     )
+    rows = result.all()
+
+    team_ids = {t.team_id for t, _name in rows}
+    represented_team_ids: set[int] = set()
+    if team_ids:
+        rep_result = await db.execute(
+            select(Employee.team_id)
+            .join(User, User.employee_id == Employee.id)
+            .where(Employee.team_id.in_(team_ids), User.role == UserRole.team_leader)
+            .distinct()
+        )
+        represented_team_ids = {row[0] for row in rep_result.all()}
+
     return [
         GalaTurnOut(
             id=t.id, team_id=t.team_id, team_name=name, order_no=t.order_no,
             seat_quota=t.seat_quota, status=t.status, started_at=t.started_at,
-            expires_at=t.expires_at,
+            expires_at=t.expires_at, is_makeup=t.is_makeup,
+            has_representative=t.team_id in represented_team_ids,
         )
-        for t, name in result.all()
+        for t, name in rows
     ]
 
 

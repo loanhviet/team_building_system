@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { FormField, MoreFields } from "@/components/domain/form-field";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
-import { Badge } from "@/components/ui/badge";
+import { StatusChip } from "@/components/domain/status-chip";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -320,91 +321,18 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
     },
   ];
 
-  const roomColumns: DataTableColumn<Room>[] = [
-    { key: "room_number", header: "Số phòng", cell: (r) => r.room_number, sortValue: (r) => r.room_number },
-    {
-      key: "room_type",
-      header: "Loại phòng",
-      cell: (r) => roomTypes?.find((t) => t.id === r.room_type_id)?.name ?? "—",
-    },
-    { key: "capacity", header: "Sức chứa", cell: (r) => r.capacity, sortValue: (r) => r.capacity },
-    {
-      key: "occupied",
-      header: "Đã ở",
-      cell: (r) => <Badge variant={r.occupied >= r.capacity ? "secondary" : "outline"}>{r.occupied}/{r.capacity}</Badge>,
-      sortValue: (r) => r.occupied,
-    },
-    {
-      key: "occupants",
-      header: "Người ở",
-      cell: (r) => {
-        const names = allAssignments.filter((a) => a.room_id === r.id).map((a) => a.full_name);
-        return names.length ? (
-          <span className="text-xs text-muted-foreground">{names.join(", ")}</span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        );
-      },
-    },
-    {
-      key: "actions",
-      header: "",
-      cell: (r) => (
-        <div className="flex gap-1">
-          <Button size="sm" variant="ghost" onClick={() => openEditRoom(r)}>
-            Sửa
-          </Button>
-          <ConfirmDialog
-            trigger={
-              <Button size="sm" variant="ghost">
-                Xoá
-              </Button>
-            }
-            title="Xoá phòng này?"
-            description="Chỉ xoá được khi không còn ai đang ở phòng này."
-            confirmLabel="Xoá"
-            destructive
-            onConfirm={() => deleteRoomMutation.mutate(r.id)}
-          />
-        </div>
-      ),
-    },
-  ];
-
-  const assignmentColumns: DataTableColumn<RoomAssignment>[] = [
-    { key: "employee_code", header: "Mã NV", cell: (a) => a.employee_code ?? "—", className: "font-mono" },
-    { key: "full_name", header: "Họ tên", cell: (a) => a.full_name, sortValue: (a) => a.full_name },
-    { key: "team_name", header: "Team", cell: (a) => a.team_name ?? "—", sortValue: (a) => a.team_name },
-    { key: "hotel_name", header: "Khách sạn", cell: (a) => a.hotel_name },
-    { key: "room_number", header: "Phòng", cell: (a) => a.room_number },
-    {
-      key: "actions",
-      header: "",
-      cell: (a) => (
-        <ConfirmDialog
-          trigger={
-            <Button size="sm" variant="ghost">
-              Bỏ gán
-            </Button>
-          }
-          title="Bỏ gán phòng?"
-          description={`${a.full_name} sẽ trở lại danh sách chưa có phòng.`}
-          confirmLabel="Bỏ gán"
-          destructive
-          onConfirm={() => unassignMutation.mutate(a.id)}
-        />
-      ),
-    },
-  ];
-
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4">
+        <div className="mr-auto">
+          <h2 className="font-display text-lg font-semibold">Phòng khách sạn</h2>
+          <p className="text-sm text-muted-foreground">Import danh sách phòng hoặc gán thủ công. CBNV chỉ xem sau khi công bố.</p>
+        </div>
         <Select
           value={hotelId ? String(hotelId) : undefined}
           onValueChange={(v) => setSelectedHotelId(Number(v))}
         >
-          <SelectTrigger className="w-64">
+          <SelectTrigger className="min-h-11 w-64">
             <SelectValue placeholder="Chọn khách sạn" />
           </SelectTrigger>
           <SelectContent>
@@ -429,28 +357,23 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
               <DialogTitle>{editingHotel ? "Sửa khách sạn" : "Thêm khách sạn"}</DialogTitle>
             </DialogHeader>
             <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Tên khách sạn</Label>
+              <FormField label="Tên khách sạn" required>
                 <Input value={hotelForm.name} onChange={(e) => setHotelForm({ ...hotelForm, name: e.target.value })} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Địa chỉ</Label>
-                <Input value={hotelForm.address} onChange={(e) => setHotelForm({ ...hotelForm, address: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label>Nhận phòng</Label>
+              </FormField>
+              <MoreFields>
+                <FormField label="Địa chỉ" className="sm:col-span-2">
+                  <Input value={hotelForm.address} onChange={(e) => setHotelForm({ ...hotelForm, address: e.target.value })} />
+                </FormField>
+                <FormField label="Nhận phòng">
                   <Input type="date" value={hotelForm.checkin_date} onChange={(e) => setHotelForm({ ...hotelForm, checkin_date: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Trả phòng</Label>
+                </FormField>
+                <FormField label="Trả phòng">
                   <Input type="date" value={hotelForm.checkout_date} onChange={(e) => setHotelForm({ ...hotelForm, checkout_date: e.target.value })} />
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Ghi chú</Label>
-                <Input value={hotelForm.note} onChange={(e) => setHotelForm({ ...hotelForm, note: e.target.value })} />
-              </div>
+                </FormField>
+                <FormField label="Ghi chú" className="sm:col-span-2">
+                  <Input value={hotelForm.note} onChange={(e) => setHotelForm({ ...hotelForm, note: e.target.value })} />
+                </FormField>
+              </MoreFields>
             </div>
             <DialogFooter>
               <Button disabled={!hotelForm.name || saveHotelMutation.isPending} onClick={() => saveHotelMutation.mutate()}>
@@ -575,9 +498,78 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                 </Dialog>
               </div>
             </div>
-            <DataTable columns={roomColumns} rows={allRooms} rowKey={(r) => r.id} emptyMessage="Chưa có phòng" />
+            {allRooms.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Chưa có phòng.</p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {allRooms.map((r) => {
+                  const guests = allAssignments.filter((a) => a.room_id === r.id);
+                  const full = r.occupied >= r.capacity;
+                  return (
+                    <div
+                      key={r.id}
+                      className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-display text-lg font-semibold">Phòng {r.room_number}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {roomTypes?.find((t) => t.id === r.room_type_id)?.name ?? "Phòng"} · {r.occupied}/{r.capacity}
+                            {full ? " · đầy" : ""}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => openEditRoom(r)}>
+                            Sửa
+                          </Button>
+                          <ConfirmDialog
+                            trigger={
+                              <Button variant="ghost" className="h-8 px-2 text-xs">
+                                Xoá
+                              </Button>
+                            }
+                            title="Xoá phòng này?"
+                            description="Chỉ xoá được khi không còn ai đang ở phòng này."
+                            confirmLabel="Xoá"
+                            destructive
+                            onConfirm={() => deleteRoomMutation.mutate(r.id)}
+                          />
+                        </div>
+                      </div>
+                      {guests.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Trống</p>
+                      ) : (
+                        <ul className="flex flex-col gap-1 text-sm">
+                          {guests.map((g) => (
+                            <li key={g.id} className="flex items-center justify-between gap-2">
+                              <span className="truncate">{g.full_name}</span>
+                              <ConfirmDialog
+                                trigger={
+                                  <Button variant="ghost" className="h-8 px-2 text-xs">
+                                    Bỏ
+                                  </Button>
+                                }
+                                title="Bỏ gán phòng?"
+                                description={`${g.full_name} sẽ trở lại danh sách chưa có phòng.`}
+                                confirmLabel="Bỏ gán"
+                                destructive
+                                onConfirm={() => unassignMutation.mutate(g.id)}
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </>
+      )}
+
+      {(unassigned?.length ?? 0) > 0 && (
+        <StatusChip kind="flag" label={`${unassigned!.length} người tham gia chưa có phòng`} />
       )}
 
       <div className="flex flex-col gap-2">
@@ -665,12 +657,16 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
           </Button>
         </div>
 
-        <DataTable
-          columns={assignmentColumns}
-          rows={allAssignments}
-          rowKey={(a) => a.id}
-          emptyMessage="Chưa gán phòng cho ai"
-        />
+        {(unassigned?.length ?? 0) > 0 && (
+          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+            {unassigned!.slice(0, 12).map((e) => (
+              <li key={e.employee_id}>
+                {e.employee_code} — {e.full_name}
+              </li>
+            ))}
+            {(unassigned?.length ?? 0) > 12 && <li>… và {(unassigned!.length) - 12} người nữa</li>}
+          </ul>
+        )}
       </div>
     </div>
   );

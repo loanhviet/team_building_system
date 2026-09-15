@@ -67,6 +67,11 @@ class TransportLeg(Base):
     direction: Mapped[str] = mapped_column(String(50))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # "before_flight" (this leg feeds a departure — airport-bound) or
+    # "after_flight" (this leg starts from arrival — hotel-bound); null = no
+    # flight relationship (e.g. a leg that never touches an airport). Drives
+    # bus_greedy's timing window — see services/allocation/bus_greedy.py
+    flight_timing: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class PickupPoint(Base):

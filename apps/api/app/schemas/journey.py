@@ -61,6 +61,7 @@ class JourneyScheduleItem(BaseModel):
 
 
 class JourneyAnnouncement(BaseModel):
+    id: int
     title: str
     body_md: str
     is_pinned: bool

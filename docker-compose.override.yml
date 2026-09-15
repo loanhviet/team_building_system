@@ -1,5 +1,9 @@
 # Dev mode, auto-loaded by plain `docker compose`: bind-mounted source + hot reload.
 services:
+  qdrant:
+    ports:
+      - "6363:6333"
+
   api:
     volumes:
       - ./apps/api:/app

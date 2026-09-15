@@ -54,6 +54,8 @@ class RegistrationAdminOut(RegistrationOut):
     email: str
     team_id: int | None = None
     team_name: str | None
+    team_code: str | None = None
+    position: str | None = None
     shift_name: str | None = None
     transport_summary: str | None = None
 

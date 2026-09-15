@@ -79,3 +79,9 @@ class GalaTurn(Base):
     status: Mapped[str] = mapped_column(TurnStatus, default="waiting")
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # a team whose original turn ran out (expired/skipped) without filling its
+    # quota gets exactly one of these, appended to the end of the queue once
+    # the normal waiting list is exhausted — see gala_service._spawn_makeup_turns.
+    # Without this a team that missed its turn had zero seats, permanently
+    # (BRD §8 has no "you're just out of luck" case).
+    is_makeup: Mapped[bool] = mapped_column(Boolean, default=False)

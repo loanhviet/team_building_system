@@ -51,3 +51,19 @@ async def test_journey_schedule_filters_by_shift_audience(client, world, auth_he
     titles = [item["title"] for item in resp.json()["schedule"]]
     assert "Chi Ca 1" in titles
     assert "Chi Ca 2" not in titles
+
+
+async def test_events_mine_and_journey_event_id(client, world, auth_headers, db_session):
+    world.event.status = EventStatus.information_published
+    await db_session.commit()
+    headers = auth_headers(world.employee_user)
+
+    mine = await client.get("/api/events/mine", headers=headers)
+    assert mine.status_code == 200
+    body = mine.json()
+    assert any(e["id"] == world.event.id and e["has_journey"] for e in body)
+
+    ok = await client.get(f"/api/journey/me?event_id={world.event.id}", headers=headers)
+    assert ok.status_code == 200
+    missing = await client.get("/api/journey/me?event_id=999999", headers=headers)
+    assert missing.status_code == 404

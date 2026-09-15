@@ -1,3 +1,4 @@
+import hashlib
 import io
 from collections import defaultdict
 from typing import Annotated
@@ -86,21 +87,25 @@ async def _registration_out(db: DbSession, reg: Registration) -> RegistrationOut
 
 
 @me_router.get("/me", response_model=RegistrationOut | None)
-async def get_my_latest_registration(db: DbSession, user: CurrentUser) -> RegistrationOut | None:
+async def get_my_latest_registration(
+    db: DbSession, user: CurrentUser, event_id: int | None = None
+) -> RegistrationOut | None:
     """The most recent registration for this employee whose event hasn't
     fully wrapped up — doesn't auto-create a draft (unlike the scoped
     endpoint), since there may be no event_id to create one against."""
     employee = await _current_employee(db, user)
-    result = await db.execute(
+    stmt = (
         select(Registration)
         .join(Event, Event.id == Registration.event_id)
-        .where(
-            Registration.employee_id == employee.id,
-            Event.status != EventStatus.event_completed,
-        )
+        .where(Registration.employee_id == employee.id)
         .order_by(Registration.id.desc())
         .limit(1)
     )
+    if event_id is not None:
+        stmt = stmt.where(Registration.event_id == event_id)
+    else:
+        stmt = stmt.where(Event.status != EventStatus.event_completed)
+    result = await db.execute(stmt)
     reg = result.scalar_one_or_none()
     return await _registration_out(db, reg) if reg is not None else None
 
@@ -196,10 +201,14 @@ async def submit_my_registration(
     needed_count = sum(1 for n in needs if n.is_needed)
     transport_summary = f"{needed_count} chặng" if needed_count else "Không có nhu cầu"
 
-    # dedupe key is per-registration, not per-submission: submit_registration()
-    # bumps submitted_at on every resubmit, so keying on it would send a fresh
-    # "confirmed" email every time someone edits and resubmits before the
-    # registration deadline instead of only once
+    # dedupe key is per-registration *content*, not just per-registration id:
+    # keying on reg.id alone (the previous behavior) meant editing and
+    # resubmitting with a different Ca or transport needs before the deadline
+    # never sent an updated confirmation — CBNV kept the first email forever,
+    # even if it no longer matched what they'd actually submitted
+    content_fingerprint = hashlib.sha1(
+        f"{reg.is_participating}:{reg.shift_id}:{sorted(n.leg_id for n in needs if n.is_needed)}".encode()
+    ).hexdigest()[:10]
     outbox_id = await enqueue_email(
         db,
         event_id=event_id,
@@ -214,7 +223,7 @@ async def submit_my_registration(
             "transport_summary": transport_summary,
             "app_url": settings.app_base_url,
         },
-        dedupe_key=f"registration_confirmed:{reg.id}",
+        dedupe_key=f"registration_confirmed:{reg.id}:{content_fingerprint}",
     )
 
     await record_audit(
@@ -261,7 +270,11 @@ async def _admin_list_query(
         stmt = stmt.where(Registration.status == status_filter)
     if search:
         needle = f"%{search.strip()}%"
-        stmt = stmt.where(Employee.full_name.ilike(needle) | Employee.email.ilike(needle))
+        stmt = stmt.where(
+            Employee.full_name.ilike(needle)
+            | Employee.email.ilike(needle)
+            | Employee.employee_code.ilike(needle)
+        )
     if team_id is not None:
         stmt = stmt.where(Employee.team_id == team_id)
     if shift_id is not None:
@@ -305,11 +318,49 @@ async def list_registrations(
                 email=reg.employee.email,
                 team_id=reg.employee.team_id,
                 team_name=reg.employee.team.name if reg.employee.team else None,
+                team_code=reg.employee.team.code if reg.employee.team else None,
+                position=reg.employee.position,
                 shift_name=shifts.get(reg.shift_id) if reg.shift_id else None,
                 transport_summary=", ".join(needs_by_reg.get(reg.id, [])) or None,
             )
         )
     return out
+
+
+@router.post("/remind", status_code=status.HTTP_202_ACCEPTED)
+async def remind_unsubmitted(
+    event_id: int,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> dict:
+    """Nhắc CBNV còn bản nháp chưa gửi. Gửi qua worker, không spam trùng trong ngày."""
+    await master_data.get_or_404(db, Event, event_id)
+    result = await db.execute(
+        select(Registration).where(
+            Registration.event_id == event_id,
+            Registration.status == "draft",
+        )
+    )
+    drafts = result.scalars().all()
+    if not drafts:
+        raise AppError(
+            "nothing_to_remind",
+            "Không còn hồ sơ nháp để nhắc",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    await record_audit(
+        db,
+        actor_user_id=user.id,
+        action="remind",
+        entity_type="registration",
+        entity_id=event_id,
+        after={"count": len(drafts)},
+        event_id=event_id,
+    )
+    await db.commit()
+    await queue.enqueue_job("remind_unsubmitted_task", event_id)
+    return {"queued": len(drafts)}
 
 
 @router.get("/export")

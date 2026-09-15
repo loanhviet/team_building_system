@@ -1,16 +1,23 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bus, ClipboardCheck, Plane, UserCheck } from "lucide-react";
+import type { ComponentType, ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Callout } from "@/components/domain/callout";
+import { ChoiceCard } from "@/components/domain/form-field";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { EmptyState } from "@/components/domain/empty-state";
+import { PageHeader } from "@/components/domain/page-header";
+import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { ProfileCard } from "@/components/domain/profile-card";
+import { StepIndicator } from "@/components/domain/step-indicator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -22,6 +29,7 @@ import {
 import { apiFetch, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
+import { useEmployeeEvent } from "@/lib/use-employee-event";
 import type {
   Employee,
   Event,
@@ -33,35 +41,30 @@ import type {
   TransportNeed,
 } from "@/types/api";
 
+function SectionTitle({
+  step,
+  icon: Icon,
+  children,
+}: {
+  step: number;
+  icon: ComponentType<{ className?: string }>;
+  children: ReactNode;
+}) {
+  return (
+    <CardTitle className="flex items-center gap-2 text-base">
+      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/12 text-xs font-semibold text-primary">
+        {step}
+      </span>
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      {children}
+    </CardTitle>
+  );
+}
+
 export default function RegisterPage() {
   const { user } = useAuth();
-
-  const { data: currentEvent, isLoading: currentLoading } = useQuery({
-    queryKey: ["events", "current"],
-    queryFn: () => apiFetch<Event | null>("/api/events/current"),
-    enabled: !!user,
-  });
-
-  // When there's no event open for registration, fall back to whatever event
-  // the CBNV's most recent registration belongs to — without this, closing
-  // registration made an already-submitted registration permanently
-  // unviewable (the page had no event_id left to ask for it with).
-  const { data: latestReg, isLoading: latestLoading } = useQuery({
-    queryKey: ["registrations", "me", "latest"],
-    queryFn: () => apiFetch<Registration | null>("/api/registrations/me"),
-    enabled: !!user && !currentLoading && !currentEvent,
-  });
-
-  const pastEventId = !currentEvent ? latestReg?.event_id : undefined;
-  const { data: pastEvent, isLoading: pastEventLoading } = useQuery({
-    queryKey: ["events", pastEventId],
-    queryFn: () => apiFetch<Event>(`/api/events/${pastEventId}`),
-    enabled: !!pastEventId,
-  });
-
-  const event = currentEvent ?? pastEvent ?? null;
-  const eventId = event?.id;
-  const isOpenForEditing = !!currentEvent;
+  const { event, eventId, canRegister, isLoading: eventLoading } = useEmployeeEvent();
+  const isOpenForEditing = canRegister;
 
   // The scoped endpoint auto-creates a draft row — only call it while
   // registration is actually open. Once closed, `latestReg` (already fetched
@@ -71,9 +74,12 @@ export default function RegisterPage() {
     isLoading: registrationLoading,
     error: registrationError,
   } = useQuery({
-    queryKey: ["events", eventId, "registrations", "me"],
-    queryFn: () => apiFetch<Registration>(`/api/events/${eventId}/registrations/me`),
-    enabled: !!eventId && isOpenForEditing,
+    queryKey: ["events", eventId, "registrations", "me", isOpenForEditing],
+    queryFn: () =>
+      isOpenForEditing
+        ? apiFetch<Registration>(`/api/events/${eventId}/registrations/me`)
+        : apiFetch<Registration | null>(`/api/registrations/me?event_id=${eventId}`),
+    enabled: !!eventId,
   });
 
   const { data: employee } = useQuery({
@@ -106,11 +112,10 @@ export default function RegisterPage() {
     enabled: !!eventId && isOpenForEditing,
   });
 
-  const isLoading =
-    currentLoading || (!currentEvent && (latestLoading || pastEventLoading));
+  const isLoading = eventLoading;
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Đang tải...</p>;
+    return <PageSkeleton rows={3} />;
   }
 
   if (!event) {
@@ -122,7 +127,7 @@ export default function RegisterPage() {
     );
   }
 
-  const effectiveRegistration = isOpenForEditing ? registration : latestReg;
+  const effectiveRegistration = registration ?? null;
 
   if (isOpenForEditing && registrationError) {
     return (
@@ -135,7 +140,7 @@ export default function RegisterPage() {
   }
 
   if (isOpenForEditing && (registrationLoading || !registration)) {
-    return <p className="text-sm text-muted-foreground">Đang tải form đăng ký...</p>;
+    return <PageSkeleton rows={3} />;
   }
 
   if (!effectiveRegistration) {
@@ -223,7 +228,27 @@ function RegistrationForm({
   );
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [step, setStep] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const { user } = useAuth();
+
+  type StepId = "profile" | "join" | "shift" | "transport" | "review";
+  const flow: { id: StepId; label: string }[] =
+    isParticipating === false
+      ? [
+          { id: "profile", label: "Hồ sơ" },
+          { id: "join", label: "Tham gia" },
+          { id: "review", label: "Xem lại" },
+        ]
+      : [
+          { id: "profile", label: "Hồ sơ" },
+          { id: "join", label: "Tham gia" },
+          { id: "shift", label: "Ca bay" },
+          { id: "transport", label: "Xe đưa đón" },
+          { id: "review", label: "Xem lại" },
+        ];
+  const currentStep = flow[Math.min(step, flow.length - 1)];
+  const stepNumOf = (id: StepId) => flow.findIndex((s) => s.id === id) + 1;
 
   const outboundLegs = legs.filter((l) => l.direction === "outbound");
   const inboundLegs = legs.filter((l) => l.direction === "inbound");
@@ -268,12 +293,17 @@ function RegistrationForm({
       });
     },
     onSuccess: () => {
+      setSubmitError(null);
       setJustSubmitted(true);
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "registrations", "me"] });
       queryClient.invalidateQueries({ queryKey: ["registrations", "me", "latest"] });
       queryClient.invalidateQueries({ queryKey: ["employees", "me"] });
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+    onError: (err) => {
+      const msg = err instanceof ApiError ? err.message : "Có lỗi xảy ra";
+      setSubmitError(msg);
+      toast.error(msg);
+    },
   });
 
   const cancelMutation = useMutation({
@@ -296,6 +326,21 @@ function RegistrationForm({
     (!isParticipating ||
       (agreed && shiftId !== null && phone.trim() !== "" && needsSelectionValid)) &&
     !submitMutation.isPending;
+
+  const stepBlockedReason = (): string | null => {
+    if (!currentStep) return null;
+    if (currentStep.id === "join" && isParticipating === null) return "Chọn Có hoặc Không tham gia.";
+    if (currentStep.id === "join" && isParticipating && !agreed) return "Cần đồng ý quy định chương trình.";
+    if (currentStep.id === "join" && isParticipating && termsError) return "Không tải được quy định.";
+    if (currentStep.id === "shift" && shiftId === null) return "Chọn ca đăng ký (nguyện vọng).";
+    if (currentStep.id === "transport" && !needsSelectionValid) {
+      return "Mỗi chặng cần xe phải chọn điểm đón/trả.";
+    }
+    if (currentStep.id === "review" && isParticipating && phone.trim() === "") {
+      return "Nhập số điện thoại ở bước Hồ sơ.";
+    }
+    return null;
+  };
 
   if (justSubmitted) {
     const chosenShift = shifts.find((s) => s.id === shiftId);
@@ -338,118 +383,203 @@ function RegistrationForm({
     );
   }
 
+  const show = (id: StepId) => readOnly || currentStep?.id === id;
+  const blocked = stepBlockedReason();
+  const chosenShift = shifts.find((s) => s.id === shiftId);
+  const chosenLegs = legs.filter((l) => needs[l.id]?.is_needed);
+
   return (
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
     <div className="flex flex-col gap-5">
-      <div>
-        <p className="ticket-kicker">Đăng ký tham gia</p>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">{event.name}</h1>
-      </div>
-
-      {readOnly && (
-        <div className="rounded-lg border border-muted-foreground/30 bg-muted px-3 py-2 text-sm">
-          BTC đã đóng đăng ký. Đây là thông tin bạn đã gửi — liên hệ BTC nếu cần thay đổi.
-        </div>
-      )}
-
-      <ProfileCard
-        controlledPhone={readOnly ? undefined : { value: phone, onChange: setPhone }}
+      <PageHeader
+        title="Phiếu đăng ký tham gia"
+        description={
+          event.registration_close_at && !readOnly
+            ? `${event.name} · Hạn chỉnh sửa: ${formatDateTime(event.registration_close_at)}`
+            : event.name
+        }
       />
 
+      {readOnly && (
+        <Callout tone="info">
+          BTC đã đóng đăng ký. Đây là thông tin bạn đã gửi — liên hệ BTC nếu cần thay đổi.
+        </Callout>
+      )}
+
       {registration.status === "submitted" && !readOnly && (
-        <div className="rounded-lg border border-primary/30 bg-primary/8 px-3 py-2 text-sm">
+        <Callout tone="ok">
           Đã gửi lúc {formatDateTime(registration.submitted_at)}.
-          {event.registration_close_at ? (
-            <> Bạn có thể sửa đến {formatDateTime(event.registration_close_at)}.</>
-          ) : (
-            <> Bạn vẫn sửa được trước khi BTC đóng đăng ký.</>
-          )}
+          {event.registration_close_at
+            ? ` Bạn có thể sửa đến ${formatDateTime(event.registration_close_at)}.`
+            : " Bạn vẫn sửa được trước khi BTC đóng đăng ký."}
+        </Callout>
+      )}
+
+      {!readOnly && <StepIndicator steps={flow.map((s) => s.label)} current={Math.min(step, flow.length - 1)} />}
+
+      {submitError && (
+        <div id="register-error-summary" tabIndex={-1}>
+          <Callout tone="danger" title="Không gửi được đăng ký">
+            {submitError}
+          </Callout>
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Xác nhận tham gia</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <RadioGroup
-            value={isParticipating === null ? undefined : String(isParticipating)}
-            onValueChange={(v) => setIsParticipating(v === "true")}
-            className="flex flex-row gap-4"
-          >
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="true" disabled={readOnly} />
-              Có tham gia
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="false" disabled={readOnly} />
-              Không tham gia
-            </label>
-          </RadioGroup>
+      <div key={readOnly ? "review-all" : currentStep?.id} className="flex animate-in flex-col gap-4 fade-in slide-in-from-right-2 duration-200">
+      {show("profile") && (
+        <ProfileCard
+          step={stepNumOf("profile")}
+          controlledPhone={readOnly ? undefined : { value: phone, onChange: setPhone }}
+        />
+      )}
 
-          {isParticipating && (
-            <>
+      {show("join") && (
+        <Card>
+          <CardHeader>
+            <SectionTitle step={stepNumOf("join")} icon={UserCheck}>
+              Bạn có tham gia không?
+            </SectionTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <ChoiceCard
+                selected={isParticipating === true}
+                title="Có, tôi tham gia"
+                hint="Sẽ chọn ca và nhu cầu xe ở bước sau"
+                disabled={readOnly}
+                onClick={() => setIsParticipating(true)}
+              />
+              <ChoiceCard
+                selected={isParticipating === false}
+                title="Không tham gia"
+                hint="BTC ghi nhận, không phân bổ nguồn lực"
+                disabled={readOnly}
+                onClick={() => setIsParticipating(false)}
+              />
+            </div>
+            {isParticipating && !readOnly && terms && (
               <div className="flex flex-col gap-2">
-                <Label>
-                  Ca đăng ký <span className="text-destructive">*</span>
-                </Label>
-                <Select
-                  value={shiftId ? String(shiftId) : undefined}
-                  onValueChange={(v) => setShiftId(Number(v))}
-                  disabled={readOnly}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Chọn ca" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {shifts.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        {s.name}
-                        {s.depart_after_time ? ` (sau ${s.depart_after_time})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Đây là nguyện vọng. BTC phân bổ theo nguồn lực thực tế, không cam kết đáp ứng 100%.
-                </p>
+                <div className="max-h-40 overflow-auto rounded-xl border border-border bg-muted/40 p-3 text-sm whitespace-pre-wrap">
+                  {terms.terms_text}
+                </div>
+                <label className="flex min-h-11 items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={agreed}
+                    onCheckedChange={(checked) => setAgreed(checked === true)}
+                  />
+                  Tôi đã đọc và đồng ý quy định
+                </label>
               </div>
+            )}
+            {isParticipating && !readOnly && !terms && termsError && (
+              <EmptyState
+                variant="error"
+                title="Không tải được quy định chương trình"
+                description="Vui lòng tải lại trang. Bạn cần đọc và đồng ý quy định trước khi gửi đăng ký."
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-              {outboundLegs.length > 0 && (
-                <TransportLegGroup
-                  title="Chiều đi"
-                  legs={outboundLegs}
-                  needs={needs}
-                  setNeeds={setNeeds}
-                  pickupPoints={sitePickupPoints}
+      {show("shift") && isParticipating && (
+        <Card>
+          <CardHeader>
+            <SectionTitle step={stepNumOf("shift")} icon={Plane}>
+              Ca đăng ký
+            </SectionTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Nguyện vọng ca bay — BTC phân bổ theo slot thật, không cam kết 100%.
+            </p>
+            <div className="flex flex-col gap-2">
+              {shifts.map((s) => (
+                <ChoiceCard
+                  key={s.id}
+                  selected={shiftId === s.id}
+                  title={s.name}
+                  hint={s.depart_after_time ? `Khởi hành sau ${s.depart_after_time}` : undefined}
                   disabled={readOnly}
+                  onClick={() => setShiftId(s.id)}
                 />
-              )}
-              {inboundLegs.length > 0 && (
-                <TransportLegGroup
-                  title="Chiều về"
-                  legs={inboundLegs}
-                  needs={needs}
-                  setNeeds={setNeeds}
-                  pickupPoints={sitePickupPoints}
-                  disabled={readOnly}
-                />
-              )}
-              {otherLegs.length > 0 && (
-                <TransportLegGroup
-                  title="Chặng khác"
-                  legs={otherLegs}
-                  needs={needs}
-                  setNeeds={setNeeds}
-                  pickupPoints={sitePickupPoints}
-                  disabled={readOnly}
-                />
-              )}
-              {legs.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  BTC chưa cấu hình chặng xe cho sự kiện này.
-                </p>
-              )}
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
+      {show("transport") && isParticipating && (
+        <Card>
+          <CardHeader>
+            <SectionTitle step={stepNumOf("transport")} icon={Bus}>
+              Nhu cầu xe
+            </SectionTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {outboundLegs.length > 0 && (
+              <TransportLegGroup
+                title="Chiều đi"
+                legs={outboundLegs}
+                needs={needs}
+                setNeeds={setNeeds}
+                pickupPoints={sitePickupPoints}
+                disabled={readOnly}
+              />
+            )}
+            {inboundLegs.length > 0 && (
+              <TransportLegGroup
+                title="Chiều về"
+                legs={inboundLegs}
+                needs={needs}
+                setNeeds={setNeeds}
+                pickupPoints={sitePickupPoints}
+                disabled={readOnly}
+              />
+            )}
+            {otherLegs.length > 0 && (
+              <TransportLegGroup
+                title="Chặng khác"
+                legs={otherLegs}
+                needs={needs}
+                setNeeds={setNeeds}
+                pickupPoints={sitePickupPoints}
+                disabled={readOnly}
+              />
+            )}
+            {legs.length === 0 && (
+              <p className="text-sm text-muted-foreground">BTC chưa cấu hình chặng xe cho sự kiện này.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {show("review") && (
+        <Card>
+          <CardHeader>
+            <SectionTitle step={stepNumOf("review")} icon={ClipboardCheck}>
+              {readOnly ? "Thông tin đã gửi" : "Xem lại & gửi"}
+            </SectionTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1 text-sm">
+              <p>
+                <span className="text-muted-foreground">Tham gia:</span>{" "}
+                {isParticipating ? "Có tham gia" : isParticipating === false ? "Không tham gia" : "—"}
+              </p>
+              {isParticipating && (
+                <>
+                  <p>
+                    <span className="text-muted-foreground">Ca:</span> {chosenShift?.name ?? "—"}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Xe:</span>{" "}
+                    {chosenLegs.length > 0 ? chosenLegs.map((l) => l.name).join(", ") : "Không đăng ký xe"}
+                  </p>
+                </>
+              )}
+            </div>
+            {isParticipating && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="wish-note">Mong muốn/đề xuất</Label>
                 <Textarea
@@ -463,63 +593,114 @@ function RegistrationForm({
                   BTC xem và xử lý thủ công. Hệ thống không cam kết đáp ứng.
                 </p>
               </div>
-
-              {!readOnly && terms && (
-                <label className="flex items-start gap-2 text-sm">
-                  <Checkbox
-                    className="mt-1"
-                    checked={agreed}
-                    onCheckedChange={(checked) => setAgreed(checked === true)}
+            )}
+            {!readOnly && (
+              <div className="flex flex-wrap gap-2">
+                <Button className="min-h-11" disabled={!canSubmit} onClick={() => submitMutation.mutate()}>
+                  {registration.status === "submitted" ? "Cập nhật đăng ký" : "Gửi đăng ký"}
+                </Button>
+                {registration.status === "submitted" && (
+                  <ConfirmDialog
+                    trigger={
+                      <Button variant="outline" className="min-h-11" disabled={cancelMutation.isPending}>
+                        Huỷ đăng ký
+                      </Button>
+                    }
+                    title="Huỷ đăng ký?"
+                    description={
+                      <div className="flex flex-col gap-2 pt-2 text-left">
+                        <p>Hành động này cần liên hệ BTC nếu bạn muốn đăng ký lại sau đó.</p>
+                        <Label htmlFor="cancel-reason">Lý do (không bắt buộc)</Label>
+                        <Textarea
+                          id="cancel-reason"
+                          value={cancelReason}
+                          onChange={(e) => setCancelReason(e.target.value)}
+                          placeholder="Cho BTC biết lý do bạn huỷ..."
+                        />
+                      </div>
+                    }
+                    confirmLabel="Huỷ đăng ký"
+                    destructive
+                    onConfirm={() => cancelMutation.mutate(cancelReason)}
                   />
-                  <span>{terms.terms_text}</span>
-                </label>
-              )}
-              {!readOnly && !terms && termsError && (
-                <EmptyState
-                  variant="error"
-                  title="Không tải được quy định chương trình"
-                  description="Vui lòng tải lại trang. Bạn cần đọc và đồng ý quy định trước khi gửi đăng ký."
-                />
-              )}
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      </div>
+
+      {!readOnly && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            disabled={step === 0}
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+          >
+            Quay lại
+          </Button>
+          {currentStep?.id !== "review" && (
+            <Button
+              type="button"
+              className="min-h-11"
+              disabled={!!blocked}
+              onClick={() => setStep((s) => Math.min(flow.length - 1, s + 1))}
+            >
+              Tiếp tục
+            </Button>
+          )}
+          {blocked && <p className="text-sm text-destructive">{blocked}</p>}
+        </div>
+      )}
+    </div>
+    <aside className="hidden lg:sticky lg:top-24 lg:block">
+      <div className="surface-card p-4">
+        <p className="text-xs font-semibold text-muted-foreground">Tóm tắt đăng ký</p>
+        {!readOnly && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Tiến trình</span>
+              <span>
+                {Math.min(step, flow.length - 1) + 1}/{flow.length} bước
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-200"
+                style={{
+                  width: `${((Math.min(step, flow.length - 1) + 1) / flow.length) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <dl className="mt-3 flex flex-col gap-2 text-sm">
+          <div>
+            <dt className="text-muted-foreground">Tham gia</dt>
+            <dd className="font-medium">
+              {isParticipating ? "Có tham gia" : isParticipating === false ? "Không tham gia" : "Chưa chọn"}
+            </dd>
+          </div>
+          {isParticipating && (
+            <>
+              <div>
+                <dt className="text-muted-foreground">Ca</dt>
+                <dd className="font-medium">{chosenShift?.name ?? "Chưa chọn"}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Xe</dt>
+                <dd className="font-medium">
+                  {chosenLegs.length > 0 ? chosenLegs.map((l) => l.name).join(", ") : "Không đăng ký xe"}
+                </dd>
+              </div>
             </>
           )}
-
-          {!readOnly && (
-            <div className="flex gap-2">
-              <Button disabled={!canSubmit} onClick={() => submitMutation.mutate()}>
-                {registration.status === "submitted" ? "Cập nhật đăng ký" : "Gửi đăng ký"}
-              </Button>
-              {registration.status === "submitted" && (
-                <ConfirmDialog
-                  trigger={
-                    <Button variant="outline" disabled={cancelMutation.isPending}>
-                      Huỷ đăng ký
-                    </Button>
-                  }
-                  title="Huỷ đăng ký?"
-                  description={
-                    <div className="flex flex-col gap-2 pt-2 text-left">
-                      <p>
-                        Hành động này cần liên hệ BTC nếu bạn muốn đăng ký lại sau đó.
-                      </p>
-                      <Label htmlFor="cancel-reason">Lý do (không bắt buộc)</Label>
-                      <Textarea
-                        id="cancel-reason"
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                        placeholder="Cho BTC biết lý do bạn huỷ..."
-                      />
-                    </div>
-                  }
-                  confirmLabel="Huỷ đăng ký"
-                  destructive
-                  onConfirm={() => cancelMutation.mutate(cancelReason)}
-                />
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </dl>
+      </div>
+    </aside>
     </div>
   );
 }
@@ -546,8 +727,8 @@ function TransportLegGroup({
         const need = needs[leg.id];
         const missingPickup = need?.is_needed && !need.pickup_point_id;
         return (
-          <div key={leg.id} className="flex flex-wrap items-center gap-3 text-sm">
-            <label className="flex items-center gap-2">
+          <div key={leg.id} className="rounded-xl border border-border bg-card p-3">
+            <label className="flex min-h-11 items-center gap-2 text-sm font-medium">
               <Checkbox
                 checked={need?.is_needed ?? false}
                 disabled={disabled}
@@ -562,10 +743,10 @@ function TransportLegGroup({
                   }))
                 }
               />
-              {leg.name}
+              Cần xe: {leg.name}
             </label>
             {need?.is_needed && (
-              <>
+              <div className="mt-2 pl-6">
                 <Select
                   value={need.pickup_point_id ? String(need.pickup_point_id) : undefined}
                   onValueChange={(v) =>
@@ -576,7 +757,7 @@ function TransportLegGroup({
                   }
                   disabled={disabled}
                 >
-                  <SelectTrigger className="w-48">
+                  <SelectTrigger className="min-h-11">
                     <SelectValue placeholder="Điểm đón/trả" />
                   </SelectTrigger>
                   <SelectContent>
@@ -588,12 +769,12 @@ function TransportLegGroup({
                   </SelectContent>
                 </Select>
                 {pickupPoints.length === 0 && (
-                  <p className="text-xs text-muted-foreground">BTC chưa cấu hình điểm đón</p>
+                  <p className="mt-1 text-xs text-muted-foreground">BTC chưa cấu hình điểm đón</p>
                 )}
                 {missingPickup && (
-                  <p className="text-xs text-destructive">Chọn điểm đón trước khi gửi</p>
+                  <p className="mt-1 text-xs text-destructive">Chọn điểm đón trước khi gửi</p>
                 )}
-              </>
+              </div>
             )}
           </div>
         );

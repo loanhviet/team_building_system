@@ -29,11 +29,17 @@ from app.models.registration import Registration
 
 class FakeQueue:
     """Stands in for the ArqRedis pool in tests: records what would have been
-    enqueued/published instead of touching Redis or a real worker."""
+    enqueued/published instead of touching Redis or a real worker. Also
+    stands in for the plain redis.asyncio.Redis client gala_service takes for
+    its seat locks (ArqRedis subclasses Redis in the real app, so the same
+    object serves both roles in prod) — `set`/`get`/`eval` are a minimal
+    in-memory reimplementation of the NX-lock + compare-and-delete pattern
+    `services/gala/seat_lock.py` relies on."""
 
     def __init__(self) -> None:
         self.jobs: list[tuple[str, tuple, dict]] = []
         self._kv: dict[str, int] = {}
+        self._locks: dict[str, str] = {}
 
     async def enqueue_job(self, name: str, *args, **kwargs):
         self.jobs.append((name, args, kwargs))
@@ -48,6 +54,21 @@ class FakeQueue:
 
     async def expire(self, key: str, seconds: int) -> bool:
         return True
+
+    async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if nx and key in self._locks:
+            return None
+        self._locks[key] = value
+        return True
+
+    async def get(self, key: str) -> str | None:
+        return self._locks.get(key)
+
+    async def eval(self, script: str, numkeys: int, key: str, arg: str) -> int:
+        if self._locks.get(key) == arg:
+            del self._locks[key]
+            return 1
+        return 0
 
 
 @pytest_asyncio.fixture

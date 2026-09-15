@@ -8,16 +8,16 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.config import get_settings
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
 from app.models.bus import Bus, BusAssignment
-from app.models.event import Event
+from app.models.event import Event, PickupPoint, TransportLeg
+from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
-from app.models.registration import Registration
+from app.models.registration import Registration, RegistrationTransportNeed
 from app.models.system import AllocationRun, Job
 from app.schemas.bus import (
     BusAdjustRequest,
@@ -26,17 +26,42 @@ from app.schemas.bus import (
     BusCreate,
     BusOut,
     BusUpdate,
+    UnlockBusAssignmentRequest,
 )
 from app.schemas.flight import AllocationEnqueuedOut, AllocationRunOut
 from app.services import master_data
+from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
-from app.services.notification.email_service import dispatch_email, enqueue_email
+from app.services.notification.email_service import PUBLISHED_STATUSES, notify_employees
 
 router = APIRouter(prefix="/events/{event_id}", tags=["buses"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
-settings = get_settings()
+
+
+async def _flight_times_by_employee(
+    db: DbSession, event_id: int, direction: str
+) -> dict[int, tuple[int, str, object, object]]:
+    """employee_id -> (flight_id, flight_code, depart_at, arrive_at) for a
+    flight direction — shared by list/adjust so pickup/timing checks and the
+    flight_code column read the same data."""
+    result = await db.execute(
+        select(
+            FlightAssignment.employee_id, Flight.id, Flight.flight_code,
+            Flight.depart_at, Flight.arrive_at,
+        )
+        .join(Flight, Flight.id == FlightAssignment.flight_id)
+        .where(
+            FlightAssignment.event_id == event_id,
+            FlightAssignment.direction == direction,
+            FlightAssignment.flight_id.is_not(None),
+        )
+    )
+    return {
+        eid: (fid, code, depart_at, arrive_at)
+        for eid, fid, code, depart_at, arrive_at in result.all()
+    }
 
 
 @router.get("/buses", response_model=list[BusOut])
@@ -64,31 +89,48 @@ async def create_bus(event_id: int, payload: BusCreate, db: DbSession, user: Adm
     return bus
 
 
+# fields that matter to someone already booked on this bus
+PASSENGER_FACING_BUS_FIELDS = {
+    "gather_at", "depart_at", "pickup_point_id", "destination", "leader_name", "leader_phone",
+}
+
+
 @router.patch("/buses/{bus_id}", response_model=BusOut)
 async def update_bus(
-    event_id: int, bus_id: int, payload: BusUpdate, db: DbSession, user: AdminUser
+    event_id: int,
+    bus_id: int,
+    payload: BusUpdate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> Bus:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
     bus = await master_data.get_or_404(db, Bus, bus_id, event_id=event_id)
     before = BusOut.model_validate(bus).model_dump(mode="json")
     await master_data.update(db, bus, payload.model_dump(exclude_unset=True))
+    after = BusOut.model_validate(bus).model_dump(mode="json")
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="bus", entity_id=bus_id,
-        before=before, after=BusOut.model_validate(bus).model_dump(mode="json"), event_id=event_id,
+        before=before, after=after, event_id=event_id,
     )
     await db.commit()
     await db.refresh(bus)
+
+    changed_passenger_fields = any(before.get(f) != after.get(f) for f in PASSENGER_FACING_BUS_FIELDS)
+    if changed_passenger_fields and event.status.value in PUBLISHED_STATUSES:
+        result = await db.execute(
+            select(BusAssignment.employee_id).where(
+                BusAssignment.event_id == event_id, BusAssignment.bus_id == bus_id
+            )
+        )
+        employee_ids = [row[0] for row in result.all()]
+        await notify_employees(
+            db, queue, event, employee_ids, "bus_changed",
+            dedupe_suffix=f"{bus_id}:{utcnow().isoformat()}",
+        )
+
     return bus
-
-
-def _assignment_out(a: BusAssignment) -> BusAssignmentOut:
-    return BusAssignmentOut(
-        id=a.id, bus_id=a.bus_id, employee_id=a.employee_id, leg_id=a.leg_id, source=a.source,
-        is_locked=a.is_locked, is_flagged=a.is_flagged, flag_reason=a.flag_reason,
-        employee_code=a.employee.employee_code, full_name=a.employee.full_name,
-        team_name=a.employee.team.name if a.employee.team else None,
-    )
 
 
 @router.get("/bus-assignments", response_model=list[BusAssignmentOut])
@@ -103,7 +145,60 @@ async def list_bus_assignments(
     if leg_id is not None:
         stmt = stmt.where(BusAssignment.leg_id == leg_id)
     result = await db.execute(stmt)
-    return [_assignment_out(a) for a in result.scalars().all()]
+    assignments = result.scalars().all()
+
+    # requested pickup point per (employee, leg) — only fetched for the legs
+    # actually present in this result, so an unfiltered "all legs" call
+    # doesn't pull the whole event's transport_needs for nothing
+    leg_ids = {a.leg_id for a in assignments}
+    pickup_by_employee_leg: dict[tuple[int, int], str] = {}
+    flight_by_employee_by_direction: dict[str, dict[int, tuple[int, str, object, object]]] = {}
+    if leg_ids:
+        legs = {
+            leg.id: leg
+            for leg in (
+                await db.execute(select(TransportLeg).where(TransportLeg.id.in_(leg_ids)))
+            ).scalars().all()
+        }
+        need_result = await db.execute(
+            select(
+                Registration.employee_id, RegistrationTransportNeed.leg_id, PickupPoint.name,
+            )
+            .join(Registration, Registration.id == RegistrationTransportNeed.registration_id)
+            .join(PickupPoint, PickupPoint.id == RegistrationTransportNeed.pickup_point_id)
+            .where(
+                Registration.event_id == event_id,
+                RegistrationTransportNeed.leg_id.in_(leg_ids),
+            )
+        )
+        pickup_by_employee_leg = {
+            (eid, lid): name for eid, lid, name in need_result.all()
+        }
+        for direction in {leg.direction for leg in legs.values() if leg.direction in ("outbound", "inbound")}:
+            flight_by_employee_by_direction[direction] = await _flight_times_by_employee(
+                db, event_id, direction
+            )
+
+    out = []
+    for a in assignments:
+        leg = legs.get(a.leg_id) if leg_ids else None
+        flight_row = (
+            flight_by_employee_by_direction.get(leg.direction, {}).get(a.employee_id)
+            if leg is not None
+            else None
+        )
+        out.append(
+            BusAssignmentOut(
+                id=a.id, bus_id=a.bus_id, employee_id=a.employee_id, leg_id=a.leg_id,
+                source=a.source, is_locked=a.is_locked, is_flagged=a.is_flagged,
+                flag_reason=a.flag_reason, employee_code=a.employee.employee_code,
+                full_name=a.employee.full_name,
+                team_name=a.employee.team.name if a.employee.team else None,
+                requested_pickup_point_name=pickup_by_employee_leg.get((a.employee_id, a.leg_id)),
+                flight_code=flight_row[1] if flight_row else None,
+            )
+        )
+    return out
 
 
 @router.post(
@@ -209,6 +304,50 @@ async def adjust_bus_assignments(
         )
     employee_ids = valid_ids
 
+    warnings = []
+    target_leg = await db.get(TransportLeg, target_bus.leg_id)
+    if target_leg is not None:
+        pickup_result = await db.execute(
+            select(Registration.employee_id, RegistrationTransportNeed.pickup_point_id)
+            .join(Registration, Registration.id == RegistrationTransportNeed.registration_id)
+            .where(
+                Registration.event_id == event_id,
+                Registration.employee_id.in_(employee_ids),
+                RegistrationTransportNeed.leg_id == target_bus.leg_id,
+            )
+        )
+        pickup_by_employee = dict(pickup_result.all())
+        flight_by_employee = (
+            await _flight_times_by_employee(db, event_id, target_leg.direction)
+            if target_leg.direction in ("outbound", "inbound")
+            else {}
+        )
+        code_result = await db.execute(
+            select(Employee.id, Employee.employee_code).where(Employee.id.in_(employee_ids))
+        )
+        code_by_employee = dict(code_result.all())
+
+        incompatible_codes = []
+        for employee_id in employee_ids:
+            _fid, _code, flight_depart_at, flight_arrive_at = flight_by_employee.get(
+                employee_id, (None, None, None, None)
+            )
+            if not bus_compatible(
+                target_bus.pickup_point_id, target_bus.depart_at,
+                pickup_by_employee.get(employee_id), flight_depart_at, flight_arrive_at,
+                target_leg.flight_timing,
+            ):
+                incompatible_codes.append(code_by_employee.get(employee_id) or "?")
+        if incompatible_codes:
+            if not payload.force:
+                raise AppError(
+                    "bus_incompatible",
+                    f"Xe {target_bus.code} không khớp điểm đón/giờ bay đã đăng ký của: "
+                    f"{', '.join(sorted(incompatible_codes))}",
+                    status.HTTP_409_CONFLICT,
+                )
+            warnings.append("bus_incompatible_forced")
+
     result = await db.execute(
         select(BusAssignment).where(
             BusAssignment.event_id == event_id,
@@ -220,7 +359,6 @@ async def adjust_bus_assignments(
     moving_in = employee_ids - current_on_target
     would_be_count = len(current_on_target) + len(moving_in)
 
-    warnings = []
     if would_be_count > target_bus.capacity:
         if not payload.force:
             raise AppError(
@@ -263,27 +401,40 @@ async def adjust_bus_assignments(
 
     await db.commit()
     if event.status.value in ("information_published", "event_started"):
-        outbox_ids = []
-        for employee_id in employee_ids:
-            employee = await db.get(Employee, employee_id)
-            if employee is None:
-                continue
-            outbox_id = await enqueue_email(
-                db, event_id=event_id, to_email=employee.email,
-                template_code="bus_changed",
-                payload={
-                    "full_name": employee.full_name, "event_name": event.name,
-                    "app_url": settings.app_base_url,
-                },
-                dedupe_key=f"bus_changed:{event_id}:{employee_id}:{utcnow().isoformat()}",
-            )
-            outbox_ids.append(outbox_id)
-        await db.commit()
-        # dispatch only after commit — see enqueue_email's docstring
-        for outbox_id in outbox_ids:
-            await dispatch_email(queue, outbox_id)
+        await notify_employees(
+            db, queue, event, list(employee_ids), "bus_changed",
+            dedupe_suffix=utcnow().isoformat(),
+        )
 
     return {"moved": len(employee_ids), "warnings": warnings}
+
+
+@router.post("/bus-assignments/unlock")
+async def unlock_bus_assignments(
+    event_id: int, payload: UnlockBusAssignmentRequest, db: DbSession, user: AdminUser
+) -> dict:
+    """Same reasoning as the flight unlock endpoint: a manual bus reassign
+    pins `is_locked=True` forever otherwise, so a later auto-run could never
+    reconsider these people again."""
+    await master_data.get_or_404(db, Event, event_id)
+    result = await db.execute(
+        select(BusAssignment).where(
+            BusAssignment.event_id == event_id,
+            BusAssignment.leg_id == payload.leg_id,
+            BusAssignment.employee_id.in_(payload.employee_ids),
+            BusAssignment.is_locked.is_(True),
+        )
+    )
+    assignments = result.scalars().all()
+    for a in assignments:
+        a.is_locked = False
+    await record_audit(
+        db, actor_user_id=user.id, action="unlock", entity_type="bus_assignment",
+        entity_id=event_id, after={"employee_ids": [a.employee_id for a in assignments]},
+        event_id=event_id,
+    )
+    await db.commit()
+    return {"unlocked": len(assignments)}
 
 
 @router.get("/bus-assignments/export")

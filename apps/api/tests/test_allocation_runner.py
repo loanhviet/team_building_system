@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.core.time import utcnow
 from app.models.flight import Flight, FlightAssignment
+from app.models.organization import Site
 from app.models.registration import Registration
 from app.models.system import AllocationRun
 from app.services.allocation.runner import run_flight_allocation
@@ -58,3 +59,45 @@ async def test_run_flight_allocation_persists_summary_and_assignments(db_session
     await db_session.refresh(run)
     assert run.status == "succeeded"
     assert run.summary_json == summary
+
+
+async def test_run_flight_allocation_never_crosses_sites(db_session, world):
+    # world.site is HN with world.employee already registered. Add an HCM
+    # employee + registration, and one flight per site — the HCM person must
+    # never land on the HN-only flight, even though it's the only whole-team
+    # fit (regression for the audit's "49/49 HCM staff booked out of HAN" bug).
+    hcm_site = Site(code="HCM", name="Ho Chi Minh")
+    db_session.add(hcm_site)
+    await db_session.flush()
+    hcm_person = await make_employee(db_session, team=world.team, site=hcm_site, code="NV002")
+    db_session.add(
+        Registration(
+            event_id=world.event.id, employee_id=hcm_person.employee.id, status="submitted",
+            is_participating=True, shift_id=world.shift.id, agreed_terms_at=utcnow(),
+            terms_version="v1", submitted_at=utcnow(),
+        )
+    )
+    hn_flight = Flight(
+        event_id=world.event.id, flight_code="VN001", direction="outbound",
+        capacity=5, site_id=world.site.id,
+    )
+    hcm_flight = Flight(
+        event_id=world.event.id, flight_code="VJ001", direction="outbound",
+        capacity=5, site_id=hcm_site.id,
+    )
+    db_session.add_all([hn_flight, hcm_flight])
+    await db_session.flush()
+
+    run = AllocationRun(event_id=world.event.id, type="flight", status="running")
+    db_session.add(run)
+    await db_session.flush()
+
+    await run_flight_allocation(db_session, world.event.id, "outbound", None, run.id)
+    await db_session.commit()
+
+    result = await db_session.execute(
+        select(FlightAssignment).where(FlightAssignment.event_id == world.event.id)
+    )
+    by_employee = {a.employee_id: a.flight_id for a in result.scalars().all()}
+    assert by_employee[world.employee.id] == hn_flight.id
+    assert by_employee[hcm_person.employee.id] == hcm_flight.id

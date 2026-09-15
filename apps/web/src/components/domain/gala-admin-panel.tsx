@@ -33,7 +33,14 @@ import { useCountdown } from "@/lib/use-countdown";
 import { useGalaWebSocket } from "@/lib/use-gala-ws";
 import type { GalaConfig, GalaSeat, GalaState, GalaTable, GalaTurn } from "@/types/api";
 
-const DEFAULT_CONFIG_FORM = { name: "Gala Dinner", stageLabel: "Sân khấu", turnDuration: "60", holdTtl: "30" };
+const DEFAULT_CONFIG_FORM = {
+  name: "Gala Dinner",
+  stageLabel: "Sân khấu",
+  turnDuration: "60",
+  holdTtl: "30",
+  seatQuotaRule: "by_team_size" as "by_team_size" | "fixed",
+  fixedQuota: "",
+};
 
 export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
@@ -67,6 +74,8 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
         stageLabel: state.config.stage_label,
         turnDuration: String(state.config.turn_duration_seconds),
         holdTtl: String(state.config.hold_ttl_seconds),
+        seatQuotaRule: state.config.seat_quota_rule,
+        fixedQuota: state.config.fixed_quota != null ? String(state.config.fixed_quota) : "",
       });
     } else {
       setConfigForm(DEFAULT_CONFIG_FORM);
@@ -83,6 +92,10 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           stage_label: configForm.stageLabel,
           turn_duration_seconds: Number(configForm.turnDuration),
           hold_ttl_seconds: Number(configForm.holdTtl),
+          seat_quota_rule: configForm.seatQuotaRule,
+          fixed_quota: configForm.seatQuotaRule === "fixed" && configForm.fixedQuota
+            ? Number(configForm.fixedQuota)
+            : null,
         }),
       }),
     onSuccess: () => {
@@ -190,10 +203,24 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const hasWaiting = !!state?.turns.find((t) => t.status === "waiting");
   const hasAnyTurns = !!state && state.turns.length > 0;
   const activeTables = (state?.tables ?? []).filter((t) => t.is_active);
+  const availableSeatCount = (state?.seats ?? []).filter((s) => s.status === "available").length;
+  const confirmedCountByTeam = new Map<number, number>();
+  for (const s of state?.seats ?? []) {
+    if (s.status === "confirmed" && s.team_id != null) {
+      confirmedCountByTeam.set(s.team_id, (confirmedCountByTeam.get(s.team_id) ?? 0) + 1);
+    }
+  }
+  // only the original (non-makeup) turn's quota is the team's real total —
+  // a makeup turn's quota is just the remainder that was still open when it
+  // was spawned, so counting both would double-count (mirrors the same
+  // reasoning in dashboard_service.build_dashboard's gala_unseated_count)
+  const neededSeatCount = (state?.turns ?? [])
+    .filter((t) => !t.is_makeup)
+    .reduce((sum, t) => sum + Math.max(t.seat_quota - (confirmedCountByTeam.get(t.team_id) ?? 0), 0), 0);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
         <Dialog open={configOpen} onOpenChange={(open) => (open ? openConfigDialog() : setConfigOpen(false))}>
           <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
             {state?.config ? "Sửa cấu hình" : "Tạo cấu hình Gala"}
@@ -237,6 +264,34 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                   onChange={(e) => setConfigForm((f) => ({ ...f, holdTtl: e.target.value }))}
                 />
               </div>
+              <div className="flex flex-col gap-2">
+                <Label>Quy tắc hạn mức ghế</Label>
+                <Select
+                  value={configForm.seatQuotaRule}
+                  onValueChange={(v) =>
+                    setConfigForm((f) => ({ ...f, seatQuotaRule: (v as "by_team_size" | "fixed") ?? "by_team_size" }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="by_team_size">Theo số người tham gia của Team</SelectItem>
+                    <SelectItem value="fixed">Số cố định cho mọi Team</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {configForm.seatQuotaRule === "fixed" && (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="fixed-quota">Số ghế cố định mỗi Team</Label>
+                  <Input
+                    id="fixed-quota"
+                    type="number"
+                    value={configForm.fixedQuota}
+                    onChange={(e) => setConfigForm((f) => ({ ...f, fixedQuota: e.target.value }))}
+                  />
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button
@@ -327,7 +382,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           title="Bỏ qua lượt hiện tại?"
           description={
             activeTurn
-              ? `Team "${activeTurn.team_name}" sẽ mất lượt này, mọi ghế đang giữ sẽ được nhả. Chuyển sang Team tiếp theo.`
+              ? `Team "${activeTurn.team_name}" sẽ mất lượt này, mọi ghế đang giữ sẽ được nhả. Nếu chưa đủ hạn mức ghế, Team sẽ có 1 lượt bù ở cuối hàng chờ. Chuyển sang Team tiếp theo.`
               : undefined
           }
           confirmLabel="Bỏ qua"
@@ -347,12 +402,15 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
       </div>
 
       {state?.config && (
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span>
             Trạng thái: <Badge variant="outline">{galaConfigStatusLabel(state.config.status)}</Badge>
           </span>
           <span>
             {state.tables.length} bàn, {state.seats.length} ghế
+          </span>
+          <span>
+            Ghế trống <b>{availableSeatCount}</b> · Cần <b>{neededSeatCount}</b>
           </span>
           {activeTurn && (
             <span>
@@ -361,7 +419,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
             </span>
           )}
           <span>{blockMode ? "— bấm ghế trống để khoá/mở" : "— kéo bàn để xếp sơ đồ"}</span>
-        </div>
+        </p>
       )}
 
       {state?.config && (
@@ -386,11 +444,39 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {activeTables.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-2 border-b border-[var(--rule)] py-1.5 text-sm last:border-0">
+              <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-1.5 text-sm last:border-0">
                 <span>
                   <b>{t.code}</b> — {t.seat_count} ghế, {t.shape === "round" ? "tròn" : "chữ nhật"}
                 </span>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    X
+                    <Input
+                      key={`x-${t.id}-${t.x}`}
+                      type="number"
+                      className="h-8 w-16"
+                      defaultValue={t.x}
+                      aria-label={`Toạ độ X bàn ${t.code}`}
+                      onBlur={(e) => {
+                        const x = Number(e.target.value);
+                        if (!Number.isNaN(x) && x !== t.x) moveMutation.mutate({ id: t.id, x, y: t.y });
+                      }}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    Y
+                    <Input
+                      key={`y-${t.id}-${t.y}`}
+                      type="number"
+                      className="h-8 w-16"
+                      defaultValue={t.y}
+                      aria-label={`Toạ độ Y bàn ${t.code}`}
+                      onBlur={(e) => {
+                        const y = Number(e.target.value);
+                        if (!Number.isNaN(y) && y !== t.y) moveMutation.mutate({ id: t.id, x: t.x, y });
+                      }}
+                    />
+                  </label>
                   <Button size="sm" variant="ghost" onClick={() => setEditingTable(t)}>
                     Sửa
                   </Button>
@@ -434,7 +520,10 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                 variant={t.status === "active" ? "default" : "outline"}
                 className={t.status === "done" || t.status === "skipped" || t.status === "expired" ? "opacity-50" : undefined}
               >
-                #{t.order_no} {t.team_name} ({t.seat_quota} ghế) — {galaTurnStatusLabel(t.status)}
+                #{t.order_no} {t.team_name} ({confirmedCountByTeam.get(t.team_id) ?? 0}/{t.seat_quota} ghế) —{" "}
+                {galaTurnStatusLabel(t.status)}
+                {t.is_makeup && " · Lượt bù"}
+                {!t.has_representative && " · Chưa có trưởng nhóm"}
               </Badge>
             ))}
           </CardContent>

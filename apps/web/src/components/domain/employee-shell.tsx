@@ -1,56 +1,109 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CalendarRange,
-  MessageCircle,
-  Ticket,
-  Users,
+  ChevronDown,
   ClipboardList,
-  UserRound,
+  HelpCircle,
   LogOut,
+  Menu,
+  MessageCircle,
+  Route,
+  UserRound,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import { BrandMark } from "@/components/domain/brand-mark";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { EventStatusBadge } from "@/components/domain/status-badge";
-import { Button } from "@/components/ui/button";
-import { apiFetch } from "@/lib/api";
+import { isNavActive, type ShellLink } from "@/components/domain/shell-rail";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth-context";
-import { ROLE_LABEL } from "@/lib/format";
-import { useEmployeeEvent } from "@/lib/use-employee-event";
+import { EmployeeEventProvider, useEmployeeEvent } from "@/lib/use-employee-event";
 import { cn } from "@/lib/utils";
-import type { GalaConfig, Registration } from "@/types/api";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: typeof Ticket;
-  show?: boolean;
-};
+function EmployeeEventPicker({ compact = false }: { compact?: boolean }) {
+  const { events, event, setEventId } = useEmployeeEvent();
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  if (events.length === 0) return null;
 
-export function EmployeeShell({ children }: { children: ReactNode }) {
+  return (
+    <div className={cn(!compact && "rounded-xl border border-border bg-muted/50 p-3")}>
+      {!compact && <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Kỳ của bạn</p>}
+      <Select
+        value={event ? String(event.id) : undefined}
+        onValueChange={(v) => {
+          const id = Number(v);
+          const next = events.find((e) => e.id === id);
+          setEventId(id);
+          queryClient.removeQueries({ queryKey: ["journey"] });
+          queryClient.removeQueries({ queryKey: ["chat"] });
+          if (pathname.startsWith("/gala")) router.push(`/gala/${id}`);
+          toast.message(next ? `Đang xem ${next.name}` : "Đã đổi kỳ");
+        }}
+      >
+        <SelectTrigger className={cn("text-left", compact ? "h-9 min-h-9 w-[min(16rem,40vw)]" : "h-auto min-h-11 w-full py-2")}>
+          <SelectValue placeholder="Chọn kỳ">
+            {event ? <span className="truncate font-medium">{event.name}</span> : null}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {events.map((e) => (
+            <SelectItem key={e.id} value={String(e.id)}>
+              {e.name}
+              {e.has_journey ? " · Hành trình" : e.can_register ? " · Đang mở ĐK" : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!compact && event && (
+        <div className="mt-2">
+          <EventStatusBadge status={event.status} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function EmployeeShell({ children }: { children: React.ReactNode }) {
+  return (
+    <EmployeeEventProvider>
+      <EmployeeShellInner>{children}</EmployeeShellInner>
+    </EmployeeEventProvider>
+  );
+}
+
+function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const { user, isLoading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const { eventId, eventName, eventStatus, isLeader, hasJourney } = useEmployeeEvent();
-
-  // Whether there's anything at all to show on /register: an event currently
-  // open (fresh registration), or a past one the CBNV already submitted to
-  // (register/page.tsx renders that read-only once its window has closed).
-  const { data: latestReg } = useQuery({
-    queryKey: ["registrations", "me", "latest"],
-    queryFn: () => apiFetch<Registration | null>("/api/registrations/me"),
-    enabled: !!user,
-  });
-  const hasRegistration = hasJourney || !!latestReg;
-
-  const { data: galaConfig } = useQuery({
-    queryKey: ["events", eventId, "gala", "config"],
-    queryFn: () => apiFetch<GalaConfig | null>(`/api/events/${eventId}/gala/config`),
-    enabled: !!eventId,
-  });
+  const { eventId, eventName, event, events, canRegister, hasJourney, isLeader, galaConfig } =
+    useEmployeeEvent();
+  const isChat = pathname === "/chat";
+  const isGala = pathname.startsWith("/gala");
 
   useEffect(() => {
     if (isLoading) return;
@@ -65,133 +118,262 @@ export function EmployeeShell({ children }: { children: ReactNode }) {
 
   if (isLoading || !user) {
     return (
-      <div className="flex min-h-svh flex-1 items-center justify-center bg-[var(--foam)]">
+      <div className="flex min-h-svh flex-1 items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Đang tải...</p>
       </div>
     );
   }
 
-  const nav: NavItem[] = user.must_change_password
+  const nav: ShellLink[] = user.must_change_password
     ? []
     : [
-        { href: "/register", label: "Đăng ký", icon: ClipboardList, show: hasRegistration },
-        { href: "/journey", label: "Hành trình", icon: Ticket },
         {
-          href: eventId ? `/gala/${eventId}` : "/journey",
-          label: "Gala",
+          href: "/journey",
+          label: "Hành trình của tôi",
+          icon: Route,
+        },
+        {
+          href: "/register",
+          label: "Đăng ký thông tin",
+          icon: ClipboardList,
+          badge: canRegister ? "Mở" : undefined,
+        },
+        {
+          href: eventId ? `/gala/${eventId}` : "/gala",
+          label: "Gala Dinner & Ghế ngồi",
           icon: CalendarRange,
           show: !!galaConfig,
+          badge: galaConfig && hasJourney ? "•" : undefined,
         },
-        { href: "/chat", label: "Hỏi đáp", icon: MessageCircle },
+        { href: "/chat", label: "Hỏi đáp BTC", icon: MessageCircle },
+        { href: "/account", label: "Tài khoản nhân viên", icon: UserRound },
         { href: "/team", label: "Team", icon: Users, show: isLeader },
-      ].filter((item) => item.show !== false);
+      ];
 
-  const isActive = (href: string) => {
-    if (href.startsWith("/gala")) return pathname.startsWith("/gala");
-    return pathname === href;
-  };
+  const tabs = nav.filter((i) => i.show !== false);
+  const dock = tabs
+    .filter((i) => i.href !== "/team" && i.href !== "/account")
+    .slice(0, 5)
+    .map((i) => ({
+      ...i,
+      label:
+        i.href === "/journey"
+          ? "Hành trình"
+          : i.href === "/register"
+            ? "Đăng ký"
+            : i.href.startsWith("/gala")
+              ? "Gala"
+              : i.href === "/chat"
+                ? "Hỏi đáp"
+                : i.label,
+    }));
+
+  const doLogout = () => logout().then(() => router.push("/login"));
+
+  const signOut = (
+    <Button
+      variant="ghost"
+      className="h-10 w-full justify-start text-destructive"
+      onClick={doLogout}
+    >
+      <LogOut className="size-4" aria-hidden="true" />
+      Đăng xuất
+    </Button>
+  );
 
   return (
-    <div className="flex min-h-svh flex-col bg-[var(--foam)]">
-      <header className="sticky top-0 z-30 bg-[var(--night)] text-[#e8eef2]">
-        <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-3 px-4">
-          <div className="min-w-0">
-            <BrandMark light className="[&>span:last-child]:text-base" />
-            {eventName && (
-              <p className="truncate pl-9 text-[11px] text-white/55">{eventName}</p>
-            )}
-          </div>
-          <nav aria-label="Điều hướng chính" className="hidden items-center gap-1 sm:flex">
-            {nav.map((item) => (
+    <div className={cn("flex flex-col bg-background", isChat ? "h-dvh overflow-hidden" : "min-h-dvh")}>
+      <a href="#main" className="skip-link">
+        Bỏ qua điều hướng
+      </a>
+      <header className="sticky top-0 z-40 border-b border-border bg-card shadow-sm">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
+          <Sheet>
+            <SheetTrigger
+              className={cn(buttonVariants({ variant: "outline", size: "icon" }), "size-10 lg:hidden")}
+              aria-label="Mở menu"
+            >
+              <Menu className="size-4" />
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[17.5rem] p-4">
+              <SheetHeader>
+                <SheetTitle className="text-left">
+                  <BrandMark />
+                </SheetTitle>
+              </SheetHeader>
+              <div className="mt-4 flex flex-col gap-4">
+                <EmployeeEventPicker />
+                <nav className="flex flex-col gap-0.5" aria-label="Điều hướng">
+                  {tabs.map((item) => {
+                    const Icon = item.icon;
+                    const active = isNavActive(pathname, item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        className="nav-link"
+                      >
+                        <Icon className="size-4" aria-hidden="true" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </nav>
+                {signOut}
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <Link href="/journey" className="min-w-0 shrink-0">
+            <BrandMark
+              title={eventName ?? "Team Building"}
+              subtitle={event?.destination ?? undefined}
+            />
+          </Link>
+
+          <nav className="ml-4 hidden items-center gap-5 lg:flex" aria-label="Điều hướng chính">
+            {tabs
+              .filter((i) => i.href !== "/team")
+              .map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                aria-current={isActive(item.href) ? "page" : undefined}
-                className={cn(
-                  "px-3 py-1 text-sm",
-                  isActive(item.href)
-                    ? "bg-[var(--lagoon)] text-white"
-                    : "text-white/70 hover:bg-white/10 hover:text-white",
-                )}
+                aria-current={isNavActive(pathname, item.href) ? "page" : undefined}
+                className="top-tab gap-1"
               >
                 {item.label}
+                {item.href.startsWith("/gala") ? (
+                  <span className="size-2 rounded-full bg-[var(--ember)]" aria-hidden="true" />
+                ) : item.badge ? (
+                  <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                    {item.badge}
+                  </span>
+                ) : null}
               </Link>
             ))}
           </nav>
-          <div className="flex items-center gap-2">
+
+          <div className="ml-auto flex min-w-0 items-center gap-2">
             <Link
-              href="/account"
-              className={cn(
-                "hidden max-w-[10rem] truncate text-right text-xs sm:block",
-                pathname === "/account" && "text-[var(--lagoon)]",
-              )}
+              href="/chat"
+              className="hidden items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-[11px] font-bold text-orange-800 hover:bg-orange-100 sm:inline-flex"
             >
-              <span className="block truncate">{user.full_name ?? user.email}</span>
-              <span className="text-white/50">{ROLE_LABEL[user.role] ?? user.role}</span>
+              Hỏi đáp 24/7
             </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 text-white hover:bg-white/10 sm:hidden"
-              onClick={() => router.push("/account")}
-              aria-label="Tài khoản"
+            {events.length > 1 && (
+              <div className="hidden sm:block">
+                <EmployeeEventPicker compact />
+              </div>
+            )}
+            <Link
+              href="/chat"
+              className="hidden size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground lg:inline-flex"
+              aria-label="Trợ giúp"
             >
-              <UserRound className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 text-white hover:bg-white/10"
-              onClick={() => logout().then(() => router.push("/login"))}
-              aria-label="Đăng xuất"
-            >
-              <LogOut className="size-4" />
-            </Button>
+              <HelpCircle className="size-5" />
+            </Link>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex min-w-0 items-center gap-2 rounded-full py-1 pl-1 pr-2 hover:bg-muted">
+                <span className="relative">
+                  <InitialsAvatar name={user.full_name ?? user.email} className="size-9" />
+                  <span className="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-card bg-emerald-500" />
+                </span>
+                <span className="hidden min-w-0 text-left lg:block">
+                  <span className="block truncate text-xs font-semibold leading-tight">
+                    {user.full_name ?? user.email}
+                  </span>
+                  <span className="block truncate text-[10px] font-medium text-primary">
+                    {[user.employee_code, user.team_name].filter(Boolean).join(" • ") || "Tài khoản nhân viên"}
+                  </span>
+                </span>
+                <ChevronDown className="hidden size-4 shrink-0 text-muted-foreground lg:block" aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-56">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>
+                    {user.full_name ?? user.email}
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => router.push("/account")}>
+                    <UserRound />
+                    Tài khoản nhân viên
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={doLogout}>
+                  <LogOut />
+                  Đăng xuất
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
-        {eventStatus && (
-          <div className="border-t border-white/10 px-4 py-1">
-            <div className="mx-auto flex max-w-3xl items-center gap-2">
-              <EventStatusBadge status={eventStatus} />
-            </div>
-          </div>
-        )}
       </header>
 
       <main
+        id="main"
         className={cn(
-          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pt-6 sm:pb-8",
-          nav.length > 0 ? "pb-24" : "pb-8",
+          "mx-auto flex w-full flex-1 flex-col",
+          isChat ? "min-h-0 max-w-7xl px-4 pt-4 pb-4 sm:px-6" : "max-w-7xl px-4 pt-6 sm:px-6",
+          !isChat && !isGala && dock.length > 0 ? "pb-24 md:pb-10" : "pb-8",
+          isGala && "max-w-none px-0 pt-0 pb-24 md:pb-0",
         )}
       >
-        {children}
+        <div
+          key={pathname}
+          className={cn("flex min-h-0 flex-1 flex-col animate-in fade-in duration-200", isChat && "min-h-0")}
+        >
+          {children}
+        </div>
       </main>
 
-      {nav.length > 0 && (
+      {!isChat && !isGala && (
+        <footer className="mt-auto hidden border-t border-border bg-card md:block">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-4 text-xs text-muted-foreground">
+            <p>
+              <span className="font-semibold text-foreground">{eventName ?? "Team Building"}</span>
+              {" · "}Cổng nội bộ — thông tin hành trình của bạn.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <Link href="/chat" className="hover:text-primary">
+                Hỏi đáp BTC
+              </Link>
+              <Link href="/account" className="hover:text-primary">
+                Tài khoản
+              </Link>
+              <button type="button" className="hover:text-destructive" onClick={doLogout}>
+                Đăng xuất
+              </button>
+            </div>
+          </div>
+        </footer>
+      )}
+
+      {dock.length > 0 && (
         <nav
-          aria-label="Điều hướng chính (di động)"
-          className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--night)] bg-[var(--night)] text-[#e8eef2] sm:hidden"
+          aria-label="Điều hướng chính"
+          className="dock fixed inset-x-0 bottom-0 z-30 pb-[env(safe-area-inset-bottom)] md:hidden"
         >
           <ul
             className={cn(
-              "mx-auto grid max-w-3xl gap-1 px-2 py-2",
-              nav.length >= 5 ? "grid-cols-5" : "grid-cols-4",
+              "mx-auto grid max-w-3xl gap-1 px-2 py-1.5",
+              dock.length >= 5 ? "grid-cols-5" : "grid-cols-4",
             )}
           >
-            {nav.map((item) => {
+            {dock.map((item) => {
               const Icon = item.icon;
-              const active = isActive(item.href);
+              const active = isNavActive(pathname, item.href);
               return (
                 <li key={item.href}>
                   <Link
                     href={item.href}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex flex-col items-center gap-0.5 py-1 text-[11px]",
-                      active ? "text-white" : "text-white/55",
+                      "flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[11px]",
+                      active ? "bg-primary/12 font-medium text-primary" : "text-muted-foreground",
                     )}
                   >
-                    <Icon className="size-5" />
+                    <Icon className="size-5" aria-hidden="true" />
                     {item.label}
                   </Link>
                 </li>

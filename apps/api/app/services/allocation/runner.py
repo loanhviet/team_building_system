@@ -8,7 +8,13 @@ from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration
 from app.models.system import AllocationRun
-from app.services.allocation.base import DEFAULT_WEIGHTS, Candidate, FlightSlot, TeamGroup
+from app.services.allocation.base import (
+    DEFAULT_WEIGHTS,
+    Candidate,
+    FlightSlot,
+    TeamGroup,
+    merge_weights,
+)
 from app.services.allocation.greedy import GreedyFlightStrategy
 
 
@@ -25,10 +31,12 @@ async def run_flight_allocation(
 
         raw = await get_setting(db, event_id, "flight_allocation_weights", {})
         stored_weights = raw if isinstance(raw, dict) else {}
-    effective_weights = {**DEFAULT_WEIGHTS, **stored_weights}
+    effective_weights = merge_weights(stored_weights, DEFAULT_WEIGHTS)
 
     result = await db.execute(
-        select(Registration.employee_id, Registration.shift_id, Employee.team_id)
+        select(
+            Registration.employee_id, Registration.shift_id, Employee.team_id, Employee.site_id
+        )
         .join(Employee, Employee.id == Registration.employee_id)
         .where(
             Registration.event_id == event_id,
@@ -52,23 +60,30 @@ async def run_flight_allocation(
         select(Flight).where(Flight.event_id == event_id, Flight.direction == direction)
     )
     slots = {
-        f.id: FlightSlot(flight_id=f.id, shift_id=f.shift_id, capacity=f.capacity)
+        f.id: FlightSlot(flight_id=f.id, shift_id=f.shift_id, capacity=f.capacity, site_id=f.site_id)
         for f in result.scalars().all()
     }
-    team_by_employee = {employee_id: team_id for employee_id, _shift_id, team_id in rows}
+    team_by_employee = {employee_id: team_id for employee_id, _shift_id, team_id, _site_id in rows}
     for a in locked:
         if a.flight_id in slots:
             slots[a.flight_id].assigned.append(a.employee_id)
             slots[a.flight_id].assigned_team_ids.append(team_by_employee.get(a.employee_id))
 
-    by_team: dict[int | None, list[Candidate]] = defaultdict(list)
-    for employee_id, shift_id, team_id in rows:
+    # group by (team_id, site_id) — never treat a team spread across two
+    # office sites as one group to "keep together"; that grouping is what let
+    # HCM employees get greedily boarded onto HN-only flights (see runner
+    # audit note in docs/REBUILD-PLAN.md §R7)
+    by_team_site: dict[tuple[int | None, int | None], list[Candidate]] = defaultdict(list)
+    for employee_id, shift_id, team_id, site_id in rows:
         if employee_id in locked_employee_ids:
             continue
-        by_team[team_id].append(
+        by_team_site[(team_id, site_id)].append(
             Candidate(employee_id=employee_id, team_id=team_id, shift_id=shift_id)
         )
-    teams = [TeamGroup(team_id=tid, employees=emps) for tid, emps in by_team.items()]
+    teams = [
+        TeamGroup(team_id=tid, employees=emps, site_id=sid)
+        for (tid, sid), emps in by_team_site.items()
+    ]
 
     outcome = GreedyFlightStrategy().allocate(teams, list(slots.values()), effective_weights)
 

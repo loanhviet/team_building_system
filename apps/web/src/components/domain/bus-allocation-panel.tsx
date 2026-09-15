@@ -1,9 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeftRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { FormField, MoreFields } from "@/components/domain/form-field";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
+import { ResourceCard } from "@/components/domain/resource-card";
+import { Segmented } from "@/components/domain/segmented";
+import { StatusChip } from "@/components/domain/status-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,7 +33,8 @@ import {
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
-import { assignmentSourceLabel, flagReasonLabel } from "@/lib/labels";
+import { formatTime } from "@/lib/format";
+import { flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
   AllocationRun,
@@ -56,6 +64,7 @@ const EMPTY_BUS = {
 export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const [legId, setLegId] = useState<number | null>(null);
+  const [focusBusId, setFocusBusId] = useState<number | "all">("all");
   const [busDialogOpen, setBusDialogOpen] = useState(false);
   const [editingBus, setEditingBus] = useState<Bus | null>(null);
   const [busForm, setBusForm] = useState(EMPTY_BUS);
@@ -67,6 +76,8 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const [adjustReason, setAdjustReason] = useState(DEFAULT_ADJUST_REASON);
   const [overCapacityMsg, setOverCapacityMsg] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [filterTab, setFilterTab] = useState<"all" | "flag" | "locked" | "unassigned">("all");
+  const [listSearch, setListSearch] = useState("");
 
   const { data: legs } = useQuery({
     queryKey: ["events", eventId, "transport-legs"],
@@ -211,12 +222,26 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       refetchAssignments();
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.code === "over_capacity") {
+      if (err instanceof ApiError && (err.code === "over_capacity" || err.code === "bus_incompatible")) {
         setOverCapacityMsg(err.message);
         return;
       }
       toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra");
     },
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<{ unlocked: number }>(`/api/events/${eventId}/bus-assignments/unlock`, {
+        method: "POST",
+        body: JSON.stringify({ leg_id: currentLegId, employee_ids: Array.from(selected) }),
+      }),
+    onSuccess: (data) => {
+      toast.success(`Đã bỏ ghim ${data.unlocked} người — lần chạy phân xe tự động tiếp theo sẽ xét lại họ`);
+      setSelected(new Set());
+      refetchAssignments();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
   type BusAllocationSummary = {
@@ -236,93 +261,137 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
 
   const teamName = (id: number) => teams?.find((t) => t.id === id)?.name ?? `#${id}`;
 
-  const busColumns: DataTableColumn<Bus>[] = [
-    { key: "code", header: "Mã xe", cell: (b) => b.code, className: "font-mono", sortValue: (b) => b.code },
-    { key: "name", header: "Tên xe", cell: (b) => b.name ?? "—", sortValue: (b) => b.name },
-    { key: "capacity", header: "Sức chứa", cell: (b) => b.capacity, sortValue: (b) => b.capacity },
+  const flagCount = (assignments ?? []).filter((a) => a.is_flagged).length;
+  const lockedCount = (assignments ?? []).filter((a) => a.is_locked).length;
+  const unassignedCount = (assignments ?? []).filter((a) => a.bus_id == null).length;
+
+  const visibleAssignments = (assignments ?? []).filter((a) => {
+    if (focusBusId !== "all" && a.bus_id !== focusBusId) return false;
+    if (filterTab === "flag" && !a.is_flagged) return false;
+    if (filterTab === "locked" && !a.is_locked) return false;
+    if (filterTab === "unassigned" && a.bus_id != null) return false;
+    const q = listSearch.trim().toLowerCase();
+    if (q) {
+      const haystack = [a.full_name, a.employee_code, a.team_name].filter(Boolean).join(" ").toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+  const allVisibleSelected =
+    visibleAssignments.length > 0 && visibleAssignments.every((a) => selected.has(a.employee_id));
+
+  const assignmentColumns: DataTableColumn<BusAssignment>[] = [
     {
-      key: "gather_at",
-      header: "Tập trung",
-      cell: (b) => (b.gather_at ? new Date(b.gather_at).toLocaleString("vi-VN") : "—"),
-      sortValue: (b) => b.gather_at,
+      key: "person",
+      header: "Nhân sự",
+      cell: (a) => (
+        <div className="flex items-center gap-2.5">
+          <Checkbox
+            checked={selected.has(a.employee_id)}
+            onCheckedChange={(v) =>
+              setSelected((prev) => {
+                const copy = new Set(prev);
+                if (v === true) copy.add(a.employee_id);
+                else copy.delete(a.employee_id);
+                return copy;
+              })
+            }
+            aria-label={`Chọn ${a.full_name}`}
+          />
+          <InitialsAvatar name={a.full_name} className="size-8" />
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{a.full_name}</span>
+            <span className="block truncate text-xs text-muted-foreground">{a.employee_code ?? "—"}</span>
+          </span>
+        </div>
+      ),
+      sortValue: (a) => a.full_name,
     },
     {
-      key: "pickup",
-      header: "Điểm đón",
-      cell: (b) => pickupPoints?.find((p) => p.id === b.pickup_point_id)?.name ?? "—",
+      key: "team",
+      header: "Team / Khối",
+      cell: (a) => a.team_name ?? "—",
+      sortValue: (a) => a.team_name ?? "",
     },
-    { key: "destination", header: "Điểm đến", cell: (b) => b.destination ?? "—" },
-    { key: "leader_name", header: "Trưởng xe", cell: (b) => b.leader_name ?? "—", sortValue: (b) => b.leader_name },
-    { key: "leader_phone", header: "SĐT", cell: (b) => b.leader_phone ?? "—" },
+    {
+      key: "requested_pickup",
+      header: "Điểm đón đăng ký",
+      cell: (a) => a.requested_pickup_point_name ?? "—",
+      sortValue: (a) => a.requested_pickup_point_name ?? "",
+    },
+    {
+      key: "flight",
+      header: "Chuyến bay",
+      cell: (a) => a.flight_code ?? "—",
+      sortValue: (a) => a.flight_code ?? "",
+    },
+    {
+      key: "assigned",
+      header: "Xe đã xếp",
+      cell: (a) => {
+        const assignedBus = buses?.find((b) => b.id === a.bus_id);
+        const pickup = pickupPoints?.find((p) => p.id === assignedBus?.pickup_point_id);
+        return assignedBus ? (
+          <Badge variant="outline" className="font-mono">
+            {assignedBus.code}
+            {pickup ? ` · ${pickup.name}` : ""}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">Chưa xếp xe</span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Trạng thái",
+      cell: (a) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {a.is_flagged ? (
+            <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} />
+          ) : a.bus_id != null ? (
+            <StatusChip kind="confirmed" label="Đã xếp" />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+          {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
+        </div>
+      ),
+    },
     {
       key: "actions",
       header: "",
-      cell: (b) => (
-        <Button size="sm" variant="ghost" onClick={() => openEditBus(b)}>
-          Sửa
+      className: "w-10 text-right",
+      cell: (a) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setSelected(new Set([a.employee_id]))}
+          aria-label={`Chuyển ${a.full_name} sang xe khác`}
+        >
+          <ArrowLeftRight className="size-4" aria-hidden="true" />
         </Button>
       ),
     },
   ];
 
-  const assignmentColumns: DataTableColumn<BusAssignment>[] = [
-    {
-      key: "select",
-      header: "",
-      className: "w-8",
-      cell: (a) => (
-        <Checkbox
-          checked={selected.has(a.employee_id)}
-          onCheckedChange={(checked) =>
-            setSelected((prev) => {
-              const next = new Set(prev);
-              if (checked === true) next.add(a.employee_id);
-              else next.delete(a.employee_id);
-              return next;
-            })
-          }
-        />
-      ),
-    },
-    {
-      key: "employee_code",
-      header: "Mã NV",
-      cell: (a) => a.employee_code ?? "—",
-      className: "font-mono",
-      sortValue: (a) => a.employee_code,
-    },
-    { key: "full_name", header: "Họ tên", cell: (a) => a.full_name, sortValue: (a) => a.full_name },
-    { key: "team_name", header: "Team", cell: (a) => a.team_name ?? "—", sortValue: (a) => a.team_name },
-    {
-      key: "bus",
-      header: "Xe",
-      cell: (a) => (
-        <>
-          {buses?.find((b) => b.id === a.bus_id)?.code ?? "Chưa xếp"}
-          {a.is_locked && (
-            <Badge variant="secondary" className="ml-1">
-              Ghim
-            </Badge>
-          )}
-          {a.is_flagged && (
-            <Badge variant="destructive" className="ml-1">
-              {flagReasonLabel(a.flag_reason)}
-            </Badge>
-          )}
-        </>
-      ),
-    },
-    { key: "source", header: "Nguồn", cell: (a) => assignmentSourceLabel(a.source), sortValue: (a) => a.source },
-  ];
-
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Phân xe</h2>
+          <p className="text-sm text-muted-foreground">Chọn chặng, chỉ định trưởng xe, rồi chạy phân bổ.</p>
+          <AllocationWeightsHint eventId={eventId} kind="bus" />
+        </div>
         <Select
           value={currentLegId ? String(currentLegId) : undefined}
-          onValueChange={(v) => setLegId(v ? Number(v) : null)}
+          onValueChange={(v) => {
+            setLegId(v ? Number(v) : null);
+            setFocusBusId("all");
+            setSelected(new Set());
+          }}
         >
-          <SelectTrigger className="w-56">
+          <SelectTrigger className="min-h-11 w-64">
             <SelectValue placeholder="Chọn chặng" />
           </SelectTrigger>
           <SelectContent>
@@ -339,86 +408,81 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })} onClick={openCreateBus}>
               Thêm xe
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingBus ? "Sửa xe" : "Thêm xe cho chặng này"}</DialogTitle>
               </DialogHeader>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <Label>Mã xe</Label>
-                  <Input value={busForm.code} onChange={(e) => setBusForm({ ...busForm, code: e.target.value })} />
+              <div className="flex flex-col gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Mã xe" required>
+                    <Input value={busForm.code} onChange={(e) => setBusForm({ ...busForm, code: e.target.value })} />
+                  </FormField>
+                  <FormField label="Sức chứa" required>
+                    <Input
+                      type="number"
+                      value={busForm.capacity}
+                      onChange={(e) => setBusForm({ ...busForm, capacity: e.target.value })}
+                    />
+                  </FormField>
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Tên xe</Label>
-                  <Input value={busForm.name} onChange={(e) => setBusForm({ ...busForm, name: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Sức chứa</Label>
-                  <Input
-                    type="number"
-                    value={busForm.capacity}
-                    onChange={(e) => setBusForm({ ...busForm, capacity: e.target.value })}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Điểm đón</Label>
-                  <Select
-                    value={busForm.pickup_point_id}
-                    onValueChange={(v) => setBusForm({ ...busForm, pickup_point_id: v ?? "" })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn điểm đón" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {pickupPoints?.map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Giờ tập trung</Label>
-                  <Input
-                    type="datetime-local"
-                    value={busForm.gather_at}
-                    onChange={(e) => setBusForm({ ...busForm, gather_at: e.target.value })}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Giờ khởi hành</Label>
-                  <Input
-                    type="datetime-local"
-                    value={busForm.depart_at}
-                    onChange={(e) => setBusForm({ ...busForm, depart_at: e.target.value })}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Điểm đến</Label>
-                  <Input
-                    value={busForm.destination}
-                    onChange={(e) => setBusForm({ ...busForm, destination: e.target.value })}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Trưởng xe</Label>
+                <FormField label="Trưởng xe">
                   <Input
                     value={busForm.leader_name}
                     onChange={(e) => setBusForm({ ...busForm, leader_name: e.target.value })}
+                    placeholder="Họ tên"
                   />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>SĐT Trưởng xe</Label>
-                  <Input
-                    value={busForm.leader_phone}
-                    onChange={(e) => setBusForm({ ...busForm, leader_phone: e.target.value })}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5 sm:col-span-2">
-                  <Label>Ghi chú</Label>
-                  <Input value={busForm.note} onChange={(e) => setBusForm({ ...busForm, note: e.target.value })} />
-                </div>
+                </FormField>
+                <MoreFields>
+                  <FormField label="SĐT trưởng xe">
+                    <Input
+                      value={busForm.leader_phone}
+                      onChange={(e) => setBusForm({ ...busForm, leader_phone: e.target.value })}
+                    />
+                  </FormField>
+                  <FormField label="Tên xe">
+                    <Input value={busForm.name} onChange={(e) => setBusForm({ ...busForm, name: e.target.value })} />
+                  </FormField>
+                  <FormField label="Điểm đón">
+                    <Select
+                      value={busForm.pickup_point_id}
+                      onValueChange={(v) => setBusForm({ ...busForm, pickup_point_id: v ?? "" })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn điểm đón" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {pickupPoints?.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                  <FormField label="Điểm đến">
+                    <Input
+                      value={busForm.destination}
+                      onChange={(e) => setBusForm({ ...busForm, destination: e.target.value })}
+                    />
+                  </FormField>
+                  <FormField label="Giờ tập trung">
+                    <Input
+                      type="datetime-local"
+                      value={busForm.gather_at}
+                      onChange={(e) => setBusForm({ ...busForm, gather_at: e.target.value })}
+                    />
+                  </FormField>
+                  <FormField label="Giờ khởi hành">
+                    <Input
+                      type="datetime-local"
+                      value={busForm.depart_at}
+                      onChange={(e) => setBusForm({ ...busForm, depart_at: e.target.value })}
+                    />
+                  </FormField>
+                  <FormField label="Ghi chú" className="sm:col-span-2">
+                    <Input value={busForm.note} onChange={(e) => setBusForm({ ...busForm, note: e.target.value })} />
+                  </FormField>
+                </MoreFields>
               </div>
               <DialogFooter>
                 <Button
@@ -431,7 +495,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             </DialogContent>
           </Dialog>
           <Button
-            size="sm"
             disabled={!currentLegId || runAllocationMutation.isPending || job?.status === "running"}
             onClick={() => runAllocationMutation.mutate()}
           >
@@ -487,13 +550,49 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           </Dialog>
         </div>
       </div>
+      </div>
 
-      <DataTable
-        columns={busColumns}
-        rows={buses ?? []}
-        rowKey={(b) => b.id}
-        emptyMessage="Chưa có xe cho chặng này"
-      />
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <ResourceCard
+          title="Tất cả"
+          subtitle={`${(assignments ?? []).length} người`}
+          selected={focusBusId === "all"}
+          onClick={() => setFocusBusId("all")}
+        />
+        {(buses ?? []).map((b) => {
+          const n = (assignments ?? []).filter((a) => a.bus_id === b.id).length;
+          return (
+            <ResourceCard
+              key={b.id}
+              title={b.code}
+              subtitle={[
+                b.depart_at ? formatTime(b.depart_at) : null,
+                b.leader_name ? `TX ${b.leader_name}` : "Chưa có trưởng xe",
+                pickupPoints?.find((p) => p.id === b.pickup_point_id)?.name,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              assigned={n}
+              capacity={b.capacity}
+              selected={focusBusId === b.id}
+              onClick={() => setFocusBusId(b.id)}
+              warning={!b.leader_name ? "Thiếu trưởng xe" : undefined}
+              footer={
+                <Button
+                  variant="ghost"
+                  className="mt-1 h-8 px-0 text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditBus(b);
+                  }}
+                >
+                  Sửa xe
+                </Button>
+              }
+            />
+          );
+        })}
+      </div>
 
       {job && (job.status === "queued" || job.status === "running") && (
         <p className="text-sm text-muted-foreground">Đang chạy phân xe...</p>
@@ -518,39 +617,40 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-medium">Danh sách nhu cầu xe (chặng đã chọn)</p>
-          {selected.size > 0 && (
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{selected.size} đã chọn</span>
-              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Chuyển tới xe" />
-                </SelectTrigger>
-                <SelectContent>
-                  {buses?.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>
-                      {b.code}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                disabled={!moveTarget}
-                onClick={() => {
-                  setMoveTeamId("");
-                  setOverCapacityMsg(null);
-                  setAdjustOpen(true);
-                }}
-              >
-                Chuyển
-              </Button>
-            </div>
-          )}
+          <Input
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            placeholder="Tìm tên, mã NV, team..."
+            className="w-64"
+          />
+          <Segmented
+            ariaLabel="Lọc danh sách nhu cầu xe"
+            value={filterTab}
+            onChange={setFilterTab}
+            options={[
+              { value: "all", label: `Tất cả (${(assignments ?? []).length})` },
+              { value: "flag", label: `Chỉ Flag (${flagCount})` },
+              { value: "locked", label: `Đã ghim (${lockedCount})` },
+              { value: "unassigned", label: `Chưa xếp (${unassignedCount})` },
+            ]}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() =>
+              setSelected(
+                allVisibleSelected ? new Set() : new Set(visibleAssignments.map((a) => a.employee_id)),
+              )
+            }
+          >
+            {allVisibleSelected ? "Bỏ chọn tất cả" : `Chọn tất cả (${visibleAssignments.length})`}
+          </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
           <span>Hoặc chuyển cả Team:</span>
           <Select value={moveTeamId} onValueChange={(v) => setMoveTeamId(v ?? "")}>
             <SelectTrigger className="w-44">
@@ -588,13 +688,54 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             Chuyển cả Team
           </Button>
         </div>
+
         <DataTable
           columns={assignmentColumns}
-          rows={assignments ?? []}
+          rows={visibleAssignments}
           rowKey={(a) => a.employee_id}
-          emptyMessage="Chưa có dữ liệu"
+          emptyMessage="Chưa có nhu cầu xe cho chặng này — chạy phân bổ hoặc chọn “Tất cả”."
         />
       </div>
+
+      {selected.size > 0 && (
+        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
+          <span className="text-sm font-medium">{selected.size} đã chọn</span>
+          <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Chuyển tới xe" />
+            </SelectTrigger>
+            <SelectContent>
+              {buses?.map((b) => (
+                <SelectItem key={b.id} value={String(b.id)}>
+                  {b.code}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            disabled={!moveTarget}
+            onClick={() => {
+              setMoveTeamId("");
+              setOverCapacityMsg(null);
+              setAdjustOpen(true);
+            }}
+          >
+            Chuyển
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={unlockMutation.isPending}
+            onClick={() => unlockMutation.mutate()}
+          >
+            Bỏ ghim
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            Bỏ chọn
+          </Button>
+        </div>
+      )}
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>
@@ -613,7 +754,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
               {overCapacityMsg && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
                 <p className="text-xs text-destructive">
-                  Ghi đè sức chứa cần lý do cụ thể, không dùng lý do mặc định.
+                  Ghi đè cảnh báo cần lý do cụ thể, không dùng lý do mặc định.
                 </p>
               )}
             </div>
@@ -637,7 +778,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
                 }
                 onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget), force: true })}
               >
-                Vẫn ghi đè sức chứa
+                Vẫn ghi đè cảnh báo
               </Button>
             )}
           </DialogFooter>

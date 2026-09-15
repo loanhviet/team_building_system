@@ -87,6 +87,11 @@ class GalaTurnOut(BaseModel):
     status: str
     started_at: datetime | None
     expires_at: datetime | None
+    is_makeup: bool = False
+    # whether this team has a team_leader account to actually act on this
+    # turn — BTC needs to see this *before* starting the turn, not discover
+    # it when nobody shows up to pick a seat (BRD §8.4/§16 q.8)
+    has_representative: bool = True
 
 
 class GalaStateOut(BaseModel):
