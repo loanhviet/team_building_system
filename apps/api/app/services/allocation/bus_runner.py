@@ -1,10 +1,12 @@
+from fastapi import status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.core.time import utcnow
 from app.models.bus import Bus, BusAssignment
 from app.models.event import TransportLeg
-from app.models.flight import FlightAssignment
+from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.models.system import AllocationRun
@@ -18,7 +20,9 @@ async def run_bus_allocation(
     leg = await db.get(TransportLeg, leg_id)
 
     result = await db.execute(
-        select(Employee.id, Employee.team_id)
+        select(
+            Employee.id, Employee.team_id, RegistrationTransportNeed.pickup_point_id
+        )
         .join(Registration, Registration.employee_id == Employee.id)
         .join(
             RegistrationTransportNeed,
@@ -34,16 +38,33 @@ async def run_bus_allocation(
     )
     rows = result.all()
 
-    flight_by_employee: dict[int, int] = {}
+    flight_by_employee: dict[int, tuple[int, object, object]] = {}
     if leg is not None and leg.direction in ("outbound", "inbound"):
         fresult = await db.execute(
-            select(FlightAssignment.employee_id, FlightAssignment.flight_id).where(
+            select(
+                FlightAssignment.employee_id, Flight.id, Flight.depart_at, Flight.arrive_at
+            )
+            .join(Flight, Flight.id == FlightAssignment.flight_id)
+            .where(
                 FlightAssignment.event_id == event_id,
                 FlightAssignment.direction == leg.direction,
                 FlightAssignment.flight_id.is_not(None),
             )
         )
-        flight_by_employee = dict(fresult.all())
+        flight_by_employee = {
+            eid: (fid, depart_at, arrive_at) for eid, fid, depart_at, arrive_at in fresult.all()
+        }
+
+    # a leg that's supposed to feed/follow a specific flight can't be sanely
+    # allocated before that flight's own allocation has run — every bus would
+    # just fall through as "no flight timing to compare against"
+    if leg is not None and leg.flight_timing and not flight_by_employee:
+        raise AppError(
+            "flight_allocation_required",
+            f"Chặng '{leg.name}' cần đối chiếu giờ bay — hãy chạy phân bổ chuyến bay chiều "
+            f"{leg.direction} trước.",
+            status.HTTP_400_BAD_REQUEST,
+        )
 
     result = await db.execute(
         select(BusAssignment).where(
@@ -58,19 +79,29 @@ async def run_bus_allocation(
     result = await db.execute(
         select(Bus).where(Bus.event_id == event_id, Bus.leg_id == leg_id)
     )
-    team_by_employee = {eid: tid for eid, tid in rows}
-    slots = {b.id: BusSlot(bus_id=b.id, capacity=b.capacity) for b in result.scalars().all()}
+    team_by_employee = {eid: tid for eid, tid, _pp in rows}
+    slots = {
+        b.id: BusSlot(
+            bus_id=b.id, capacity=b.capacity, pickup_point_id=b.pickup_point_id, depart_at=b.depart_at
+        )
+        for b in result.scalars().all()
+    }
     for a in locked:
         if a.bus_id in slots:
             slots[a.bus_id].assigned.append(a.employee_id)
             slots[a.bus_id].assigned_team_ids.append(team_by_employee.get(a.employee_id))
-            fid = flight_by_employee.get(a.employee_id)
+            fid = flight_by_employee.get(a.employee_id, (None, None, None))[0]
             if fid is not None:
                 slots[a.bus_id].flight_ids_present.add(fid)
 
     candidates = [
-        BusCandidate(employee_id=eid, team_id=tid, flight_id=flight_by_employee.get(eid))
-        for eid, tid in rows
+        BusCandidate(
+            employee_id=eid, team_id=tid, pickup_point_id=pickup_point_id,
+            flight_id=flight_by_employee.get(eid, (None, None, None))[0],
+            flight_depart_at=flight_by_employee.get(eid, (None, None, None))[1],
+            flight_arrive_at=flight_by_employee.get(eid, (None, None, None))[2],
+        )
+        for eid, tid, pickup_point_id in rows
         if eid not in locked_employee_ids
     ]
 
@@ -78,7 +109,8 @@ async def run_bus_allocation(
 
     raw = await get_setting(db, event_id, "bus_allocation_weights", {})
     weights = merge_weights(raw if isinstance(raw, dict) else {}, DEFAULT_BUS_WEIGHTS)
-    outcome = allocate_buses(candidates, list(slots.values()), weights)
+    flight_timing = leg.flight_timing if leg is not None else None
+    outcome = allocate_buses(candidates, list(slots.values()), weights, flight_timing)
 
     await db.execute(
         delete(BusAssignment).where(

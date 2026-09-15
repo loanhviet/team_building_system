@@ -4,12 +4,14 @@ shifts, legs, pickup points or flights — every screen in the app rendered empt
 
 Seeds two events:
   - TB2026 ("information_published"): fully operational — shifts, all 4 transport
-    legs, pickup points, 6 flights (both directions) with real times/airports,
-    hotel+rooms, buses with gather/pickup/leader, ~105 registrations run through
-    the real allocation functions, a partially-drawn Gala floor plan, a 3-day
-    schedule, and announcements. A few outbound flight seats are intentionally
-    left short so some registrations come out `is_flagged` — BTC has something
-    real to resolve, per BRD §5.3.
+    legs (tagged with `flight_timing`), pickup points, 10 flights (both directions,
+    Hanoi <-> Đà Nẵng and Hồ Chí Minh <-> Đà Nẵng, each `Flight.site_id`-tagged)
+    with real times/airports, hotel+rooms, buses with gather/pickup/leader times
+    chosen to line up with those flights, ~105 registrations run through the real
+    allocation functions, a partially-drawn Gala floor plan, a 3-day schedule, and
+    announcements. HCM flight capacity is intentionally a bit tight so some
+    registrations come out `is_flagged` — BTC has something real to resolve, per
+    BRD §5.3.
   - TB2027 ("registration_open"): same shift/leg/pickup-point configuration,
     zero registrations — for exercising the CBNV registration flow from scratch.
 
@@ -19,6 +21,7 @@ Reset first: `docker compose exec api python -m app.db.seed --reset`
 
 import argparse
 import asyncio
+import itertools
 import random
 from datetime import date, datetime, timedelta
 
@@ -149,10 +152,10 @@ async def seed_event_config(
     db.add_all(shifts)
 
     legs = [
-        TransportLeg(event_id=event.id, code="HN_SB", name="Nhà/Văn phòng → Sân bay", direction="outbound", sort_order=1),
-        TransportLeg(event_id=event.id, code="SB_KS", name="Sân bay → Khách sạn", direction="outbound", sort_order=2),
-        TransportLeg(event_id=event.id, code="KS_SB", name="Khách sạn → Sân bay", direction="inbound", sort_order=1),
-        TransportLeg(event_id=event.id, code="SB_HN", name="Sân bay → Nhà/Văn phòng", direction="inbound", sort_order=2),
+        TransportLeg(event_id=event.id, code="HN_SB", name="Nhà/Văn phòng → Sân bay", direction="outbound", sort_order=1, flight_timing="before_flight"),
+        TransportLeg(event_id=event.id, code="SB_KS", name="Sân bay → Khách sạn", direction="outbound", sort_order=2, flight_timing="after_flight"),
+        TransportLeg(event_id=event.id, code="KS_SB", name="Khách sạn → Sân bay", direction="inbound", sort_order=1, flight_timing="before_flight"),
+        TransportLeg(event_id=event.id, code="SB_HN", name="Sân bay → Nhà/Văn phòng", direction="inbound", sort_order=2, flight_timing="after_flight"),
     ]
     db.add_all(legs)
     await db.flush()
@@ -170,31 +173,52 @@ async def seed_event_config(
     return shifts, legs, pickup_points
 
 
-async def seed_flights(db: AsyncSession, event: Event, shifts: list[Shift]) -> list[Flight]:
+async def seed_flights(
+    db: AsyncSession, event: Event, shifts: list[Shift], sites: list[Site]
+) -> list[Flight]:
     ca1 = next(s for s in shifts if s.code == "CA1")
     ca2 = next(s for s in shifts if s.code == "CA2")
+    hn = next(s for s in sites if s.code == "HN")
+    hcm = next(s for s in sites if s.code == "HCM")
     out_day = datetime.combine(event.start_date, datetime.min.time())
     in_day = datetime.combine(event.end_date, datetime.min.time())
 
     flights = [
+        # Hanoi <-> Đà Nẵng
         Flight(event_id=event.id, flight_code="VN001", airline="Vietnam Airlines", direction="outbound",
-               shift_id=ca1.id, depart_at=out_day.replace(hour=6), arrive_at=out_day.replace(hour=7, minute=20),
+               shift_id=ca1.id, site_id=hn.id, depart_at=out_day.replace(hour=6), arrive_at=out_day.replace(hour=7, minute=20),
                origin="Sân bay Nội Bài (HAN)", destination="Sân bay Đà Nẵng (DAD)", capacity=35),
         Flight(event_id=event.id, flight_code="VN003", airline="Vietnam Airlines", direction="outbound",
-               shift_id=ca1.id, depart_at=out_day.replace(hour=6, minute=45), arrive_at=out_day.replace(hour=8, minute=5),
+               shift_id=ca1.id, site_id=hn.id, depart_at=out_day.replace(hour=6, minute=45), arrive_at=out_day.replace(hour=8, minute=5),
                origin="Sân bay Nội Bài (HAN)", destination="Sân bay Đà Nẵng (DAD)", capacity=35),
         Flight(event_id=event.id, flight_code="VJ205", airline="Vietjet Air", direction="outbound",
-               shift_id=ca2.id, depart_at=out_day.replace(hour=18), arrive_at=out_day.replace(hour=19, minute=20),
+               shift_id=ca2.id, site_id=hn.id, depart_at=out_day.replace(hour=18), arrive_at=out_day.replace(hour=19, minute=20),
                origin="Sân bay Nội Bài (HAN)", destination="Sân bay Đà Nẵng (DAD)", capacity=22),
         Flight(event_id=event.id, flight_code="VN101", airline="Vietnam Airlines", direction="inbound",
-               depart_at=in_day.replace(hour=15), arrive_at=in_day.replace(hour=16, minute=20),
+               site_id=hn.id, depart_at=in_day.replace(hour=15), arrive_at=in_day.replace(hour=16, minute=20),
                origin="Sân bay Đà Nẵng (DAD)", destination="Sân bay Nội Bài (HAN)", capacity=35),
         Flight(event_id=event.id, flight_code="VN103", airline="Vietnam Airlines", direction="inbound",
-               depart_at=in_day.replace(hour=15, minute=45), arrive_at=in_day.replace(hour=17, minute=5),
+               site_id=hn.id, depart_at=in_day.replace(hour=15, minute=45), arrive_at=in_day.replace(hour=17, minute=5),
                origin="Sân bay Đà Nẵng (DAD)", destination="Sân bay Nội Bài (HAN)", capacity=35),
         Flight(event_id=event.id, flight_code="VJ208", airline="Vietjet Air", direction="inbound",
-               depart_at=in_day.replace(hour=19), arrive_at=in_day.replace(hour=20, minute=20),
+               site_id=hn.id, depart_at=in_day.replace(hour=19), arrive_at=in_day.replace(hour=20, minute=20),
                origin="Sân bay Đà Nẵng (DAD)", destination="Sân bay Nội Bài (HAN)", capacity=30),
+        # Hồ Chí Minh <-> Đà Nẵng — was missing entirely before R7 (audit found
+        # every HCM employee getting auto-booked out of Hanoi); capacity is
+        # intentionally a bit tight (48 < ~49 participating) so BTC still has
+        # a real no_slot case to resolve, same idea as the HN side used to have
+        Flight(event_id=event.id, flight_code="VJ601", airline="Vietjet Air", direction="outbound",
+               shift_id=ca1.id, site_id=hcm.id, depart_at=out_day.replace(hour=6, minute=30), arrive_at=out_day.replace(hour=7, minute=50),
+               origin="Sân bay Tân Sơn Nhất (SGN)", destination="Sân bay Đà Nẵng (DAD)", capacity=30),
+        Flight(event_id=event.id, flight_code="VN603", airline="Vietnam Airlines", direction="outbound",
+               shift_id=ca2.id, site_id=hcm.id, depart_at=out_day.replace(hour=18, minute=15), arrive_at=out_day.replace(hour=19, minute=35),
+               origin="Sân bay Tân Sơn Nhất (SGN)", destination="Sân bay Đà Nẵng (DAD)", capacity=18),
+        Flight(event_id=event.id, flight_code="VN701", airline="Vietnam Airlines", direction="inbound",
+               site_id=hcm.id, depart_at=in_day.replace(hour=15, minute=30), arrive_at=in_day.replace(hour=16, minute=50),
+               origin="Sân bay Đà Nẵng (DAD)", destination="Sân bay Tân Sơn Nhất (SGN)", capacity=30),
+        Flight(event_id=event.id, flight_code="VJ702", airline="Vietjet Air", direction="inbound",
+               site_id=hcm.id, depart_at=in_day.replace(hour=19, minute=30), arrive_at=in_day.replace(hour=20, minute=50),
+               origin="Sân bay Đà Nẵng (DAD)", destination="Sân bay Tân Sơn Nhất (SGN)", capacity=18),
     ]
     db.add_all(flights)
     await db.flush()
@@ -238,25 +262,50 @@ async def seed_buses(db: AsyncSession, event: Event, legs: list[TransportLeg], p
         ("Đỗ Văn Kiên", "0999999999"), ("Ngô Thị Hoa", "0900000001"),
         ("Phan Văn Tùng", "0900000002"), ("Vương Thị Yến", "0900000003"),
     ]
-    leader_iter = iter(leaders)
+    leader_iter = itertools.cycle(leaders)  # 15 buses now, only 12 named leaders
 
     # seed_event_config creates pickup_points as [HN, HN, HCM, HCM] in that order
     hn_points, hcm_points = pickup_points[:2], pickup_points[2:]
 
+    # gather_at is 15min before depart_at (below); every gather time here is
+    # picked so depart_at lands inside bus_greedy's flight-timing window for
+    # the flight(s) it's meant to serve (see docs/REBUILD-PLAN.md §R7) —
+    # before_flight: [flight.depart_at-6h, flight.depart_at-90min];
+    # after_flight: [flight.arrive_at, flight.arrive_at+3h]. HN legs serve
+    # VN001/VN003/VJ205 (out) + VN101/VN103/VJ208 (in); HCM legs serve
+    # VJ601/VN603 (out) + VN701/VJ702 (in) — see seed_flights.
+    #
+    # Registration picks one of a site's 2 pickup points at random (see
+    # seed_registrations), so HN_SB/SB_HN each need a bus per (site, pickup
+    # point, timeslot) — one bus per site per slot isn't enough coverage,
+    # it just leaves whichever point that bus *didn't* take flagged
+    # no_compatible_bus for every person on the other point.
     specs = [
         # (leg_code, code, capacity, gather_at, destination, pickup_point)
-        ("HN_SB", "XE-HN1", 35, out_day.replace(hour=4), "Sân bay Nội Bài", hn_points[0]),
-        ("HN_SB", "XE-HN2", 35, out_day.replace(hour=4, minute=30), "Sân bay Nội Bài", hn_points[-1]),
-        ("HN_SB", "XE-HCM1", 35, out_day.replace(hour=4, minute=15), "Sân bay Nội Bài", hcm_points[0]),
-        ("SB_KS", "XE-DAD1", 35, out_day.replace(hour=7, minute=30), "Danang Beach Resort", None),
-        ("SB_KS", "XE-DAD2", 35, out_day.replace(hour=8, minute=15), "Danang Beach Resort", None),
-        ("SB_KS", "XE-DAD3", 35, out_day.replace(hour=19, minute=30), "Danang Beach Resort", None),
-        ("KS_SB", "XE-DAD4", 35, in_day.replace(hour=12, minute=30), "Sân bay Đà Nẵng", None),
-        ("KS_SB", "XE-DAD5", 35, in_day.replace(hour=13, minute=15), "Sân bay Đà Nẵng", None),
-        ("KS_SB", "XE-DAD6", 30, in_day.replace(hour=17), "Sân bay Đà Nẵng", None),
-        ("SB_HN", "XE-HN3", 35, in_day.replace(hour=16, minute=30), "Văn phòng Hà Nội", hn_points[0]),
-        ("SB_HN", "XE-HN4", 35, in_day.replace(hour=17, minute=15), "Văn phòng Hà Nội", hn_points[-1]),
-        ("SB_HN", "XE-HCM2", 30, in_day.replace(hour=21), "Văn phòng công ty", hcm_points[0]),
+        ("HN_SB", "XE-HN1A", 22, out_day.replace(hour=3, minute=45), "Sân bay Nội Bài", hn_points[0]),
+        ("HN_SB", "XE-HN1B", 22, out_day.replace(hour=3, minute=45), "Sân bay Nội Bài", hn_points[-1]),
+        ("HN_SB", "XE-HN2A", 15, out_day.replace(hour=15, minute=15), "Sân bay Nội Bài", hn_points[0]),
+        ("HN_SB", "XE-HN2B", 15, out_day.replace(hour=15, minute=15), "Sân bay Nội Bài", hn_points[-1]),
+        ("HN_SB", "XE-HCM1A", 18, out_day.replace(hour=4), "Sân bay Tân Sơn Nhất", hcm_points[0]),
+        ("HN_SB", "XE-HCM1B", 18, out_day.replace(hour=4), "Sân bay Tân Sơn Nhất", hcm_points[-1]),
+        ("HN_SB", "XE-HCM2A", 12, out_day.replace(hour=15, minute=45), "Sân bay Tân Sơn Nhất", hcm_points[0]),
+        ("HN_SB", "XE-HCM2B", 12, out_day.replace(hour=15, minute=45), "Sân bay Tân Sơn Nhất", hcm_points[-1]),
+        ("SB_KS", "XE-DAD1", 40, out_day.replace(hour=7, minute=15), "Danang Beach Resort", None),
+        ("SB_KS", "XE-DAD2", 70, out_day.replace(hour=8, minute=15), "Danang Beach Resort", None),
+        ("SB_KS", "XE-DAD3", 45, out_day.replace(hour=19, minute=30), "Danang Beach Resort", None),
+        ("KS_SB", "XE-DAD4", 40, in_day.replace(hour=12, minute=15), "Sân bay Đà Nẵng", None),
+        ("KS_SB", "XE-DAD5", 70, in_day.replace(hour=12, minute=45), "Sân bay Đà Nẵng", None),
+        ("KS_SB", "XE-DAD6", 55, in_day.replace(hour=16, minute=45), "Sân bay Đà Nẵng", None),
+        ("SB_HN", "XE-HN3A", 22, in_day.replace(hour=16, minute=30), "Văn phòng Hà Nội", hn_points[0]),
+        ("SB_HN", "XE-HN3B", 22, in_day.replace(hour=16, minute=30), "Văn phòng Hà Nội", hn_points[-1]),
+        ("SB_HN", "XE-HN4A", 22, in_day.replace(hour=17, minute=15), "Văn phòng Hà Nội", hn_points[0]),
+        ("SB_HN", "XE-HN4B", 22, in_day.replace(hour=17, minute=15), "Văn phòng Hà Nội", hn_points[-1]),
+        ("SB_HN", "XE-HN5A", 18, in_day.replace(hour=20, minute=30), "Văn phòng Hà Nội", hn_points[0]),
+        ("SB_HN", "XE-HN5B", 18, in_day.replace(hour=20, minute=30), "Văn phòng Hà Nội", hn_points[-1]),
+        ("SB_HN", "XE-HCM3A", 18, in_day.replace(hour=17), "Văn phòng TP.HCM", hcm_points[0]),
+        ("SB_HN", "XE-HCM3B", 18, in_day.replace(hour=17), "Văn phòng TP.HCM", hcm_points[-1]),
+        ("SB_HN", "XE-HCM4A", 12, in_day.replace(hour=21), "Văn phòng TP.HCM", hcm_points[0]),
+        ("SB_HN", "XE-HCM4B", 12, in_day.replace(hour=21), "Văn phòng TP.HCM", hcm_points[-1]),
     ]
 
     buses = []
@@ -514,7 +563,7 @@ async def seed() -> None:
         await db.flush()
 
         shifts, legs, pickup_points = await seed_event_config(db, event_a, sites)
-        await seed_flights(db, event_a, shifts)
+        await seed_flights(db, event_a, shifts, sites)
         _hotel, rooms = await seed_hotel(db, event_a)
         await seed_buses(db, event_a, legs, pickup_points)
         registrations, team_participating_count = await seed_registrations(
@@ -545,7 +594,7 @@ async def seed() -> None:
         )
         print(
             f"Event A (TB2026, information_published): {len(registrations)}/{EMPLOYEE_COUNT} registered "
-            f"({participating} participating), 4 transport legs, 6 flights, 1 hotel, 12 buses, "
+            f"({participating} participating), 4 transport legs, 10 flights, 1 hotel, 24 buses, "
             f"15 Gala tables, 12 schedule items, 3 announcements — allocations + Gala draw already run."
         )
         print("Event B (TB2027, registration_open): same config, 0 registrations.")

@@ -28,6 +28,7 @@ export const assignmentSourceLabel = makeLookup({
 export const flagReasonLabel = makeLookup({
   no_slot: "Hết chỗ",
   shift_mismatch: "Không đúng ca",
+  no_compatible_bus: "Không có xe khớp điểm đón/giờ bay",
 });
 
 export const jobStatusLabel = makeLookup({

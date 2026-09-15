@@ -66,6 +66,11 @@ class BusAssignmentOut(BaseModel):
     employee_code: str | None
     full_name: str
     team_name: str | None
+    # what the CBNV actually registered for this leg — shown next to the bus
+    # they got so BTC can see a pickup mismatch at a glance, same idea as
+    # FlightAssignmentOut.requested_shift_name
+    requested_pickup_point_name: str | None = None
+    flight_code: str | None = None
 
 
 class BusAdjustRequest(BaseModel):
@@ -74,3 +79,8 @@ class BusAdjustRequest(BaseModel):
     bus_id: int
     reason: str
     force: bool = False
+
+
+class UnlockBusAssignmentRequest(BaseModel):
+    leg_id: int
+    employee_ids: list[int]

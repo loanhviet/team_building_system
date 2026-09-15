@@ -148,6 +148,7 @@ export type TransportLeg = {
   direction: string;
   sort_order: number;
   is_active: boolean;
+  flight_timing: "before_flight" | "after_flight" | null;
 };
 
 export type PickupPoint = {
@@ -485,6 +486,8 @@ export type BusAssignment = {
   employee_code: string | null;
   full_name: string;
   team_name: string | null;
+  requested_pickup_point_name: string | null;
+  flight_code: string | null;
 };
 
 export type Flight = {

@@ -214,12 +214,26 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       refetchAssignments();
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.code === "over_capacity") {
+      if (err instanceof ApiError && (err.code === "over_capacity" || err.code === "bus_incompatible")) {
         setOverCapacityMsg(err.message);
         return;
       }
       toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra");
     },
+  });
+
+  const unlockMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<{ unlocked: number }>(`/api/events/${eventId}/bus-assignments/unlock`, {
+        method: "POST",
+        body: JSON.stringify({ leg_id: currentLegId, employee_ids: Array.from(selected) }),
+      }),
+    onSuccess: (data) => {
+      toast.success(`Đã bỏ ghim ${data.unlocked} người — lần chạy phân xe tự động tiếp theo sẽ xét lại họ`);
+      setSelected(new Set());
+      refetchAssignments();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
 
   type BusAllocationSummary = {
@@ -507,6 +521,14 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
               >
                 Chuyển
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={unlockMutation.isPending}
+                onClick={() => unlockMutation.mutate()}
+              >
+                Bỏ ghim
+              </Button>
             </div>
           )}
         </div>
@@ -587,6 +609,14 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
                             <span className="text-muted-foreground">Chưa xếp xe</span>
                           )}
                           {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
+                          {a.flight_code && (
+                            <span className="text-muted-foreground">Chuyến {a.flight_code}</span>
+                          )}
+                          {a.requested_pickup_point_name && (
+                            <span className="text-muted-foreground">
+                              Đăng ký: {a.requested_pickup_point_name}
+                            </span>
+                          )}
                         </div>
                       }
                     />
@@ -615,7 +645,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
               {overCapacityMsg && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
                 <p className="text-xs text-destructive">
-                  Ghi đè sức chứa cần lý do cụ thể, không dùng lý do mặc định.
+                  Ghi đè cảnh báo cần lý do cụ thể, không dùng lý do mặc định.
                 </p>
               )}
             </div>
@@ -639,7 +669,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
                 }
                 onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget), force: true })}
               >
-                Vẫn ghi đè sức chứa
+                Vẫn ghi đè cảnh báo
               </Button>
             )}
           </DialogFooter>

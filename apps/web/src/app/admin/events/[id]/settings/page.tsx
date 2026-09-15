@@ -93,6 +93,11 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
             { name: "code", label: "Mã" },
             { name: "name", label: "Tên" },
             { name: "direction", label: "Chiều (outbound/inbound/local)" },
+            {
+              name: "flight_timing",
+              label: "Ràng buộc giờ bay (before_flight/after_flight, để trống nếu không liên quan)",
+              required: false,
+            },
           ]}
         />
       </section>
