@@ -32,8 +32,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import { formatTime } from "@/lib/format";
+import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
   AllocationRun,
@@ -245,7 +246,6 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const summary = (job?.result_json ?? latestRunForDirection?.summary_json) as
     | FlightAllocationSummary
     | undefined;
-  const remainingByFlight = new Map(summary?.flights.map((f) => [f.flight_id, f.remaining]) ?? []);
   const teamName = (id: number) => teams?.find((t) => t.id === id)?.name ?? `#${id}`;
 
   const openCreateFlight = () => {
@@ -273,11 +273,25 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const dirFlights = flights?.filter((f) => f.direction === direction) ?? [];
   const assignedCount = (flightId: number) =>
     (assignments ?? []).filter((a) => a.flight_id === flightId).length;
+  const remainingCount = (f: Flight) => f.capacity - assignedCount(f.id);
 
   const splitTeamNames = new Set(
     (summary?.split_team_ids ?? [])
       .map((tid) => teams?.find((t) => t.id === tid)?.name)
       .filter((n): n is string => !!n),
+  );
+  // live, not from the last run's summary — how many distinct flights each
+  // split team's members are actually on right now (manual moves after the
+  // auto-run change this without a new run happening)
+  const splitTeamFlightCounts = new Map(
+    Array.from(splitTeamNames).map((name) => [
+      name,
+      new Set(
+        (assignments ?? [])
+          .filter((a) => a.team_name === name && a.flight_id != null)
+          .map((a) => a.flight_id),
+      ).size,
+    ]),
   );
   const flagCount = (assignments ?? []).filter((a) => a.is_flagged).length;
   const lockedCount = (assignments ?? []).filter((a) => a.is_locked).length;
@@ -365,7 +379,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             {a.is_flagged ? (
               <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} />
             ) : assignedFlight ? (
-              <StatusChip kind="confirmed" label="Đúng ca" />
+              <StatusChip kind="confirmed" label={assignedFlight.shift_id ? "Đúng ca" : "Đã xếp"} />
             ) : (
               <span className="text-muted-foreground">—</span>
             )}
@@ -610,14 +624,15 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             onClick={() => setFocusFlightId("all")}
           />
           {dirFlights.map((f) => {
-            const n = remainingByFlight.has(f.id)
-              ? f.capacity - (remainingByFlight.get(f.id) ?? 0)
-              : assignedCount(f.id);
+            // always live from `assignments`, never the last run's summary —
+            // that summary goes stale the moment someone manually reassigns
+            // a person without re-running auto-allocation (U1)
+            const n = assignedCount(f.id);
             return (
               <ResourceCard
                 key={f.id}
                 title={f.flight_code}
-                subtitle={`${f.origin ?? "—"} → ${f.destination ?? "—"}${shifts?.find((s) => s.id === f.shift_id) ? ` · ${shifts.find((s) => s.id === f.shift_id)!.name}` : ""}${f.site_id ? ` · ${sites?.find((s) => s.id === f.site_id)?.name ?? ""}` : ""}`}
+                subtitle={`${f.origin ?? "—"} → ${f.destination ?? "—"}${f.depart_at ? ` · ${formatTime(f.depart_at)}` : ""}${shifts?.find((s) => s.id === f.shift_id) ? ` · ${shifts.find((s) => s.id === f.shift_id)!.name}` : ""}${f.site_id ? ` · ${sites?.find((s) => s.id === f.site_id)?.name ?? ""}` : ""}`}
                 assigned={n}
                 capacity={f.capacity}
                 selected={focusFlightId === f.id}
@@ -657,7 +672,13 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                 <p className="mt-2">
                   <StatusChip
                     kind="flag"
-                    label={`Team bị tách: ${summary.split_team_ids.map(teamName).join(", ")}`}
+                    label={`Team bị tách: ${summary.split_team_ids
+                      .map((tid) => {
+                        const name = teamName(tid);
+                        const n = splitTeamFlightCounts.get(name);
+                        return n ? `${name} · ${n} chuyến` : name;
+                      })
+                      .join(", ")}`}
                   />
                 </p>
               )}
@@ -719,7 +740,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                   ?.filter((f) => f.direction === direction)
                   .map((f) => (
                     <SelectItem key={f.id} value={String(f.id)}>
-                      {f.flight_code}
+                      {f.flight_code} · còn {remainingCount(f)}
                     </SelectItem>
                   ))}
               </SelectContent>
@@ -759,7 +780,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                 ?.filter((f) => f.direction === direction)
                 .map((f) => (
                   <SelectItem key={f.id} value={String(f.id)}>
-                    {f.flight_code}
+                    {f.flight_code} · còn {remainingCount(f)}
                   </SelectItem>
                 ))}
             </SelectContent>

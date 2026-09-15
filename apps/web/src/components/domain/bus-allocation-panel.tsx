@@ -1,14 +1,19 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeftRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
+import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { FormField, MoreFields } from "@/components/domain/form-field";
-import { PersonRow } from "@/components/domain/person-row";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { ResourceCard } from "@/components/domain/resource-card";
+import { Segmented } from "@/components/domain/segmented";
+import { StatusChip } from "@/components/domain/status-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import { formatTime } from "@/lib/format";
 import { flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
@@ -70,6 +76,8 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const [adjustReason, setAdjustReason] = useState(DEFAULT_ADJUST_REASON);
   const [overCapacityMsg, setOverCapacityMsg] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [filterTab, setFilterTab] = useState<"all" | "flag" | "locked" | "unassigned">("all");
+  const [listSearch, setListSearch] = useState("");
 
   const { data: legs } = useQuery({
     queryKey: ["events", eventId, "transport-legs"],
@@ -252,6 +260,119 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const summary = (job?.result_json ?? latestRunForLeg?.summary_json) as BusAllocationSummary | undefined;
 
   const teamName = (id: number) => teams?.find((t) => t.id === id)?.name ?? `#${id}`;
+
+  const flagCount = (assignments ?? []).filter((a) => a.is_flagged).length;
+  const lockedCount = (assignments ?? []).filter((a) => a.is_locked).length;
+  const unassignedCount = (assignments ?? []).filter((a) => a.bus_id == null).length;
+
+  const visibleAssignments = (assignments ?? []).filter((a) => {
+    if (focusBusId !== "all" && a.bus_id !== focusBusId) return false;
+    if (filterTab === "flag" && !a.is_flagged) return false;
+    if (filterTab === "locked" && !a.is_locked) return false;
+    if (filterTab === "unassigned" && a.bus_id != null) return false;
+    const q = listSearch.trim().toLowerCase();
+    if (q) {
+      const haystack = [a.full_name, a.employee_code, a.team_name].filter(Boolean).join(" ").toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+  const allVisibleSelected =
+    visibleAssignments.length > 0 && visibleAssignments.every((a) => selected.has(a.employee_id));
+
+  const assignmentColumns: DataTableColumn<BusAssignment>[] = [
+    {
+      key: "person",
+      header: "Nhân sự",
+      cell: (a) => (
+        <div className="flex items-center gap-2.5">
+          <Checkbox
+            checked={selected.has(a.employee_id)}
+            onCheckedChange={(v) =>
+              setSelected((prev) => {
+                const copy = new Set(prev);
+                if (v === true) copy.add(a.employee_id);
+                else copy.delete(a.employee_id);
+                return copy;
+              })
+            }
+            aria-label={`Chọn ${a.full_name}`}
+          />
+          <InitialsAvatar name={a.full_name} className="size-8" />
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{a.full_name}</span>
+            <span className="block truncate text-xs text-muted-foreground">{a.employee_code ?? "—"}</span>
+          </span>
+        </div>
+      ),
+      sortValue: (a) => a.full_name,
+    },
+    {
+      key: "team",
+      header: "Team / Khối",
+      cell: (a) => a.team_name ?? "—",
+      sortValue: (a) => a.team_name ?? "",
+    },
+    {
+      key: "requested_pickup",
+      header: "Điểm đón đăng ký",
+      cell: (a) => a.requested_pickup_point_name ?? "—",
+      sortValue: (a) => a.requested_pickup_point_name ?? "",
+    },
+    {
+      key: "flight",
+      header: "Chuyến bay",
+      cell: (a) => a.flight_code ?? "—",
+      sortValue: (a) => a.flight_code ?? "",
+    },
+    {
+      key: "assigned",
+      header: "Xe đã xếp",
+      cell: (a) => {
+        const assignedBus = buses?.find((b) => b.id === a.bus_id);
+        const pickup = pickupPoints?.find((p) => p.id === assignedBus?.pickup_point_id);
+        return assignedBus ? (
+          <Badge variant="outline" className="font-mono">
+            {assignedBus.code}
+            {pickup ? ` · ${pickup.name}` : ""}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">Chưa xếp xe</span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Trạng thái",
+      cell: (a) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {a.is_flagged ? (
+            <StatusChip kind="flag" label={flagReasonLabel(a.flag_reason)} />
+          ) : a.bus_id != null ? (
+            <StatusChip kind="confirmed" label="Đã xếp" />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+          {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
+        </div>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      className: "w-10 text-right",
+      cell: (a) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setSelected(new Set([a.employee_id]))}
+          aria-label={`Chuyển ${a.full_name} sang xe khác`}
+        >
+          <ArrowLeftRight className="size-4" aria-hidden="true" />
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -444,7 +565,11 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             <ResourceCard
               key={b.id}
               title={b.code}
-              subtitle={[b.leader_name ? `TX ${b.leader_name}` : "Chưa có trưởng xe", pickupPoints?.find((p) => p.id === b.pickup_point_id)?.name]
+              subtitle={[
+                b.depart_at ? formatTime(b.depart_at) : null,
+                b.leader_name ? `TX ${b.leader_name}` : "Chưa có trưởng xe",
+                pickupPoints?.find((p) => p.id === b.pickup_point_id)?.name,
+              ]
                 .filter(Boolean)
                 .join(" · ")}
               assigned={n}
@@ -492,47 +617,40 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-medium">Danh sách nhu cầu xe (chặng đã chọn)</p>
-          {selected.size > 0 && (
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{selected.size} đã chọn</span>
-              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Chuyển tới xe" />
-                </SelectTrigger>
-                <SelectContent>
-                  {buses?.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>
-                      {b.code}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                disabled={!moveTarget}
-                onClick={() => {
-                  setMoveTeamId("");
-                  setOverCapacityMsg(null);
-                  setAdjustOpen(true);
-                }}
-              >
-                Chuyển
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={unlockMutation.isPending}
-                onClick={() => unlockMutation.mutate()}
-              >
-                Bỏ ghim
-              </Button>
-            </div>
-          )}
+          <Input
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            placeholder="Tìm tên, mã NV, team..."
+            className="w-64"
+          />
+          <Segmented
+            ariaLabel="Lọc danh sách nhu cầu xe"
+            value={filterTab}
+            onChange={setFilterTab}
+            options={[
+              { value: "all", label: `Tất cả (${(assignments ?? []).length})` },
+              { value: "flag", label: `Chỉ Flag (${flagCount})` },
+              { value: "locked", label: `Đã ghim (${lockedCount})` },
+              { value: "unassigned", label: `Chưa xếp (${unassignedCount})` },
+            ]}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() =>
+              setSelected(
+                allVisibleSelected ? new Set() : new Set(visibleAssignments.map((a) => a.employee_id)),
+              )
+            }
+          >
+            {allVisibleSelected ? "Bỏ chọn tất cả" : `Chọn tất cả (${visibleAssignments.length})`}
+          </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
           <span>Hoặc chuyển cả Team:</span>
           <Select value={moveTeamId} onValueChange={(v) => setMoveTeamId(v ?? "")}>
             <SelectTrigger className="w-44">
@@ -570,63 +688,54 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             Chuyển cả Team
           </Button>
         </div>
-        {(() => {
-          const people = (assignments ?? []).filter(
-            (a) => focusBusId === "all" || a.bus_id === focusBusId,
-          );
-          if (people.length === 0) {
-            return <p className="text-sm text-muted-foreground">Chưa có người trên xe này.</p>;
-          }
-          return (
-            <ul className="flex flex-col gap-2">
-              {people.map((a) => {
-                const assignedBus = buses?.find((b) => b.id === a.bus_id);
-                const pickup = pickupPoints?.find((p) => p.id === assignedBus?.pickup_point_id);
-                return (
-                  <li key={a.employee_id}>
-                    <PersonRow
-                      name={a.full_name}
-                      code={a.employee_code}
-                      team={a.team_name}
-                      selected={selected.has(a.employee_id)}
-                      onSelect={(next) =>
-                        setSelected((prev) => {
-                          const copy = new Set(prev);
-                          if (next) copy.add(a.employee_id);
-                          else copy.delete(a.employee_id);
-                          return copy;
-                        })
-                      }
-                      flag={a.is_flagged ? flagReasonLabel(a.flag_reason) : null}
-                      extra={
-                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                          {assignedBus ? (
-                            <Badge variant="outline" className="font-mono">
-                              Xe {assignedBus.code}
-                              {pickup ? ` · ${pickup.name}` : ""}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground">Chưa xếp xe</span>
-                          )}
-                          {a.is_locked && <Badge variant="secondary">Đã ghim</Badge>}
-                          {a.flight_code && (
-                            <span className="text-muted-foreground">Chuyến {a.flight_code}</span>
-                          )}
-                          {a.requested_pickup_point_name && (
-                            <span className="text-muted-foreground">
-                              Đăng ký: {a.requested_pickup_point_name}
-                            </span>
-                          )}
-                        </div>
-                      }
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          );
-        })()}
+
+        <DataTable
+          columns={assignmentColumns}
+          rows={visibleAssignments}
+          rowKey={(a) => a.employee_id}
+          emptyMessage="Chưa có nhu cầu xe cho chặng này — chạy phân bổ hoặc chọn “Tất cả”."
+        />
       </div>
+
+      {selected.size > 0 && (
+        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
+          <span className="text-sm font-medium">{selected.size} đã chọn</span>
+          <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Chuyển tới xe" />
+            </SelectTrigger>
+            <SelectContent>
+              {buses?.map((b) => (
+                <SelectItem key={b.id} value={String(b.id)}>
+                  {b.code}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            disabled={!moveTarget}
+            onClick={() => {
+              setMoveTeamId("");
+              setOverCapacityMsg(null);
+              setAdjustOpen(true);
+            }}
+          >
+            Chuyển
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={unlockMutation.isPending}
+            onClick={() => unlockMutation.mutate()}
+          >
+            Bỏ ghim
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            Bỏ chọn
+          </Button>
+        </div>
+      )}
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>

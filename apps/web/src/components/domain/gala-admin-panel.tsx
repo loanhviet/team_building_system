@@ -203,6 +203,20 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const hasWaiting = !!state?.turns.find((t) => t.status === "waiting");
   const hasAnyTurns = !!state && state.turns.length > 0;
   const activeTables = (state?.tables ?? []).filter((t) => t.is_active);
+  const availableSeatCount = (state?.seats ?? []).filter((s) => s.status === "available").length;
+  const confirmedCountByTeam = new Map<number, number>();
+  for (const s of state?.seats ?? []) {
+    if (s.status === "confirmed" && s.team_id != null) {
+      confirmedCountByTeam.set(s.team_id, (confirmedCountByTeam.get(s.team_id) ?? 0) + 1);
+    }
+  }
+  // only the original (non-makeup) turn's quota is the team's real total —
+  // a makeup turn's quota is just the remainder that was still open when it
+  // was spawned, so counting both would double-count (mirrors the same
+  // reasoning in dashboard_service.build_dashboard's gala_unseated_count)
+  const neededSeatCount = (state?.turns ?? [])
+    .filter((t) => !t.is_makeup)
+    .reduce((sum, t) => sum + Math.max(t.seat_quota - (confirmedCountByTeam.get(t.team_id) ?? 0), 0), 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -395,6 +409,9 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           <span>
             {state.tables.length} bàn, {state.seats.length} ghế
           </span>
+          <span>
+            Ghế trống <b>{availableSeatCount}</b> · Cần <b>{neededSeatCount}</b>
+          </span>
           {activeTurn && (
             <span>
               Đang chọn: <b>{activeTurn.team_name}</b>
@@ -503,7 +520,8 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                 variant={t.status === "active" ? "default" : "outline"}
                 className={t.status === "done" || t.status === "skipped" || t.status === "expired" ? "opacity-50" : undefined}
               >
-                #{t.order_no} {t.team_name} ({t.seat_quota} ghế) — {galaTurnStatusLabel(t.status)}
+                #{t.order_no} {t.team_name} ({confirmedCountByTeam.get(t.team_id) ?? 0}/{t.seat_quota} ghế) —{" "}
+                {galaTurnStatusLabel(t.status)}
                 {t.is_makeup && " · Lượt bù"}
                 {!t.has_representative && " · Chưa có trưởng nhóm"}
               </Badge>
