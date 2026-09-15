@@ -6,15 +6,18 @@ export function BrandMark({ className, light = false }: { className?: string; li
       <span
         aria-hidden
         className={cn(
-          "grid size-7 place-items-center border border-dashed text-[11px] font-semibold tracking-tight",
-          light
-            ? "border-white/40 text-[#fbf6ee]"
-            : "border-[var(--lagoon)] text-[var(--lagoon)]",
+          "grid size-8 place-items-center rounded-lg text-[11px] font-semibold tracking-tight",
+          light ? "bg-white/15 text-white" : "bg-primary text-primary-foreground",
         )}
       >
         TB
       </span>
-      <span className={cn("font-display text-lg leading-none", light ? "text-[#fbf6ee]" : "text-foreground")}>
+      <span
+        className={cn(
+          "font-display text-[1.05rem] leading-none",
+          light ? "text-white" : "text-foreground",
+        )}
+      >
         Team Building
       </span>
     </span>

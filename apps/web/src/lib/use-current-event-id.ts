@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const STORAGE_KEY = "admin:currentEventId";
 
@@ -26,14 +26,14 @@ export function useCurrentEventId(): [number | null, (id: number) => void] {
     }
   }, []);
 
-  const update = (next: number) => {
+  const update = useCallback((next: number) => {
     setId(next);
     try {
       localStorage.setItem(STORAGE_KEY, String(next));
     } catch {
       // ignore — nothing to persist, still works for this tab's session
     }
-  };
+  }, []);
 
   return [id, update];
 }

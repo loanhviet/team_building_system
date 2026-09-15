@@ -1,11 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Menu } from "lucide-react";
-import Link from "next/link";
+import { CalendarDays, Database, LayoutDashboard, LogOut, Menu, Shield, Users } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
-import { BrandMark } from "@/components/domain/brand-mark";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
+import { EventStatusBadge } from "@/components/domain/status-badge";
+import { RailUser, ShellRail } from "@/components/domain/shell-rail";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Select,
@@ -15,27 +16,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useCurrentEventId } from "@/lib/use-current-event-id";
+import { EVENT_STATUS_LABELS } from "@/lib/event-status";
 import { ROLE_LABEL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/types/api";
 
-const NAV_ITEMS = [
-  { href: "/admin", label: "Tổng quan" },
-  { href: "/admin/events", label: "Sự kiện" },
-  { href: "/admin/master-data", label: "Master Data" },
-  { href: "/admin/employees", label: "CBNV" },
-  { href: "/admin/users", label: "Tài khoản", superAdmin: true },
-];
-
-function isActive(pathname: string, href: string) {
-  if (href === "/admin") return pathname === "/admin";
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function EventPicker({ className }: { className?: string }) {
+function EventPicker() {
   const router = useRouter();
   const [currentEventId, setCurrentEventId] = useCurrentEventId();
   const { data: events } = useQuery({
@@ -45,66 +35,62 @@ function EventPicker({ className }: { className?: string }) {
 
   useEffect(() => {
     if (currentEventId == null && events && events.length > 0) {
-      setCurrentEventId(events[events.length - 1].id);
+      const rank: Record<string, number> = {
+        event_started: 0,
+        information_published: 1,
+        allocation_processing: 2,
+        registration_open: 3,
+        registration_closed: 4,
+        draft: 5,
+        event_completed: 6,
+      };
+      const live = [...events].sort(
+        (a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.id - a.id,
+      )[0];
+      setCurrentEventId(live.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, currentEventId]);
 
   if (!events || events.length === 0) return null;
+  const current = events.find((e) => e.id === currentEventId);
 
   return (
-    <div className={className}>
-      <p className="mb-1 text-[11px] text-white/45">Sự kiện đang thao tác</p>
+    <div className="mb-5 rounded-xl border border-border bg-muted/50 p-3">
+      <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Kỳ đang thao tác</p>
       <Select
         value={currentEventId ? String(currentEventId) : undefined}
         onValueChange={(v) => {
           const id = Number(v);
+          const next = events.find((e) => e.id === id);
           setCurrentEventId(id);
           router.push(`/admin/events/${id}`);
+          if (next) toast.message(`Đang thao tác ${next.name}`);
         }}
       >
-        <SelectTrigger className="w-full border-white/20 bg-white/5 text-white">
-          <SelectValue placeholder="Chọn sự kiện" />
+        <SelectTrigger className="h-auto min-h-11 w-full items-start py-2 text-left">
+          <SelectValue placeholder="Chọn sự kiện">
+            {current ? (
+              <span className="flex flex-col gap-1">
+                <span className="truncate font-medium">{current.name}</span>
+              </span>
+            ) : null}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {events.map((e) => (
             <SelectItem key={e.id} value={String(e.id)}>
-              {e.name}
+              {e.name} · {EVENT_STATUS_LABELS[e.status]}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+      {current && (
+        <div className="mt-2">
+          <EventStatusBadge status={current.status} />
+        </div>
+      )}
     </div>
-  );
-}
-
-function NavLinks({
-  pathname,
-  showUsers,
-  onNavigate,
-}: {
-  pathname: string;
-  showUsers: boolean;
-  onNavigate?: () => void;
-}) {
-  return (
-    <nav className="flex flex-col gap-0.5">
-      {NAV_ITEMS.filter((item) => !item.superAdmin || showUsers).map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          onClick={onNavigate}
-          className={cn(
-            "px-3 py-2 text-sm",
-            isActive(pathname, item.href)
-              ? "bg-[var(--lagoon)] text-white"
-              : "text-white/70 hover:bg-white/10 hover:text-white",
-          )}
-        >
-          {item.label}
-        </Link>
-      ))}
-    </nav>
   );
 }
 
@@ -133,55 +119,83 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   }
 
   const showUsers = user.role === "super_admin";
+  const groups = [
+    {
+      label: "Điều hành",
+      items: [
+        { href: "/admin", label: "Tổng quan", icon: LayoutDashboard },
+        { href: "/admin/events", label: "Sự kiện", icon: CalendarDays },
+      ],
+    },
+    {
+      label: "Dữ liệu",
+      items: [
+        { href: "/admin/employees", label: "CBNV", icon: Users },
+        { href: "/admin/master-data", label: "Team & địa điểm", icon: Database },
+        { href: "/admin/users", label: "Tài khoản", icon: Shield, show: showUsers },
+      ],
+    },
+  ];
+
+  const footer = (
+    <RailUser
+      name={user.full_name ?? user.email}
+      meta={ROLE_LABEL[user.role] ?? user.role}
+      action={
+        <Button
+          variant="ghost"
+          className="h-10 w-full justify-start text-muted-foreground"
+          onClick={() => logout().then(() => router.push("/login"))}
+        >
+          <LogOut className="size-4" aria-hidden="true" />
+          Đăng xuất
+        </Button>
+      }
+    />
+  );
 
   return (
-    <div className="flex min-h-svh flex-1 bg-[var(--foam)]">
-      <aside className="hidden w-56 shrink-0 flex-col bg-[var(--night)] p-4 text-[#e8eef2] sm:flex">
-        <div className="mb-8 px-1">
-          <BrandMark light className="[&>span:last-child]:text-[15px]" />
-          <p className="mt-2 pl-9 text-[11px] text-white/45">Bàn điều hành BTC</p>
-        </div>
-        <EventPicker className="mb-4 px-1" />
-        <NavLinks pathname={pathname} showUsers={showUsers} />
-        <div className="mt-auto flex flex-col gap-2 px-1 text-sm text-white/55">
-          <p className="truncate text-white/80">{user.email}</p>
-          <p className="text-xs">{ROLE_LABEL[user.role] ?? user.role}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-white/20 bg-transparent text-white hover:bg-white/10"
-            onClick={() => logout().then(() => router.push("/login"))}
-          >
-            Đăng xuất
-          </Button>
-        </div>
-      </aside>
+    <div className="flex min-h-svh flex-1 bg-background">
+      <a href="#main" className="skip-link">
+        Bỏ qua điều hướng
+      </a>
+      <ShellRail
+        className="hidden md:flex"
+        eyebrow="Bàn điều hành BTC"
+        eventSlot={<EventPicker />}
+        groups={groups}
+        pathname={pathname}
+        footer={footer}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 bg-[var(--night)] px-4 py-2 text-[#e8eef2] sm:hidden">
+        <header className="flex h-14 items-center gap-2 border-b border-border bg-card px-3 md:hidden">
           <Sheet>
             <SheetTrigger
-              className={cn(
-                buttonVariants({ variant: "outline", size: "icon-sm" }),
-                "border-white/20 bg-transparent text-white",
-              )}
+              className={cn(buttonVariants({ variant: "outline", size: "icon" }), "size-11")}
+              aria-label="Mở menu"
             >
               <Menu className="size-4" />
             </SheetTrigger>
-            <SheetContent side="left" className="w-64 border-none bg-[var(--night)] p-0 text-[#e8eef2]">
-              <SheetHeader>
-                <SheetTitle className="text-[#e8eef2]">
-                  <BrandMark light />
-                </SheetTitle>
+            <SheetContent side="left" className="w-[17.5rem] p-0">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Menu BTC</SheetTitle>
               </SheetHeader>
-              <div className="flex flex-col gap-4 px-2 pb-4">
-                <EventPicker />
-                <NavLinks pathname={pathname} showUsers={showUsers} />
-              </div>
+              <ShellRail
+                className="h-full w-full border-0"
+                eyebrow="Bàn điều hành BTC"
+                eventSlot={<EventPicker />}
+                groups={groups}
+                pathname={pathname}
+                footer={footer}
+              />
             </SheetContent>
           </Sheet>
           <p className="font-display text-base">Điều hành</p>
+          <InitialsAvatar name={user.full_name ?? user.email} className="ml-auto size-8" />
         </header>
-        <main className="flex-1 overflow-auto p-4 sm:p-7">{children}</main>
+        <main id="main" className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+          {children}
+        </main>
       </div>
     </div>
   );

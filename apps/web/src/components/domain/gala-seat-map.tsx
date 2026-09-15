@@ -12,10 +12,13 @@ const SEAT_SIZE = 44;
 const CLUSTER = 180;
 
 const SEAT_TONE: Record<GalaSeat["status"], string> = {
-  available: "bg-[var(--ticket)] border-[var(--lagoon)] text-[var(--night)]",
-  held: "bg-amber-300 border-amber-500 text-[var(--night)]",
-  confirmed: "bg-[var(--lagoon)] border-[var(--lagoon)] text-white",
-  blocked: "bg-[var(--night)]/25 border-[var(--night)]/40 text-[var(--night)]/50",
+  available:
+    "bg-[var(--status-empty-bg)] border-[var(--status-empty-border)] text-[var(--status-empty-fg)]",
+  held: "bg-[var(--status-locking-bg)] border-[var(--status-locking-border)] text-[var(--status-locking-fg)]",
+  confirmed:
+    "bg-[var(--status-confirmed-bg)] border-[var(--status-confirmed-border)] text-[var(--status-confirmed-fg)]",
+  blocked:
+    "bg-[var(--status-unavailable-bg)] border-[var(--status-unavailable-border)] text-[var(--status-unavailable-fg)]",
 };
 
 function seatOffset(index: number, count: number, shape: GalaTable["shape"]) {
@@ -100,9 +103,9 @@ export function GalaSeatMap({
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs text-muted-foreground sm:hidden">Vuốt ngang/dọc để xem toàn bộ sơ đồ</p>
-      <div className="overflow-auto border border-[var(--rule)] bg-[#e8eef1]">
+      <div className="overflow-auto border border-border bg-muted">
         <div className="bg-[var(--night)] px-4 py-3 text-center">
-          <p className="font-display text-sm tracking-wide text-[#fbf6ee]">
+          <p className="font-display text-sm tracking-wide text-[var(--on-night)]">
             {state.config?.stage_label ?? "Sân khấu"}
           </p>
           <div className="mx-auto mt-2 h-1.5 w-2/3 bg-[var(--lantern)]/80" />
@@ -202,22 +205,21 @@ export function GalaSeatMap({
 
 export function GalaLegend() {
   return (
-    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+    <div className="flex flex-wrap gap-3 text-xs">
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full border border-[var(--lagoon)] bg-[var(--ticket)]" /> Trống
+        <span className="size-3 border border-[var(--status-empty-border)] bg-[var(--status-empty-bg)]" /> Trống
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-amber-300" /> Đang chọn
+        <span className="size-3 border border-[var(--status-locking-border)] bg-[var(--status-locking-bg)]" /> Đang giữ
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--lagoon)]" /> Đã xác nhận (Team khác)
+        <span className="size-3 border border-[var(--status-confirmed-border)] bg-[var(--status-confirmed-bg)]" /> Đã xác nhận
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--night)]/25" /> Khoá
+        <span className="size-3 border border-[var(--status-unavailable-border)] bg-[var(--status-unavailable-bg)]" /> Không khả dụng
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="size-3 rounded-full bg-[var(--lantern)] ring-2 ring-[var(--lantern)] ring-offset-1" />{" "}
-        Team bạn
+        <span className="size-3 bg-[var(--lantern)] ring-2 ring-[var(--lantern)] ring-offset-1" /> Team bạn
       </span>
     </div>
   );

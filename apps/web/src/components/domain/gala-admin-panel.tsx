@@ -193,7 +193,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
         <Dialog open={configOpen} onOpenChange={(open) => (open ? openConfigDialog() : setConfigOpen(false))}>
           <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
             {state?.config ? "Sửa cấu hình" : "Tạo cấu hình Gala"}
@@ -347,7 +347,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
       </div>
 
       {state?.config && (
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span>
             Trạng thái: <Badge variant="outline">{galaConfigStatusLabel(state.config.status)}</Badge>
           </span>
@@ -361,7 +361,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
             </span>
           )}
           <span>{blockMode ? "— bấm ghế trống để khoá/mở" : "— kéo bàn để xếp sơ đồ"}</span>
-        </div>
+        </p>
       )}
 
       {state?.config && (
@@ -386,11 +386,39 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {activeTables.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-2 border-b border-[var(--rule)] py-1.5 text-sm last:border-0">
+              <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-1.5 text-sm last:border-0">
                 <span>
                   <b>{t.code}</b> — {t.seat_count} ghế, {t.shape === "round" ? "tròn" : "chữ nhật"}
                 </span>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    X
+                    <Input
+                      key={`x-${t.id}-${t.x}`}
+                      type="number"
+                      className="h-8 w-16"
+                      defaultValue={t.x}
+                      aria-label={`Toạ độ X bàn ${t.code}`}
+                      onBlur={(e) => {
+                        const x = Number(e.target.value);
+                        if (!Number.isNaN(x) && x !== t.x) moveMutation.mutate({ id: t.id, x, y: t.y });
+                      }}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    Y
+                    <Input
+                      key={`y-${t.id}-${t.y}`}
+                      type="number"
+                      className="h-8 w-16"
+                      defaultValue={t.y}
+                      aria-label={`Toạ độ Y bàn ${t.code}`}
+                      onBlur={(e) => {
+                        const y = Number(e.target.value);
+                        if (!Number.isNaN(y) && y !== t.y) moveMutation.mutate({ id: t.id, x: t.x, y });
+                      }}
+                    />
+                  </label>
                   <Button size="sm" variant="ghost" onClick={() => setEditingTable(t)}>
                     Sửa
                   </Button>

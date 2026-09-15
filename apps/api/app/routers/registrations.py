@@ -86,21 +86,25 @@ async def _registration_out(db: DbSession, reg: Registration) -> RegistrationOut
 
 
 @me_router.get("/me", response_model=RegistrationOut | None)
-async def get_my_latest_registration(db: DbSession, user: CurrentUser) -> RegistrationOut | None:
+async def get_my_latest_registration(
+    db: DbSession, user: CurrentUser, event_id: int | None = None
+) -> RegistrationOut | None:
     """The most recent registration for this employee whose event hasn't
     fully wrapped up — doesn't auto-create a draft (unlike the scoped
     endpoint), since there may be no event_id to create one against."""
     employee = await _current_employee(db, user)
-    result = await db.execute(
+    stmt = (
         select(Registration)
         .join(Event, Event.id == Registration.event_id)
-        .where(
-            Registration.employee_id == employee.id,
-            Event.status != EventStatus.event_completed,
-        )
+        .where(Registration.employee_id == employee.id)
         .order_by(Registration.id.desc())
         .limit(1)
     )
+    if event_id is not None:
+        stmt = stmt.where(Registration.event_id == event_id)
+    else:
+        stmt = stmt.where(Event.status != EventStatus.event_completed)
+    result = await db.execute(stmt)
     reg = result.scalar_one_or_none()
     return await _registration_out(db, reg) if reg is not None else None
 

@@ -156,72 +156,83 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
   ];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Audit Log</p>
-        <DataTable
-          columns={auditColumns}
-          rows={auditLogs ?? []}
-          rowKey={(log) => log.id}
-          isLoading={auditLoading}
-          emptyMessage="Chưa có thay đổi nào"
-          pageSize={20}
-          toolbar={
-            <>
-              <Select value={action || ALL} onValueChange={(v) => setAction(v === ALL ? "" : (v ?? ""))}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Hành động" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Tất cả</SelectItem>
-                  {actionOptions.map((a) => (
-                    <SelectItem key={a} value={a}>
-                      {auditActionLabel(a)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={entityType || ALL}
-                onValueChange={(v) => setEntityType(v === ALL ? "" : (v ?? ""))}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Đối tượng" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Tất cả</SelectItem>
-                  {entityTypeOptions.map((e) => (
-                    <SelectItem key={e} value={e}>
-                      {auditEntityTypeLabel(e)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input type="date" value={since} onChange={(e) => setSince(e.target.value)} className="w-40" />
-              <Input type="date" value={until} onChange={(e) => setUntil(e.target.value)} className="w-40" />
-              {hasFilter && (
-                <Button variant="ghost" size="sm" onClick={clearFilters}>
-                  Xoá lọc
-                </Button>
-              )}
-              <Button variant="outline" size="sm" className="ml-auto" onClick={handleExport} disabled={downloading}>
-                Export CSV
-              </Button>
-            </>
-          }
-        />
+    <div className="flex max-w-2xl flex-col gap-6">
+      <div className="flex flex-wrap gap-2">
+        <Select value={action || ALL} onValueChange={(v) => setAction(v === ALL ? "" : (v ?? ""))}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Hành động" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tất cả</SelectItem>
+            {actionOptions.map((a) => (
+              <SelectItem key={a} value={a}>
+                {auditActionLabel(a)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={entityType || ALL}
+          onValueChange={(v) => setEntityType(v === ALL ? "" : (v ?? ""))}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Đối tượng" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Tất cả</SelectItem>
+            {entityTypeOptions.map((e) => (
+              <SelectItem key={e} value={e}>
+                {auditEntityTypeLabel(e)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" onClick={handleExport} disabled={downloading}>
+          Export CSV
+        </Button>
+        {hasFilter && (
+          <Button variant="ghost" onClick={clearFilters}>
+            Xoá lọc
+          </Button>
+        )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Jobs của sự kiện này</p>
-        <DataTable
-          columns={jobColumns}
-          rows={jobs ?? []}
-          rowKey={(j) => j.id}
-          isLoading={jobsLoading}
-          emptyMessage="Chưa có job nào"
-        />
-      </div>
+      <section>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Nhật ký</h2>
+        {auditLoading && <p className="text-sm text-muted-foreground">Đang tải…</p>}
+        {(auditLogs ?? []).length === 0 && !auditLoading && (
+          <p className="text-sm text-muted-foreground">Chưa có thay đổi nào.</p>
+        )}
+        <ol className="flex flex-col">
+          {(auditLogs ?? []).slice(0, 40).map((log) => (
+            <li key={log.id} className="border-b border-border py-3 last:border-0">
+              <p className="text-sm">
+                <span className="font-medium">{auditActionLabel(log.action)}</span>
+                {" · "}
+                {auditEntityTypeLabel(log.entity_type)} #{log.entity_id}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {new Date(log.created_at).toLocaleString("vi-VN")} · {log.actor_email ?? "Hệ thống"}
+                {log.reason ? ` · ${log.reason}` : ""}
+              </p>
+              <JsonDiff before={log.before_json} after={log.after_json} />
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Job nền</h2>
+        {jobsLoading && <p className="text-sm text-muted-foreground">Đang tải…</p>}
+        <ul className="flex flex-col gap-2">
+          {(jobs ?? []).slice(0, 8).map((j) => (
+            <li key={j.id} className="flex items-center justify-between rounded-xl border border-border bg-card px-3 py-2 text-sm">
+              <span>{jobTypeLabel(j.type)}</span>
+              <span className="text-muted-foreground">{jobStatusLabel(j.status)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

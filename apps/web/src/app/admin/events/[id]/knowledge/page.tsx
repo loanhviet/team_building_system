@@ -196,22 +196,14 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <p className="ticket-kicker">Trợ lý CBNV</p>
         <h1 className="font-display text-2xl font-semibold">Tài liệu hỏi đáp</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          FAQ / handbook markdown. Chỉ bản đã đăng được trợ lý dùng. CBNV không thấy trang này —
-          họ hỏi trên /chat.
+          FAQ / handbook markdown. Chỉ bản đã đăng được trợ lý dùng. CBNV hỏi trên /chat, không thấy
+          trang này.
         </p>
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={filtered}
-        rowKey={(row) => row.id}
-        isLoading={isLoading}
-        emptyMessage="Chưa có tài liệu. Tạo FAQ về dress code, chính sách hủy, mang theo gì…"
-        toolbar={
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -241,9 +233,30 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
                   : ""}
               </span>
             )}
-          </div>
-        }
-      />
+      </div>
+
+      {isLoading && <p className="text-sm text-muted-foreground">Đang tải…</p>}
+      {!isLoading && filtered.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          Chưa có tài liệu. Tạo FAQ về dress code, chính sách hủy, mang theo gì…
+        </p>
+      )}
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {filtered.map((row) => (
+          <li key={row.id}>
+            <button
+              type="button"
+              onClick={() => openEdit(row)}
+              className="flex h-full w-full cursor-pointer flex-col items-start gap-1 rounded-2xl border border-border bg-card p-4 text-left hover:border-primary"
+            >
+              <span className="font-medium">{row.title}</span>
+              <span className="text-xs text-muted-foreground">
+                {row.is_published ? "Đã đăng — trợ lý được dùng" : "Nháp — CBNV chưa thấy"}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
 
       <Dialog
         open={dialogOpen}

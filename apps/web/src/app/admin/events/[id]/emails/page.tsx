@@ -94,20 +94,18 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
             type="button"
             onClick={() => open(tpl)}
             className={`px-3 py-2 text-left text-sm ${
-              selected === tpl.code ? "bg-[var(--night)] text-white" : "hover:bg-secondary"
+              selected === tpl.code ? "bg-[var(--night)] text-[var(--on-night)]" : "hover:bg-secondary"
             }`}
           >
             <span className="block font-medium">{tpl.code}</span>
-            <span className={selected === tpl.code ? "text-white/70" : "text-muted-foreground"}>
+            <span className={selected === tpl.code ? "text-[var(--on-night)]/80" : "text-muted-foreground"}>
               {tpl.description}
             </span>
           </button>
         ))}
       </div>
       {current ? (
-        <div className="ticket">
-          <div className="ticket-spine" />
-          <div className="ticket-body flex flex-col gap-3">
+        <div className="flex flex-col gap-3 border border-border bg-card p-4">
             <div className="flex items-center gap-2">
               <h2 className="font-display text-xl">{current.code}</h2>
               {current.is_custom && <Badge variant="outline">Đã chỉnh</Badge>}
@@ -148,7 +146,6 @@ export default function EmailTemplatesPage({ params }: { params: Promise<{ id: s
                 />
               )}
             </div>
-          </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">Chọn một mẫu bên trái để sửa.</p>

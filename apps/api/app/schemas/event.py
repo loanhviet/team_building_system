@@ -58,6 +58,14 @@ class EventOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EmployeeEventOut(EventOut):
+    """Events a CBNV is allowed to see — never drafts they didn't touch."""
+
+    can_register: bool = False
+    has_journey: bool = False
+    registration_status: str | None = None
+
+
 class ShiftCreate(BaseModel):
     code: str
     name: str

@@ -4,7 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { FormField, MoreFields } from "@/components/domain/form-field";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { JobProgress } from "@/components/domain/job-progress";
+import { WorkspaceHeader } from "@/components/domain/workspace-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -162,7 +165,17 @@ export default function EmployeesPage() {
       cell: (emp) => <span className="font-mono">{emp.employee_code ?? "—"}</span>,
       sortValue: (emp) => emp.employee_code ?? "",
     },
-    { key: "full_name", header: "Họ tên", cell: (emp) => emp.full_name, sortValue: (emp) => emp.full_name },
+    {
+      key: "full_name",
+      header: "Họ tên",
+      cell: (emp) => (
+        <span className="flex items-center gap-2">
+          <InitialsAvatar name={emp.full_name} className="size-8" />
+          <span className="font-medium">{emp.full_name}</span>
+        </span>
+      ),
+      sortValue: (emp) => emp.full_name,
+    },
     { key: "email", header: "Email", cell: (emp) => emp.email, sortValue: (emp) => emp.email },
     {
       key: "team_name",
@@ -191,8 +204,8 @@ export default function EmployeesPage() {
       header: "",
       className: "text-right",
       cell: (emp) => (
-        <Button size="sm" variant="ghost" onClick={() => openEdit(emp)}>
-          Sửa
+        <Button variant="outline" onClick={() => openEdit(emp)}>
+          Sửa hồ sơ
         </Button>
       ),
     },
@@ -200,11 +213,14 @@ export default function EmployeesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="ticket-kicker">Hồ sơ công ty</p>
-          <h1 className="font-display text-3xl font-semibold">CBNV</h1>
-        </div>
+      <WorkspaceHeader
+        title="CBNV"
+        description="Hồ sơ công ty — bấm một dòng để sửa. Import Excel khi danh sách lớn."
+        stats={[
+          { label: "Tổng hồ sơ", value: total },
+          { label: "Trang này", value: data?.items.length ?? 0 },
+        ]}
+        actions={
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => apiDownload("/api/employees/import-template", "employees_template.xlsx")}>
             File mẫu
@@ -241,59 +257,55 @@ export default function EmployeesPage() {
           <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending}>
             Import Excel
           </Button>
-          <Button onClick={openCreate}>Thêm CBNV</Button>
+          <Button className="min-h-10" onClick={openCreate}>Thêm CBNV</Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>{editing ? "Sửa CBNV" : "Thêm CBNV"}</DialogTitle>
               </DialogHeader>
-              <div className="grid gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label>Mã NV</Label>
-                  <Input value={form.employee_code} onChange={(e) => setForm({ ...form, employee_code: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Họ tên</Label>
+              <div className="flex flex-col gap-3">
+                <FormField label="Họ tên" required>
                   <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Email</Label>
+                </FormField>
+                <FormField label="Email" required>
                   <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Team</Label>
-                  <Select value={form.team_id} onValueChange={(v) => setForm({ ...form, team_id: v ?? "" })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn team" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teams?.map((t) => (
-                        <SelectItem key={t.id} value={String(t.id)}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Địa điểm</Label>
-                  <Select value={form.site_id} onValueChange={(v) => setForm({ ...form, site_id: v ?? "" })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn địa điểm" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sites?.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>SĐT</Label>
-                  <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-                </div>
+                </FormField>
+                <MoreFields>
+                  <FormField label="Mã NV">
+                    <Input value={form.employee_code} onChange={(e) => setForm({ ...form, employee_code: e.target.value })} />
+                  </FormField>
+                  <FormField label="SĐT">
+                    <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                  </FormField>
+                  <FormField label="Team">
+                    <Select value={form.team_id} onValueChange={(v) => setForm({ ...form, team_id: v ?? "" })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn team" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {teams?.map((t) => (
+                          <SelectItem key={t.id} value={String(t.id)}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                  <FormField label="Địa điểm">
+                    <Select value={form.site_id} onValueChange={(v) => setForm({ ...form, site_id: v ?? "" })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn địa điểm" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sites?.map((s) => (
+                          <SelectItem key={s.id} value={String(s.id)}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                </MoreFields>
               </div>
               <DialogFooter>
                 <Button disabled={!form.full_name || !form.email || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
@@ -303,17 +315,18 @@ export default function EmployeesPage() {
             </DialogContent>
           </Dialog>
         </div>
-      </div>
+        }
+      />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-3">
         <Input
-          placeholder="Tìm theo tên, email, mã NV..."
+          placeholder="Tìm tên, email, mã NV…"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
             setOffset(0);
           }}
-          className="w-64"
+          className="min-h-11 w-full sm:w-72"
         />
         <Select
           value={teamId}
@@ -390,6 +403,7 @@ export default function EmployeesPage() {
         rowKey={(emp) => emp.id}
         isLoading={isLoading}
         emptyMessage="Chưa có CBNV nào khớp bộ lọc"
+        onRowClick={openEdit}
       />
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">

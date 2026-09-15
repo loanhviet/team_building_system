@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { InitialsAvatar } from "@/components/domain/initials-avatar";
+import { WorkspaceHeader } from "@/components/domain/workspace-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -84,8 +86,21 @@ export default function UsersPage() {
   if (user && user.role !== "super_admin") return null;
 
   const columns: DataTableColumn<UserAdmin>[] = [
-    { key: "email", header: "Email", cell: (r) => r.email, sortValue: (r) => r.email },
-    { key: "full_name", header: "Họ tên", cell: (r) => r.full_name ?? "—", sortValue: (r) => r.full_name },
+    { key: "email", header: "Email", cell: (r) => r.email, sortValue: (r) => r.email, className: "hidden lg:table-cell" },
+    {
+      key: "full_name",
+      header: "Người dùng",
+      cell: (r) => (
+        <span className="flex items-center gap-2">
+          <InitialsAvatar name={r.full_name ?? r.email} className="size-8" />
+          <span>
+            <span className="block font-medium">{r.full_name ?? "—"}</span>
+            <span className="block text-xs text-muted-foreground">{r.email}</span>
+          </span>
+        </span>
+      ),
+      sortValue: (r) => r.full_name ?? r.email,
+    },
     {
       key: "employee_code",
       header: "Mã NV",
@@ -130,7 +145,7 @@ export default function UsersPage() {
         <div className="flex flex-wrap gap-1">
           <ConfirmDialog
             trigger={
-              <Button size="sm" variant="outline">
+              <Button variant="outline">
                 {r.is_active ? "Khoá" : "Mở khoá"}
               </Button>
             }
@@ -146,8 +161,8 @@ export default function UsersPage() {
           />
           <ConfirmDialog
             trigger={
-              <Button size="sm" variant="outline">
-                Reset MK
+              <Button variant="outline">
+                Reset mật khẩu
               </Button>
             }
             title="Đặt lại mật khẩu?"
@@ -161,26 +176,31 @@ export default function UsersPage() {
     },
   ];
 
+  const rows = data ?? [];
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <p className="ticket-kicker">Super Admin</p>
-        <h1 className="font-display text-3xl font-semibold">Tài khoản</h1>
-      </div>
+      <WorkspaceHeader
+        title="Tài khoản đăng nhập"
+        description="Đổi vai trò, khoá, hoặc cấp mật khẩu tạm. Chỉ Super Admin."
+        stats={[
+          { label: "Tổng tài khoản", value: rows.length },
+          { label: "Đang khoá", value: rows.filter((r) => !r.is_active).length, warn: rows.some((r) => !r.is_active) },
+        ]}
+      />
 
       <DataTable
         columns={columns}
-        rows={data ?? []}
+        rows={rows}
         rowKey={(r) => r.id}
         isLoading={isLoading}
         pageSize={20}
         toolbar={
-          <>
+          <div className="flex w-full flex-wrap gap-2 rounded-2xl border border-border bg-card p-3">
             <Input
-              placeholder="Tìm email, tên, mã NV..."
+              placeholder="Tìm email, tên, mã NV…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-64"
+              className="min-h-11 w-full sm:w-72"
             />
             <Select value={role} onValueChange={(v) => setRole(v ?? "")}>
               <SelectTrigger className="w-48">
@@ -195,11 +215,11 @@ export default function UsersPage() {
               </SelectContent>
             </Select>
             {role && (
-              <Button variant="ghost" size="sm" onClick={() => setRole("")}>
+              <Button variant="ghost" onClick={() => setRole("")}>
                 Xoá lọc
               </Button>
             )}
-          </>
+          </div>
         }
       />
 

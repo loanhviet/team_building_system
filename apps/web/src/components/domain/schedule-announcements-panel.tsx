@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
+import { FormField, MoreFields } from "@/components/domain/form-field";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { LiteMarkdown } from "@/components/domain/lite-markdown";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, ApiError } from "@/lib/api";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/datetime";
+import { formatDate, formatTime } from "@/lib/format";
 import type { Announcement, Event, ScheduleItem, Shift, Team } from "@/types/api";
 
 const PUBLISHED_STATUSES = new Set(["information_published", "event_started", "event_completed"]);
@@ -291,61 +293,57 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
               <DialogHeader>
                 <DialogTitle>{editingSchedule ? "Sửa mục lịch trình" : "Thêm mục lịch trình"}</DialogTitle>
               </DialogHeader>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5 sm:col-span-2">
-                  <Label>Tiêu đề</Label>
+              <div className="flex flex-col gap-3">
+                <FormField label="Tiêu đề" required>
                   <Input value={scheduleForm.title} onChange={(e) => setScheduleForm({ ...scheduleForm, title: e.target.value })} />
+                </FormField>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Bắt đầu">
+                    <Input type="datetime-local" value={scheduleForm.start_at} onChange={(e) => setScheduleForm({ ...scheduleForm, start_at: e.target.value })} />
+                  </FormField>
+                  <FormField label="Địa điểm">
+                    <Input value={scheduleForm.location} onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })} />
+                  </FormField>
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Ngày</Label>
-                  <Input type="date" value={scheduleForm.day_date} onChange={(e) => setScheduleForm({ ...scheduleForm, day_date: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Địa điểm</Label>
-                  <Input value={scheduleForm.location} onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Bắt đầu</Label>
-                  <Input type="datetime-local" value={scheduleForm.start_at} onChange={(e) => setScheduleForm({ ...scheduleForm, start_at: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Kết thúc</Label>
-                  <Input type="datetime-local" value={scheduleForm.end_at} onChange={(e) => setScheduleForm({ ...scheduleForm, end_at: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5 sm:col-span-2">
-                  <Label>Mô tả</Label>
-                  <Textarea value={scheduleForm.description} onChange={(e) => setScheduleForm({ ...scheduleForm, description: e.target.value })} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label>Đối tượng</Label>
-                  <Select value={scheduleForm.audience} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience: (v ?? "all") as typeof scheduleForm.audience, audience_ref_id: "" })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Tất cả</SelectItem>
-                      <SelectItem value="shift">Theo Ca</SelectItem>
-                      <SelectItem value="team">Theo Team</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {scheduleForm.audience !== "all" && (
-                  <div className="flex flex-col gap-1.5">
-                    <Label>{scheduleForm.audience === "shift" ? "Chọn Ca" : "Chọn Team"}</Label>
-                    <Select value={scheduleForm.audience_ref_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience_ref_id: v ?? "" })}>
+                <MoreFields>
+                  <FormField label="Ngày">
+                    <Input type="date" value={scheduleForm.day_date} onChange={(e) => setScheduleForm({ ...scheduleForm, day_date: e.target.value })} />
+                  </FormField>
+                  <FormField label="Kết thúc">
+                    <Input type="datetime-local" value={scheduleForm.end_at} onChange={(e) => setScheduleForm({ ...scheduleForm, end_at: e.target.value })} />
+                  </FormField>
+                  <FormField label="Đối tượng">
+                    <Select value={scheduleForm.audience} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience: (v ?? "all") as typeof scheduleForm.audience, audience_ref_id: "" })}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Chọn..." />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {(scheduleForm.audience === "shift" ? shifts : teams)?.map((o) => (
-                          <SelectItem key={o.id} value={String(o.id)}>
-                            {o.name}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="all">Tất cả</SelectItem>
+                        <SelectItem value="shift">Theo Ca</SelectItem>
+                        <SelectItem value="team">Theo Team</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
-                )}
+                  </FormField>
+                  {scheduleForm.audience !== "all" && (
+                    <FormField label={scheduleForm.audience === "shift" ? "Chọn Ca" : "Chọn Team"}>
+                      <Select value={scheduleForm.audience_ref_id} onValueChange={(v) => setScheduleForm({ ...scheduleForm, audience_ref_id: v ?? "" })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Chọn..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(scheduleForm.audience === "shift" ? shifts : teams)?.map((o) => (
+                            <SelectItem key={o.id} value={String(o.id)}>
+                              {o.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormField>
+                  )}
+                  <FormField label="Mô tả" className="sm:col-span-2">
+                    <Textarea value={scheduleForm.description} onChange={(e) => setScheduleForm({ ...scheduleForm, description: e.target.value })} />
+                  </FormField>
+                </MoreFields>
               </div>
               <DialogFooter>
                 {isPublished ? (
@@ -365,7 +363,63 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
             </DialogContent>
           </Dialog>
         </div>
-        <DataTable columns={scheduleColumns} rows={schedule ?? []} rowKey={(s) => s.id} emptyMessage="Chưa có lịch trình" />
+        {(() => {
+          const items = [...(schedule ?? [])].sort((a, b) => (a.start_at ?? "").localeCompare(b.start_at ?? ""));
+          const days = new Map<string, typeof items>();
+          for (const s of items) {
+            const key = s.day_date ?? "undated";
+            const list = days.get(key) ?? [];
+            list.push(s);
+            days.set(key, list);
+          }
+          if (items.length === 0) {
+            return <p className="text-sm text-muted-foreground">Chưa có lịch trình.</p>;
+          }
+          return (
+            <ol className="flex flex-col gap-4">
+              {[...days.entries()].map(([day, list]) => (
+                <li key={day}>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    {day === "undated" ? "Chưa gắn ngày" : formatDate(day)}
+                  </p>
+                  <ul className="flex flex-col gap-2">
+                    {list.map((s) => (
+                      <li key={s.id} className="rounded-xl border border-border bg-card px-3 py-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="tabular text-xs text-muted-foreground">
+                              {s.start_at ? formatTime(s.start_at) : "—"}
+                              {s.end_at ? ` – ${formatTime(s.end_at)}` : ""}
+                            </p>
+                            <p className="font-medium">{s.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[s.location, audienceLabel(s), s.is_published ? "Đã hiện" : "Ẩn"]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => openEditSchedule(s)}>
+                              Sửa
+                            </Button>
+                            <ConfirmDialog
+                              trigger={<Button variant="ghost" className="h-8 px-2 text-xs">Xoá</Button>}
+                              title="Xoá mục lịch trình này?"
+                              description={`"${s.title}" sẽ bị xoá khỏi lịch trình.`}
+                              confirmLabel="Xoá"
+                              destructive
+                              onConfirm={() => deleteScheduleMutation.mutate(s.id)}
+                            />
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ol>
+          );
+        })()}
       </div>
 
       <div className="flex flex-col gap-2">

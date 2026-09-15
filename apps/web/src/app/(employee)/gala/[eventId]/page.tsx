@@ -3,9 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { use } from "react";
 import { toast } from "sonner";
+import { Callout } from "@/components/domain/callout";
 import { EmptyState } from "@/components/domain/empty-state";
 import { GalaLegend, GalaSeatMap } from "@/components/domain/gala-seat-map";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/domain/page-header";
+import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { Button } from "@/components/ui/button";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -90,7 +92,7 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
     }
   };
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Đang tải sơ đồ Gala...</p>;
+  if (isLoading) return <PageSkeleton />;
   if (!state?.config) {
     return (
       <EmptyState
@@ -102,39 +104,37 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="ticket-kicker">Sơ đồ chỗ ngồi</p>
-          <h1 className="font-display text-3xl font-semibold">{state.config.name}</h1>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span
-            className={cn("size-2 rounded-full", connected ? "bg-emerald-500" : "bg-destructive")}
-            aria-hidden
-          />
-          {connected ? "Đang cập nhật trực tiếp" : "Mất kết nối, đang thử lại..."}
-        </div>
-      </div>
+      <PageHeader
+        title={state.config.name}
+        description={
+          <span className="inline-flex items-center gap-2">
+            <span
+              className={cn("size-2 rounded-full", connected ? "bg-primary" : "bg-destructive")}
+              aria-hidden
+            />
+            {connected ? "Đang cập nhật trực tiếp" : "Mất kết nối, đang thử lại..."}
+          </span>
+        }
+      />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {activeTurn ? (
-          <div className="flex items-center gap-2 text-sm">
-            <span>
-              Lượt của: <b>{activeTurn.team_name}</b> ({activeTeamConfirmedCount}/{activeTurn.seat_quota} ghế)
-            </span>
-            {remaining !== null && (
-              <Badge variant={remaining < 10 ? "destructive" : "outline"}>{remaining}s</Badge>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">{galaConfigStatusLabel(state.config.status)}</p>
-        )}
-        {myWaitPosition !== null && (
-          <p className="text-sm text-muted-foreground">
-            Team bạn: thứ <b>{myWaitPosition}</b> trong hàng chờ
+      {activeTurn ? (
+        <section className={cn("next-panel", isMyTurn && "next-panel-warn")}>
+          <p className="font-medium">
+            {isMyTurn ? "Lượt team bạn" : `Lượt của ${activeTurn.team_name}`}
           </p>
-        )}
-      </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {activeTeamConfirmedCount}/{activeTurn.seat_quota} ghế
+            {remaining !== null ? ` · còn ${remaining}s` : ""}
+          </p>
+        </section>
+      ) : (
+        <p className="text-sm text-muted-foreground">{galaConfigStatusLabel(state.config.status)}</p>
+      )}
+      {myWaitPosition !== null && (
+        <Callout tone="info">
+          Team bạn: thứ <b>{myWaitPosition}</b> trong hàng chờ
+        </Callout>
+      )}
 
       {orderedTurns.length > 0 && (
         <div className="flex flex-wrap gap-1.5 text-xs">

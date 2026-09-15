@@ -110,6 +110,12 @@ export type Event = {
   published_at: string | null;
 };
 
+export type EmployeeEvent = Event & {
+  can_register: boolean;
+  has_journey: boolean;
+  registration_status: string | null;
+};
+
 export type Shift = {
   id: number;
   event_id: number;
@@ -232,6 +238,7 @@ export type Journey = {
     location: string | null;
   }[];
   announcements: {
+    id: number;
     title: string;
     body_md: string;
     is_pinned: boolean;

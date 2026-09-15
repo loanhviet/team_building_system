@@ -16,11 +16,13 @@ export default function Error({
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-      <h1 className="text-2xl font-semibold">Đã có lỗi xảy ra</h1>
-      <p className="max-w-md text-sm text-zinc-500">
-        Vui lòng thử lại. Nếu lỗi tiếp diễn, liên hệ BTC.
+      <h1 className="font-display text-2xl font-semibold">Không tải được trang</h1>
+      <p className="max-w-md text-sm text-muted-foreground">
+        Thử lại. Nếu vẫn lỗi, liên hệ BTC.
       </p>
-      <Button onClick={reset}>Thử lại</Button>
+      <Button className="min-h-11" onClick={reset}>
+        Thử lại
+      </Button>
     </div>
   );
 }

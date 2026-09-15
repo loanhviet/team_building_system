@@ -9,7 +9,9 @@ from app.core.queue import get_queue
 from app.models.auth import User
 from app.models.enums import EventStatus
 from app.models.event import Event
+from app.models.registration import Registration
 from app.schemas.event import (
+    EmployeeEventOut,
     EventCreate,
     EventOut,
     EventSettingsOut,
@@ -17,6 +19,7 @@ from app.schemas.event import (
     EventTransition,
     EventUpdate,
 )
+from app.services.journey_service import PUBLISHED_STATUSES
 from app.schemas.organization import TeamRosterOut
 from app.schemas.registration import EventTermsOut
 from app.services import master_data
@@ -54,7 +57,7 @@ def _event_out(event: Event) -> EventOut:
 
 
 @router.get("", response_model=list[EventOut])
-async def list_events(db: DbSession, _user: CurrentUser) -> list[EventOut]:
+async def list_events(db: DbSession, _user: AdminUser) -> list[EventOut]:
     events = await master_data.list_all(db, Event)
     return [_event_out(e) for e in events]
 
@@ -88,6 +91,48 @@ async def get_current_event(db: DbSession, _user: CurrentUser) -> EventOut | Non
     )
     event = result.scalar_one_or_none()
     return _event_out(event) if event else None
+
+
+@router.get("/mine", response_model=list[EmployeeEventOut])
+async def list_my_events(db: DbSession, user: CurrentUser) -> list[EmployeeEventOut]:
+    """Events this CBNV may open: currently accepting registration, or ones
+    they already submitted for. Drafts they never touched stay hidden."""
+    by_id: dict[int, EmployeeEventOut] = {}
+
+    open_result = await db.execute(
+        select(Event).where(Event.status == EventStatus.registration_open)
+    )
+    for event in open_result.scalars().all():
+        by_id[event.id] = EmployeeEventOut(
+            **_event_out(event).model_dump(),
+            can_register=True,
+            has_journey=False,
+            registration_status=None,
+        )
+
+    if user.employee_id is not None:
+        owned = await db.execute(
+            select(Event, Registration).join(
+                Registration, Registration.event_id == Event.id
+            ).where(Registration.employee_id == user.employee_id)
+        )
+        for event, reg in owned.all():
+            row = by_id.get(event.id) or EmployeeEventOut(
+                **_event_out(event).model_dump(),
+                can_register=event.status == EventStatus.registration_open,
+                has_journey=False,
+                registration_status=None,
+            )
+            row.registration_status = reg.status
+            row.can_register = event.status == EventStatus.registration_open
+            row.has_journey = (
+                reg.status == "submitted"
+                and reg.is_participating is True
+                and event.status.value in PUBLISHED_STATUSES
+            )
+            by_id[event.id] = row
+
+    return sorted(by_id.values(), key=lambda e: e.id, reverse=True)
 
 
 @router.get("/{event_id}/terms", response_model=EventTermsOut)

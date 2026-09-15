@@ -26,8 +26,10 @@ from app.schemas.journey import (
 PUBLISHED_STATUSES = ("information_published", "event_started", "event_completed")
 
 
-async def resolve_published_event(db: AsyncSession, employee_id: int) -> Event:
-    result = await db.execute(
+async def resolve_published_event(
+    db: AsyncSession, employee_id: int, event_id: int | None = None
+) -> Event:
+    stmt = (
         select(Event)
         .join(Registration, Registration.event_id == Event.id)
         .where(
@@ -36,9 +38,12 @@ async def resolve_published_event(db: AsyncSession, employee_id: int) -> Event:
             Registration.is_participating.is_(True),
             Event.status.in_(PUBLISHED_STATUSES),
         )
-        .order_by(Event.published_at.desc())
-        .limit(1)
     )
+    if event_id is not None:
+        stmt = stmt.where(Event.id == event_id)
+    else:
+        stmt = stmt.order_by(Event.published_at.desc().nulls_last(), Event.id.desc()).limit(1)
+    result = await db.execute(stmt)
     event = result.scalar_one_or_none()
     if event is None:
         raise AppError(
@@ -173,7 +178,11 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
     for a in result.scalars().all():
         announcements.append(
             JourneyAnnouncement(
-                title=a.title, body_md=a.body_md, is_pinned=a.is_pinned, published_at=a.published_at
+                id=a.id,
+                title=a.title,
+                body_md=a.body_md,
+                is_pinned=a.is_pinned,
+                published_at=a.published_at,
             )
         )
 

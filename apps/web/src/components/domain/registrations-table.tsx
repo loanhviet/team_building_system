@@ -1,9 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { PersonRow } from "@/components/domain/person-row";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import type { RegistrationAdmin, Shift, Team } from "@/types/api";
 
@@ -64,6 +63,21 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
       apiFetch<RegistrationAdmin[]>(`/api/events/${eventId}/registrations${qs ? `?${qs}` : ""}`),
   });
 
+  const rows = data ?? [];
+  const byTeam = useMemo(() => {
+    const map = new Map<string, RegistrationAdmin[]>();
+    for (const r of rows) {
+      const key = r.team_name ?? "Chưa có team";
+      const list = map.get(key) ?? [];
+      list.push(r);
+      map.set(key, list);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b, "vi"));
+  }, [rows]);
+
+  const submitted = rows.filter((r) => r.status === "submitted").length;
+  const participating = rows.filter((r) => r.is_participating).length;
+
   const handleExport = async () => {
     setDownloading(true);
     try {
@@ -78,100 +92,110 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
     }
   };
 
-  const columns: DataTableColumn<RegistrationAdmin>[] = [
-    { key: "employee_code", header: "Mã NV", cell: (r) => r.employee_code ?? "—", sortValue: (r) => r.employee_code },
-    { key: "full_name", header: "Họ tên", cell: (r) => r.full_name, sortValue: (r) => r.full_name },
-    { key: "team_name", header: "Team", cell: (r) => r.team_name ?? "—", sortValue: (r) => r.team_name },
-    {
-      key: "status",
-      header: "Trạng thái",
-      cell: (r) => <Badge variant="outline">{STATUS_LABEL[r.status] ?? r.status}</Badge>,
-      sortValue: (r) => r.status,
-    },
-    {
-      key: "is_participating",
-      header: "Tham gia",
-      cell: (r) => (r.is_participating === null ? "—" : r.is_participating ? "Có" : "Không"),
-    },
-    { key: "shift_name", header: "Ca", cell: (r) => r.shift_name ?? "—", sortValue: (r) => r.shift_name },
-    {
-      key: "transport_summary",
-      header: "Xe",
-      cell: (r) => <span className="block max-w-[12rem] truncate">{r.transport_summary ?? "—"}</span>,
-    },
-    {
-      key: "wish_note",
-      header: "Mong muốn",
-      cell: (r) => <span className="block max-w-xs truncate">{r.wish_note ?? "—"}</span>,
-    },
-  ];
-
   return (
-    <DataTable
-      columns={columns}
-      rows={data ?? []}
-      rowKey={(r) => r.id}
-      isLoading={isLoading}
-      emptyMessage="Chưa có ai đăng ký"
-      pageSize={20}
-      toolbar={
-        <>
-          <Input
-            placeholder="Tìm theo tên, email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-56"
-          />
-          <Select
-            value={statusFilter || ALL}
-            onValueChange={(v) => setStatusFilter(v === ALL ? "" : (v ?? ""))}
-          >
-            <SelectTrigger className="w-36">
-              <SelectValue placeholder="Trạng thái" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Tất cả</SelectItem>
-              <SelectItem value="draft">Nháp</SelectItem>
-              <SelectItem value="submitted">Đã gửi</SelectItem>
-              <SelectItem value="cancelled">Đã huỷ</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={teamId || ALL} onValueChange={(v) => setTeamId(v === ALL ? "" : (v ?? ""))}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Team" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Tất cả</SelectItem>
-              {teams?.map((t) => (
-                <SelectItem key={t.id} value={String(t.id)}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={shiftId || ALL} onValueChange={(v) => setShiftId(v === ALL ? "" : (v ?? ""))}>
-            <SelectTrigger className="w-36">
-              <SelectValue placeholder="Ca" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Tất cả</SelectItem>
-              {shifts?.map((s) => (
-                <SelectItem key={s.id} value={String(s.id)}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {hasFilter && (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              Xoá lọc
-            </Button>
-          )}
-          <Button variant="outline" size="sm" className="ml-auto" onClick={handleExport} disabled={downloading}>
-            Export Excel
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Đăng ký</h2>
+          <p className="text-sm text-muted-foreground">
+            {isLoading
+              ? "Đang tải…"
+              : `${submitted} đã gửi · ${participating} tham gia · ${rows.length} trong bộ lọc`}
+          </p>
+        </div>
+        <Button variant="outline" onClick={handleExport} disabled={downloading}>
+          Export Excel
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-3">
+        <Input
+          placeholder="Tìm tên, email…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="min-h-11 w-full sm:w-64"
+        />
+        <Select
+          value={statusFilter || ALL}
+          onValueChange={(v) => setStatusFilter(v === ALL ? "" : (v ?? ""))}
+        >
+          <SelectTrigger className="min-h-11 w-40">
+            <SelectValue placeholder="Trạng thái" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi trạng thái</SelectItem>
+            <SelectItem value="draft">Nháp</SelectItem>
+            <SelectItem value="submitted">Đã gửi</SelectItem>
+            <SelectItem value="cancelled">Đã huỷ</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={teamId || ALL} onValueChange={(v) => setTeamId(v === ALL ? "" : (v ?? ""))}>
+          <SelectTrigger className="min-h-11 w-44">
+            <SelectValue placeholder="Team" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi team</SelectItem>
+            {teams?.map((t) => (
+              <SelectItem key={t.id} value={String(t.id)}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={shiftId || ALL} onValueChange={(v) => setShiftId(v === ALL ? "" : (v ?? ""))}>
+          <SelectTrigger className="min-h-11 w-36">
+            <SelectValue placeholder="Ca" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Mọi ca</SelectItem>
+            {shifts?.map((s) => (
+              <SelectItem key={s.id} value={String(s.id)}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {hasFilter && (
+          <Button variant="ghost" onClick={clearFilters}>
+            Xoá lọc
           </Button>
-        </>
-      }
-    />
+        )}
+      </div>
+
+      {byTeam.length === 0 && !isLoading && (
+        <p className="text-sm text-muted-foreground">Chưa có ai đăng ký.</p>
+      )}
+
+      {byTeam.map(([team, members]) => (
+        <section key={team}>
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">
+            {team} · {members.length}
+          </h3>
+          <ul className="flex flex-col gap-2">
+            {members.map((r) => (
+              <li key={r.id}>
+                <PersonRow
+                  name={r.full_name}
+                  code={r.employee_code}
+                  team={r.shift_name}
+                  extra={
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {STATUS_LABEL[r.status] ?? r.status}
+                      {r.is_participating === false
+                        ? " · Không tham gia"
+                        : r.is_participating
+                          ? " · Có tham gia"
+                          : ""}
+                      {r.transport_summary ? ` · ${r.transport_summary}` : ""}
+                      {r.wish_note ? ` · “${r.wish_note}”` : ""}
+                    </p>
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }

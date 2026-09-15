@@ -31,10 +31,33 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <nav className="hidden w-44 shrink-0 lg:sticky lg:top-6 lg:block" aria-label="Mục cấu hình">
+        <p className="mb-2 text-[11px] font-medium text-muted-foreground">Cấu hình kỳ</p>
+        <ul className="flex flex-col gap-1 text-sm">
+          {[
+            ["#su-kien", "Thông tin sự kiện"],
+            ["#quy-dinh", "Quy định & trọng số"],
+            ["#ca-bay", "Ca bay"],
+            ["#chang-xe", "Chặng xe"],
+            ["#diem-don", "Điểm đón/trả"],
+          ].map(([href, label]) => (
+            <li key={href}>
+              <a href={href} className="nav-link">
+                {label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="flex min-w-0 flex-1 flex-col gap-8">
+      <section id="su-kien" className="scroll-mt-6">
       <EventMetaForm key={event.id} event={event} />
+      </section>
+      <section id="quy-dinh" className="scroll-mt-6">
       <TermsWeightsForm key={settings.terms_version} eventId={eventId} settings={settings} />
-      <div>
+      </section>
+      <section id="ca-bay" className="scroll-mt-6">
         <h2 className="mb-2 text-lg font-medium">Ca bay</h2>
         <EntityCrudTable
           queryKey={["events", String(eventId), "shifts"]}
@@ -46,8 +69,8 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
             { name: "depart_after_time", label: "Sau giờ (HH:MM)", required: false },
           ]}
         />
-      </div>
-      <div>
+      </section>
+      <section id="chang-xe" className="scroll-mt-6">
         <h2 className="mb-2 text-lg font-medium">Chặng xe</h2>
         <EntityCrudTable
           queryKey={["events", String(eventId), "transport-legs"]}
@@ -59,8 +82,8 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
             { name: "direction", label: "Chiều di chuyển" },
           ]}
         />
-      </div>
-      <div>
+      </section>
+      <section id="diem-don" className="scroll-mt-6">
         <h2 className="mb-2 text-lg font-medium">Điểm đón/trả</h2>
         <EntityCrudTable
           queryKey={["events", String(eventId), "pickup-points"]}
@@ -71,6 +94,7 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
             { name: "address", label: "Địa chỉ", required: false },
           ]}
         />
+      </section>
       </div>
     </div>
   );

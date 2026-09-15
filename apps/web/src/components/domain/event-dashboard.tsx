@@ -1,25 +1,16 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { apiFetch } from "@/lib/api";
 import type { Dashboard } from "@/types/api";
 
-function BoardCell({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="board-cell">
-      <p className="board-n">{value}</p>
-      <p className="mt-1 text-xs text-white/55">{label}</p>
-    </div>
-  );
-}
-
 /**
- * The event stats board, shared by /admin (global, most-recent event) and
- * /admin/events/[id] (this specific event) — before this existed the two
- * pages had verbatim-duplicated JSX to keep in sync by hand.
+ * Briefing only: what BTC must do next, plus registration counts.
+ * Flight/bus/room slot charts live on those pages — duplicating them here
+ * is how the overview became unreadable.
  */
 export function EventDashboard({ eventId }: { eventId: number }) {
   const { data: dashboard, isLoading } = useQuery({
@@ -27,135 +18,81 @@ export function EventDashboard({ eventId }: { eventId: number }) {
     queryFn: () => apiFetch<Dashboard>(`/api/events/${eventId}/dashboard`),
   });
 
-  if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Đang tải số liệu...</p>;
-  }
+  if (isLoading) return <PageSkeleton rows={2} />;
   if (!dashboard) return null;
 
   const base = `/admin/events/${eventId}`;
-  const roomsNeeded = dashboard.participating_count;
+  const roomsMissing = Math.max(dashboard.participating_count - dashboard.rooms_assigned, 0);
 
-  const warnings = [
+  const tasks = [
     dashboard.flights_flagged_count > 0 && {
       href: `${base}/flights`,
-      text: `${dashboard.flights_flagged_count} ca bay bị flag — cần xử lý`,
+      title: `${dashboard.flights_flagged_count} ca bay đang bị flag`,
+      hint: "Mở chuyến bay để điều chỉnh",
     },
     dashboard.buses_flagged_count > 0 && {
       href: `${base}/buses`,
-      text: `${dashboard.buses_flagged_count} ca xe bị flag — cần xử lý`,
+      title: `${dashboard.buses_flagged_count} ca xe đang bị flag`,
+      hint: "Mở xe để điều chỉnh",
     },
     dashboard.buses_without_leader_count > 0 && {
       href: `${base}/buses`,
-      text: `${dashboard.buses_without_leader_count} xe chưa có Trưởng xe`,
+      title: `${dashboard.buses_without_leader_count} xe chưa có Trưởng xe`,
+      hint: "Chỉ định trưởng xe trước khi công bố",
     },
-    roomsNeeded > dashboard.rooms_assigned && {
+    roomsMissing > 0 && {
       href: `${base}/hotels`,
-      text: `${roomsNeeded - dashboard.rooms_assigned} người tham gia chưa có phòng`,
+      title: `${roomsMissing} người tham gia chưa có phòng`,
+      hint: "Mở khách sạn để gán phòng",
     },
-  ].filter((w): w is { href: string; text: string } => !!w);
+  ].filter((t): t is { href: string; title: string; hint: string } => !!t);
+
+  const shiftLine = dashboard.by_shift.map((s) => `${s.shift_name} ${s.count}`).join(" · ");
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="board grid-cols-2 sm:grid-cols-4">
-        <BoardCell label="Tổng CBNV" value={dashboard.total_employees} />
-        <BoardCell label="Đã đăng ký" value={dashboard.registered_count} />
-        <BoardCell label="Chưa đăng ký" value={dashboard.not_registered_count} />
-        <BoardCell label="Tham gia" value={dashboard.participating_count} />
-      </div>
+    <div className="flex max-w-xl flex-col gap-8">
+      <section>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Cần xử lý</h2>
+        {tasks.length === 0 ? (
+          <p className="rounded-2xl border border-border bg-card px-4 py-3 text-sm">
+            Không có ngoại lệ. Slot bay, xe, phòng xem ở menu bên trái.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {tasks.map((t) => (
+              <li key={t.title}>
+                <Link
+                  href={t.href}
+                  className="flex items-center gap-3 rounded-2xl border border-[var(--status-flag-border)] bg-[var(--status-flag-bg)] px-4 py-3 text-[var(--status-flag-fg)] hover:brightness-[0.98]"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{t.title}</span>
+                    <span className="block text-sm opacity-80">{t.hint}</span>
+                  </span>
+                  <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-      {warnings.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {warnings.map((w) => (
-            <Link key={w.href + w.text} href={w.href}>
-              <Badge variant="destructive">{w.text}</Badge>
-            </Link>
-          ))}
+      <section>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Đăng ký</h2>
+        <div className="rounded-2xl border border-border bg-card px-4 py-4">
+          <p className="text-lg">
+            <span className="font-display text-2xl tabular">{dashboard.registered_count}</span>
+            <span className="text-muted-foreground"> / {dashboard.total_employees} đã gửi</span>
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {dashboard.not_registered_count} chưa gửi · {dashboard.participating_count} tham gia
+            {shiftLine ? ` · ${shiftLine}` : ""}
+          </p>
+          <Link href={`${base}/registrations`} className="mt-3 inline-flex min-h-11 items-center text-sm text-primary underline">
+            Mở danh sách đăng ký
+          </Link>
         </div>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Theo ca</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {dashboard.by_shift.map((s) => (
-              <Badge key={s.shift_name} variant="outline">
-                {s.shift_name}: {s.count}
-              </Badge>
-            ))}
-            {dashboard.by_shift.length === 0 && (
-              <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Nhu cầu xe theo chặng</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {dashboard.transport_need_by_leg.map((l) => (
-              <Badge key={l.leg_name} variant="outline">
-                {l.leg_name}: {l.count}
-              </Badge>
-            ))}
-            {dashboard.transport_need_by_leg.length === 0 && (
-              <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Link href={`${base}/flights`} className="block">
-          <Card className="h-full hover:border-[var(--lagoon)]">
-            <CardHeader>
-              <CardTitle className="text-base">Tình trạng slot chuyến bay</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              {dashboard.flight_slots.map((f) => (
-                <Badge key={f.flight_code} variant={f.assigned >= f.capacity ? "secondary" : "outline"}>
-                  {f.flight_code} ({f.direction}): {f.assigned}/{f.capacity}
-                </Badge>
-              ))}
-              {dashboard.flight_slots.length === 0 && (
-                <p className="text-sm text-muted-foreground">Chưa có chuyến bay</p>
-              )}
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href={`${base}/buses`} className="block">
-          <Card className="h-full hover:border-[var(--lagoon)]">
-            <CardHeader>
-              <CardTitle className="text-base">Phân xe theo chặng</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              {dashboard.buses_by_leg.map((l) => (
-                <Badge key={l.leg_name} variant={l.assigned >= l.needed ? "outline" : "secondary"}>
-                  {l.leg_name}: {l.assigned}/{l.needed}
-                </Badge>
-              ))}
-              {dashboard.buses_by_leg.length === 0 && (
-                <p className="text-sm text-muted-foreground">Chưa cấu hình chặng xe</p>
-              )}
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href={`${base}/hotels`} className="block">
-          <Card className="h-full hover:border-[var(--lagoon)]">
-            <CardHeader>
-              <CardTitle className="text-base">Phòng</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <Badge variant={dashboard.rooms_assigned >= roomsNeeded ? "outline" : "secondary"}>
-                Đã có phòng: {dashboard.rooms_assigned}/{roomsNeeded} người
-              </Badge>
-              <Badge variant="outline">Tổng sức chứa: {dashboard.rooms_total_capacity} chỗ</Badge>
-            </CardContent>
-          </Card>
-        </Link>
-      </div>
+      </section>
     </div>
   );
 }

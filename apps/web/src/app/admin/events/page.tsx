@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { PageHeader } from "@/components/domain/page-header";
 import { EventStatusBadge } from "@/components/domain/status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -86,10 +87,7 @@ export default function EventsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="ticket-kicker">Kỳ chương trình</p>
-          <h1 className="font-display text-3xl font-semibold">Sự kiện</h1>
-        </div>
+        <PageHeader title="Sự kiện" description="Các kỳ Team Building." />
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger className={buttonVariants()}>Tạo sự kiện</DialogTrigger>
           <DialogContent>

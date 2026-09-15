@@ -3,12 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { EventStatusBadge } from "@/components/domain/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -19,29 +18,53 @@ import {
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS } from "@/lib/event-status";
+import { useCurrentEventId } from "@/lib/use-current-event-id";
 import { cn } from "@/lib/utils";
 import type { Dashboard, Event, EventStatus } from "@/types/api";
 
-const TABS = [
-  { href: "", label: "Tổng quan" },
-  { href: "/settings", label: "Cấu hình" },
-  { href: "/registrations", label: "Đăng ký" },
-  { href: "/flights", label: "Chuyến bay" },
-  { href: "/buses", label: "Xe" },
-  { href: "/hotels", label: "Khách sạn" },
-  { href: "/gala", label: "Gala" },
-  { href: "/schedule", label: "Lịch & TB" },
-  { href: "/knowledge", label: "Hỏi đáp" },
-  { href: "/emails", label: "Email" },
-  { href: "/audit", label: "Audit" },
+const NAV_GROUPS = [
+  {
+    label: "Điều hành",
+    items: [
+      { href: "", label: "Tổng quan" },
+      { href: "/registrations", label: "Đăng ký" },
+      { href: "/settings", label: "Cấu hình" },
+    ],
+  },
+  {
+    label: "Phân bổ",
+    items: [
+      { href: "/flights", label: "Chuyến bay" },
+      { href: "/buses", label: "Xe" },
+      { href: "/hotels", label: "Khách sạn" },
+    ],
+  },
+  {
+    label: "Chương trình",
+    items: [
+      { href: "/gala", label: "Gala" },
+      { href: "/schedule", label: "Lịch & TB" },
+      { href: "/knowledge", label: "Hỏi đáp" },
+      { href: "/emails", label: "Email" },
+    ],
+  },
+  {
+    label: "Nhật ký",
+    items: [{ href: "/audit", label: "Audit" }],
+  },
 ];
 
 export function EventWorkspace({ eventId, children }: { eventId: number; children: ReactNode }) {
   const pathname = usePathname();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [, setCurrentEventId] = useCurrentEventId();
   const [forceStatus, setForceStatus] = useState<EventStatus | "">("");
   const base = `/admin/events/${eventId}`;
+
+  useEffect(() => {
+    setCurrentEventId(eventId);
+  }, [eventId, setCurrentEventId]);
 
   const { data: event, isLoading } = useQuery({
     queryKey: ["events", eventId],
@@ -100,109 +123,129 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
             ))}
           </ul>
         ) : (
-          <p className="text-emerald-600">Không có cảnh báo — dữ liệu đã đầy đủ.</p>
+          <p className="text-primary">Không có cảnh báo — dữ liệu đã đầy đủ.</p>
         )}
       </div>
     );
   };
 
-  return (
-    <div className="flex flex-col gap-5">
-      <Link href="/admin/events" className="text-sm text-muted-foreground hover:text-foreground">
-        ← Sự kiện
+  const navLink = (hrefSuffix: string, label: string) => {
+    const href = `${base}${hrefSuffix}`;
+    const active = hrefSuffix === "" ? pathname === base : pathname.startsWith(href);
+    return (
+      <Link
+        key={href}
+        href={href}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "nav-link text-sm",
+          !active && "bg-transparent",
+        )}
+      >
+        {label}
       </Link>
-      <div className="ticket">
-        <div className="ticket-spine" />
-        <div className="ticket-body">
-          <p className="ticket-kicker">{event.code}</p>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">{event.name}</h1>
-          {event.destination && (
-            <p className="mt-1 text-sm text-muted-foreground">{event.destination}</p>
-          )}
-        </div>
-      </div>
+    );
+  };
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            Trạng thái: <EventStatusBadge status={event.status} />
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-3">
+  return (
+    <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+      <aside className="w-full shrink-0 lg:sticky lg:top-6 lg:w-52">
+        <Link href="/admin/events" className="mb-3 inline-block text-sm text-muted-foreground hover:text-foreground">
+          ← Tất cả sự kiện
+        </Link>
+        <nav className="hidden flex-col gap-4 lg:flex" aria-label="Mục sự kiện">
+          {NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="mb-1.5 px-2 text-[11px] font-medium text-muted-foreground">{group.label}</p>
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((item) => navLink(item.href, item.label))}
+              </div>
+            </div>
+          ))}
+        </nav>
+        <div className="flex gap-1.5 overflow-x-auto pb-1 lg:hidden">
+          {NAV_GROUPS.flatMap((g) => g.items).map((item) => {
+            const href = `${base}${item.href}`;
+            const active = item.href === "" ? pathname === base : pathname.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "shrink-0 rounded-full border px-3 py-2 text-sm",
+                  active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card",
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      </aside>
+
+      <div className="min-w-0 flex-1">
+        <header className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="font-display text-2xl font-semibold">{event.name}</h1>
+          <EventStatusBadge status={event.status} />
           {nextStatuses.map((status) => (
             <ConfirmDialog
               key={status}
-              trigger={<Button size="sm" disabled={transitionMutation.isPending}>Chuyển sang: {EVENT_STATUS_LABELS[status]}</Button>}
+              trigger={
+                <Button disabled={transitionMutation.isPending}>
+                  {EVENT_STATUS_LABELS[status]}
+                </Button>
+              }
               title={`Chuyển sang "${EVENT_STATUS_LABELS[status]}"?`}
               description={
-                transitionWarning(status) ?? `Sự kiện sẽ chuyển từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[status]}".`
+                transitionWarning(status) ??
+                `Sự kiện sẽ chuyển từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[status]}".`
               }
               confirmLabel="Chuyển trạng thái"
               onConfirm={() => transitionMutation.mutate(status)}
             />
           ))}
-          {nextStatuses.length === 0 && (
-            <p className="text-sm text-muted-foreground">Không còn bước tiếp theo trong luồng chuẩn.</p>
-          )}
           {isSuperAdmin && (
-            <div className="ml-auto flex items-center gap-2">
-              <Select value={forceStatus} onValueChange={(v) => setForceStatus(v as EventStatus)}>
-                <SelectTrigger className="w-56">
-                  <SelectValue placeholder="Ghi đè trạng thái (Super Admin)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_EVENT_STATUSES.filter((s) => s !== event.status).map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {EVENT_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <ConfirmDialog
-                trigger={
-                  <Button variant="outline" size="sm" disabled={!forceStatus || transitionMutation.isPending}>
-                    Ghi đè
-                  </Button>
-                }
-                title="Ghi đè trạng thái sự kiện?"
-                description={
-                  forceStatus
-                    ? `Bỏ qua luồng chuẩn, ép trạng thái từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[forceStatus]}". Chỉ Super Admin mới làm được — dùng khi có sự cố cần sửa tay.`
-                    : undefined
-                }
-                confirmLabel="Ghi đè"
-                destructive
-                onConfirm={() => {
-                  if (forceStatus) transitionMutation.mutate(forceStatus);
-                }}
-              />
-            </div>
+            <details className="w-full text-sm text-muted-foreground">
+              <summary className="cursor-pointer">Ghi đè trạng thái (Super Admin)</summary>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Select value={forceStatus} onValueChange={(v) => setForceStatus(v as EventStatus)}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Chọn trạng thái" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ALL_EVENT_STATUSES.filter((s) => s !== event.status).map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {EVENT_STATUS_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <ConfirmDialog
+                  trigger={
+                    <Button variant="outline" disabled={!forceStatus || transitionMutation.isPending}>
+                      Ghi đè
+                    </Button>
+                  }
+                  title="Ghi đè trạng thái sự kiện?"
+                  description={
+                    forceStatus
+                      ? `Bỏ qua luồng chuẩn, ép từ "${EVENT_STATUS_LABELS[event.status]}" sang "${EVENT_STATUS_LABELS[forceStatus]}".`
+                      : undefined
+                  }
+                  confirmLabel="Ghi đè"
+                  destructive
+                  onConfirm={() => {
+                    if (forceStatus) transitionMutation.mutate(forceStatus);
+                  }}
+                />
+              </div>
+            </details>
           )}
-        </CardContent>
-      </Card>
-
-      <div className="-mx-1 flex gap-0 overflow-x-auto border-b border-[var(--rule)]">
-        {TABS.map((tab) => {
-          const href = `${base}${tab.href}`;
-          const active = tab.href === "" ? pathname === base : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "shrink-0 border-b-2 px-3 py-2 text-sm",
-                active
-                  ? "border-[var(--lagoon)] text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
+        </header>
+        {children}
       </div>
-
-      {children}
     </div>
   );
 }

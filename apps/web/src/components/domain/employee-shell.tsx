@@ -1,56 +1,97 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CalendarRange,
-  MessageCircle,
-  Ticket,
-  Users,
   ClipboardList,
-  UserRound,
   LogOut,
+  Menu,
+  MessageCircle,
+  Route,
+  UserRound,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
-import { BrandMark } from "@/components/domain/brand-mark";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import { EventStatusBadge } from "@/components/domain/status-badge";
-import { Button } from "@/components/ui/button";
-import { apiFetch } from "@/lib/api";
+import { RailUser, ShellRail, isNavActive, type ShellGroup } from "@/components/domain/shell-rail";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth-context";
+import { EVENT_STATUS_LABELS } from "@/lib/event-status";
 import { ROLE_LABEL } from "@/lib/format";
-import { useEmployeeEvent } from "@/lib/use-employee-event";
+import { EmployeeEventProvider, useEmployeeEvent } from "@/lib/use-employee-event";
 import { cn } from "@/lib/utils";
-import type { GalaConfig, Registration } from "@/types/api";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: typeof Ticket;
-  show?: boolean;
-};
+function EmployeeEventPicker() {
+  const { events, event, setEventId } = useEmployeeEvent();
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  if (events.length === 0) return null;
 
-export function EmployeeShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-muted/50 p-3">
+      <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Kỳ của bạn</p>
+      <Select
+        value={event ? String(event.id) : undefined}
+        onValueChange={(v) => {
+          const id = Number(v);
+          const next = events.find((e) => e.id === id);
+          setEventId(id);
+          queryClient.removeQueries({ queryKey: ["journey"] });
+          queryClient.removeQueries({ queryKey: ["chat"] });
+          if (pathname.startsWith("/gala")) router.push(`/gala/${id}`);
+          toast.message(next ? `Đang xem ${next.name}` : "Đã đổi kỳ");
+        }}
+      >
+        <SelectTrigger className="h-auto min-h-11 w-full py-2 text-left">
+          <SelectValue placeholder="Chọn kỳ">
+            {event ? <span className="truncate font-medium">{event.name}</span> : null}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {events.map((e) => (
+            <SelectItem key={e.id} value={String(e.id)}>
+              {e.name}
+              {e.has_journey ? " · Hành trình" : e.can_register ? " · Đang mở ĐK" : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {event && (
+        <div className="mt-2">
+          <EventStatusBadge status={event.status} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function EmployeeShell({ children }: { children: React.ReactNode }) {
+  return (
+    <EmployeeEventProvider>
+      <EmployeeShellInner>{children}</EmployeeShellInner>
+    </EmployeeEventProvider>
+  );
+}
+
+function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const { user, isLoading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const { eventId, eventName, eventStatus, isLeader, hasJourney } = useEmployeeEvent();
-
-  // Whether there's anything at all to show on /register: an event currently
-  // open (fresh registration), or a past one the CBNV already submitted to
-  // (register/page.tsx renders that read-only once its window has closed).
-  const { data: latestReg } = useQuery({
-    queryKey: ["registrations", "me", "latest"],
-    queryFn: () => apiFetch<Registration | null>("/api/registrations/me"),
-    enabled: !!user,
-  });
-  const hasRegistration = hasJourney || !!latestReg;
-
-  const { data: galaConfig } = useQuery({
-    queryKey: ["events", eventId, "gala", "config"],
-    queryFn: () => apiFetch<GalaConfig | null>(`/api/events/${eventId}/gala/config`),
-    enabled: !!eventId,
-  });
+  const { eventId, eventName, event, canRegister, hasJourney, isLeader, galaConfig } =
+    useEmployeeEvent();
+  const isChat = pathname === "/chat";
 
   useEffect(() => {
     if (isLoading) return;
@@ -65,141 +106,152 @@ export function EmployeeShell({ children }: { children: ReactNode }) {
 
   if (isLoading || !user) {
     return (
-      <div className="flex min-h-svh flex-1 items-center justify-center bg-[var(--foam)]">
+      <div className="flex min-h-svh flex-1 items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Đang tải...</p>
       </div>
     );
   }
 
-  const nav: NavItem[] = user.must_change_password
+  const nav = user.must_change_password
     ? []
     : [
-        { href: "/register", label: "Đăng ký", icon: ClipboardList, show: hasRegistration },
-        { href: "/journey", label: "Hành trình", icon: Ticket },
         {
-          href: eventId ? `/gala/${eventId}` : "/journey",
+          href: "/journey",
+          label: "Hành trình",
+          icon: Route,
+          badge: hasJourney ? undefined : event ? "—" : undefined,
+        },
+        {
+          href: "/register",
+          label: "Đăng ký",
+          icon: ClipboardList,
+          badge: canRegister ? "Mở" : undefined,
+        },
+        {
+          href: eventId ? `/gala/${eventId}` : "/gala",
           label: "Gala",
           icon: CalendarRange,
           show: !!galaConfig,
         },
         { href: "/chat", label: "Hỏi đáp", icon: MessageCircle },
         { href: "/team", label: "Team", icon: Users, show: isLeader },
-      ].filter((item) => item.show !== false);
+      ];
 
-  const isActive = (href: string) => {
-    if (href.startsWith("/gala")) return pathname.startsWith("/gala");
-    return pathname === href;
-  };
+  const groups: ShellGroup[] = [
+    { label: "Chuyến này", items: nav.filter((i) => i.href !== "/team") },
+    { label: "Team", items: nav.filter((i) => i.href === "/team" && i.show !== false) },
+    {
+      label: "Tài khoản",
+      items: [{ href: "/account", label: "Hồ sơ & mật khẩu", icon: UserRound }],
+    },
+  ].filter((g) => g.items.some((i) => i.show !== false));
+
+  const dock = nav.filter((i) => i.show !== false).slice(0, 5);
+
+  const footer = (
+    <RailUser
+      name={user.full_name ?? user.email}
+      meta={ROLE_LABEL[user.role] ?? user.role}
+      href="/account"
+      action={
+        <Button
+          variant="ghost"
+          className="h-10 w-full justify-start text-muted-foreground"
+          onClick={() => logout().then(() => router.push("/login"))}
+        >
+          <LogOut className="size-4" aria-hidden="true" />
+          Đăng xuất
+        </Button>
+      }
+    />
+  );
+
+  const rail = (
+    <ShellRail
+      className="h-full w-full border-0 md:h-dvh md:w-[17.5rem] md:border-r"
+      eyebrow="Cổng CBNV"
+      eventSlot={<EmployeeEventPicker />}
+      groups={groups}
+      pathname={pathname}
+      footer={footer}
+    />
+  );
 
   return (
-    <div className="flex min-h-svh flex-col bg-[var(--foam)]">
-      <header className="sticky top-0 z-30 bg-[var(--night)] text-[#e8eef2]">
-        <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-3 px-4">
-          <div className="min-w-0">
-            <BrandMark light className="[&>span:last-child]:text-base" />
-            {eventName && (
-              <p className="truncate pl-9 text-[11px] text-white/55">{eventName}</p>
+    <div className={cn("flex bg-background", isChat ? "h-dvh overflow-hidden" : "min-h-dvh")}>
+      <a href="#main" className="skip-link">
+        Bỏ qua điều hướng
+      </a>
+      <div className="hidden md:flex">{rail}</div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 items-center gap-2 border-b border-border bg-card px-3 md:hidden">
+          <Sheet>
+            <SheetTrigger
+              className={cn(buttonVariants({ variant: "outline", size: "icon" }), "size-11")}
+              aria-label="Mở menu"
+            >
+              <Menu className="size-4" />
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[17.5rem] p-0">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Menu CBNV</SheetTitle>
+              </SheetHeader>
+              {rail}
+            </SheetContent>
+          </Sheet>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-base">{eventName ?? "Team Building"}</p>
+            {event && (
+              <p className="truncate text-[11px] text-muted-foreground">
+                {EVENT_STATUS_LABELS[event.status]}
+              </p>
             )}
           </div>
-          <nav aria-label="Điều hướng chính" className="hidden items-center gap-1 sm:flex">
-            {nav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={isActive(item.href) ? "page" : undefined}
-                className={cn(
-                  "px-3 py-1 text-sm",
-                  isActive(item.href)
-                    ? "bg-[var(--lagoon)] text-white"
-                    : "text-white/70 hover:bg-white/10 hover:text-white",
-                )}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/account"
+        </header>
+        <main
+          id="main"
+          className={cn(
+            "mx-auto flex w-full flex-1 flex-col px-4",
+            isChat ? "max-w-3xl min-h-0 pt-4 pb-4" : "max-w-3xl pt-6",
+            !isChat && dock.length > 0 ? "pb-24 md:pb-8" : "pb-8",
+          )}
+        >
+          {children}
+        </main>
+        {dock.length > 0 && (
+          <nav
+            aria-label="Điều hướng chính"
+            className="dock fixed inset-x-0 bottom-0 z-30 pb-[env(safe-area-inset-bottom)] md:hidden"
+          >
+            <ul
               className={cn(
-                "hidden max-w-[10rem] truncate text-right text-xs sm:block",
-                pathname === "/account" && "text-[var(--lagoon)]",
+                "mx-auto grid max-w-3xl gap-1 px-2 py-1.5",
+                dock.length >= 5 ? "grid-cols-5" : "grid-cols-4",
               )}
             >
-              <span className="block truncate">{user.full_name ?? user.email}</span>
-              <span className="text-white/50">{ROLE_LABEL[user.role] ?? user.role}</span>
-            </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 text-white hover:bg-white/10 sm:hidden"
-              onClick={() => router.push("/account")}
-              aria-label="Tài khoản"
-            >
-              <UserRound className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 text-white hover:bg-white/10"
-              onClick={() => logout().then(() => router.push("/login"))}
-              aria-label="Đăng xuất"
-            >
-              <LogOut className="size-4" />
-            </Button>
-          </div>
-        </div>
-        {eventStatus && (
-          <div className="border-t border-white/10 px-4 py-1">
-            <div className="mx-auto flex max-w-3xl items-center gap-2">
-              <EventStatusBadge status={eventStatus} />
-            </div>
-          </div>
+              {dock.map((item) => {
+                const Icon = item.icon;
+                const active = isNavActive(pathname, item.href);
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[11px]",
+                        active ? "bg-primary/12 font-medium text-primary" : "text-muted-foreground",
+                      )}
+                    >
+                      <Icon className="size-5" aria-hidden="true" />
+                      {item.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
         )}
-      </header>
-
-      <main
-        className={cn(
-          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pt-6 sm:pb-8",
-          nav.length > 0 ? "pb-24" : "pb-8",
-        )}
-      >
-        {children}
-      </main>
-
-      {nav.length > 0 && (
-        <nav
-          aria-label="Điều hướng chính (di động)"
-          className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--night)] bg-[var(--night)] text-[#e8eef2] sm:hidden"
-        >
-          <ul
-            className={cn(
-              "mx-auto grid max-w-3xl gap-1 px-2 py-2",
-              nav.length >= 5 ? "grid-cols-5" : "grid-cols-4",
-            )}
-          >
-            {nav.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "flex flex-col items-center gap-0.5 py-1 text-[11px]",
-                      active ? "text-white" : "text-white/55",
-                    )}
-                  >
-                    <Icon className="size-5" />
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-      )}
+      </div>
     </div>
   );
 }

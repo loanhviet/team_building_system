@@ -50,90 +50,91 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="grid min-h-svh flex-1 lg:grid-cols-[1.05fr_0.95fr]">
-      <aside className="pass-hero relative hidden flex-col justify-between p-10 lg:flex">
+    <div className="grid min-h-svh flex-1 lg:grid-cols-[minmax(16rem,28rem)_1fr]">
+      <aside className="hidden flex-col justify-between bg-[var(--night)] p-8 text-[var(--on-night)] lg:flex">
         <BrandMark light />
-        <div className="max-w-md">
-          <p className="font-display text-4xl leading-tight font-semibold">
-            Một cổng cho cả hành trình
-          </p>
-          <p className="mt-4 text-sm leading-relaxed text-white/70">
-            Đăng ký, chuyến bay, xe đưa đón, phòng khách sạn, ghế Gala — xem trên cùng một thẻ, không
-            còn hỏi BTC từng tin nhắn.
-          </p>
-        </div>
-        <div className="pass-stack" aria-hidden>
-          <span />
-          <span />
-          <span />
-        </div>
+        <ul className="flex flex-col gap-5 text-sm leading-relaxed text-[var(--on-night)]/85">
+          <li>
+            <p className="font-medium text-[var(--on-night)]">CBNV</p>
+            <p>Xem chuyến bay, xe, phòng, ghế Gala của mình trên một màn hình.</p>
+          </li>
+          <li>
+            <p className="font-medium text-[var(--on-night)]">BTC</p>
+            <p>Phân bổ nguồn lực, công bố thông tin, điều phối Gala.</p>
+          </li>
+        </ul>
+        <p className="text-xs text-[var(--on-night)]/60">Tài khoản do công ty cấp. Không công khai.</p>
       </aside>
 
-      <main className="flex items-center justify-center bg-[var(--foam)] p-6">
-        <form onSubmit={handleSubmit(onSubmit)} className="ticket w-full max-w-md">
-          <div className="ticket-spine" />
-          <div className="ticket-body flex flex-col gap-5 py-7">
-            <div className="lg:hidden">
-              <BrandMark />
-            </div>
-            <div>
-              <p className="ticket-kicker">Cổng nội bộ</p>
-              <h1 className="font-display text-2xl font-semibold">Đăng nhập</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Dùng email công ty BTC đã cấp tài khoản.
-              </p>
-            </div>
-            {loginError && (
-              <div
-                role="alert"
-                className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              >
-                {loginError}
-              </div>
-            )}
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                autoFocus
-                aria-invalid={!!errors.email}
-                {...register("email")}
-              />
-              {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Mật khẩu</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  aria-invalid={!!errors.password}
-                  className="pr-10"
-                  {...register("password")}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                >
-                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
-              </div>
-              {errors.password && (
-                <p className="text-sm text-destructive">{errors.password.message}</p>
-              )}
-            </div>
-            <Button type="submit" disabled={isSubmitting} className="self-start px-5">
-              {isSubmitting ? "Đang đăng nhập..." : "Vào cổng"}
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Quên mật khẩu? Liên hệ BTC để được cấp lại.
+      <main className="flex items-center justify-center bg-background p-6">
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="flex w-full max-w-sm flex-col gap-5"
+        >
+          <div className="lg:hidden">
+            <BrandMark />
+          </div>
+          <div>
+            <h1 className="font-display text-2xl font-semibold">Đăng nhập</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Email công ty và mật khẩu BTC đã cấp.
             </p>
           </div>
+          {loginError && (
+            <div
+              role="alert"
+              className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              {loginError}
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              autoFocus
+              aria-invalid={!!errors.email}
+              className="min-h-11"
+              {...register("email")}
+            />
+            {errors.email && (
+              <p className="text-sm text-destructive" role="alert">
+                {errors.email.message}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="password">Mật khẩu</Label>
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                aria-invalid={!!errors.password}
+                className="min-h-11 pr-11"
+                {...register("password")}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground hover:text-foreground"
+                aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+            {errors.password && (
+              <p className="text-sm text-destructive" role="alert">
+                {errors.password.message}
+              </p>
+            )}
+          </div>
+          <Button type="submit" disabled={isSubmitting} className="min-h-11 w-full">
+            {isSubmitting ? "Đang đăng nhập..." : "Đăng nhập"}
+          </Button>
+          <p className="text-xs text-muted-foreground">Quên mật khẩu — liên hệ BTC để cấp lại.</p>
         </form>
       </main>
     </div>
