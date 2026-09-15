@@ -896,6 +896,98 @@ hưởng TB2026/TB2027.
 
 ---
 
+### R7 — Hoàn thiện phân bổ bay/xe/Gala/Email (2026-09-15)
+
+**Vì sao:** người dùng yêu cầu audit lại BRD so với những gì đã triển khai sau R0–R6, tập trung vào
+phân bổ chuyến bay, phân bổ xe, Gala Dinner, email, và mức độ tích hợp giữa các module. R0–R6 đã đóng
+gần hết các lỗi *bề mặt* (CRUD thiếu, thiếu confirm, label tiếng Anh lọt ra UI, thiếu data-table). Đợt
+audit này đọc thẳng thuật toán và **đối chiếu với dữ liệu thật trong `data/teambuilding.db` (event
+TB2026)** — phát hiện các lỗi *nghiệp vụ* mà test đơn vị cũ không bắt được vì chỉ test từng hàm riêng lẻ,
+không test ràng buộc chéo module (site làm việc ↔ chuyến bay, điểm đón đã đăng ký ↔ xe, giờ bay ↔ giờ xe,
+hạn mức Gala theo thời gian thực).
+
+**Phương pháp audit:** đọc `services/allocation/*.py`, `services/gala/*.py`,
+`services/notification/*.py` cùng router liên quan, sau đó chạy SQL trực tiếp trên
+`data/teambuilding.db` để tìm bằng chứng thật (không chỉ đọc code mà đoán) — ví dụ đếm số CBNV HCM bị
+xếp bay từ sân bay Nội Bài, số người ngồi xe khác điểm đón đã đăng ký, số ghế Gala trống trong khi 36
+người vẫn chưa có ghế.
+
+**Kết quả audit (before fix):**
+
+| # | Module | Lỗi | Bằng chứng thật (TB2026 trước khi sửa) |
+|---|---|---|---|
+| A1 | Bay | Thuật toán bỏ qua site làm việc — `Flight` không có cột site | 49/49 CBNV HCM bị xếp bay từ Nội Bài (HAN) |
+| A2 | Bay | Chỉnh tay xong là `is_locked` vĩnh viễn, không có "bỏ ghim" | không endpoint nào unset được |
+| A3 | Bay | Đổi giờ/mã chuyến sau công bố không gửi mail, không chặn giảm sức chứa dưới số đã xếp | — |
+| B1 | Xe | Phân xe bỏ qua điểm đón CBNV đã đăng ký | 57 (HN_SB) + 62 (SB_HN) người ngồi sai điểm đón |
+| B2 | Xe | Phân xe không khớp giờ bay | xe rời 07:30 khi máy bay 08:05 mới hạ cánh; xe sáng cho người bay tối |
+| B3 | Xe | Đổi chuyến bay không đánh dấu lại xe đã phân — SSOT vỡ | — |
+| B4 | Xe | Danh sách phân xe không dùng `data-table.tsx` — vi phạm luật CLAUDE.md | `PersonRow` list, không search/filter/sort |
+| G1 | Gala | Team hết giờ lượt vĩnh viễn 0 ghế | 3 team (Customer Success, Finance, HR) = 36 người 0 ghế, Gala `finished` |
+| G2 | Gala | `hold_seat` không kiểm hạn mức — team có thể giữ vượt quota | chỉ `confirm_seat` đếm quota |
+| G3 | Gala | Dialog cấu hình thiếu `seat_quota_rule`/`fixed_quota` — mỗi lần Lưu reset về mặc định | — |
+| G4 | Gala | Bốc thăm không kiểm trạng thái event/đủ ghế | — |
+| G5 | Gala | Team không có `team_leader` — không ai chọn được, BTC không biết trước | — |
+| E1 | Email | ARQ `max_tries=3` không có tác dụng — chỉ retry khi raise `Retry`, lỗi SMTP thường là exception thường | log worker: hàng chục nghìn job, 0 retry |
+| E2 | Email | Mail kẹt `queued`/`failed` vô hình với BTC | — |
+| E4 | Email | Mail công bố/đổi bay/đổi xe không có thông tin cá nhân — biến preview không khớp payload thật | — |
+| E5 | Email | Sửa đăng ký rồi gửi lại nội dung khác → dedupe theo `reg.id` chặn mất mail mới | — |
+
+**Đúng theo BRD, không cần sửa:** khoá ghế Redis + WS realtime (đã test race ở R6), audit log, gate
+trạng thái phân bổ, tách team theo nguyện vọng ca, journey đọc live từ assignments.
+
+**Sửa theo 5 phase, mỗi phase 1 commit trên `feat/ui-redesign-v2`:**
+
+- **P1 `84edf50`** — `Flight.site_id` (migration mới); `runner.py`/`greedy.py` nhóm theo
+  `(team_id, site_id)`, `_site_ok()` là hard filter; `adjust_flight_assignments` thêm check
+  `site_mismatch` (409, force được); `POST .../flight-assignments/unlock`; `update_flight` chặn giảm
+  sức chứa dưới số đã xếp + gửi mail `flight_changed` nếu đổi giờ/mã sau công bố; import nhận cột
+  `site_code`.
+- **P2 `1e5909b`** — `TransportLeg.flight_timing` (`before_flight`/`after_flight`, migration mới);
+  `bus_greedy.bus_compatible()` — hard filter điểm đón + cửa sổ giờ so với chuyến bay, dùng chung cho
+  auto allocation lẫn `adjust_bus_assignments` (409 `bus_incompatible`); `bus_runner` chặn chạy phân xe
+  khi chặng cần đối chiếu giờ bay mà chưa phân bổ bay (400 `flight_allocation_required`);
+  `POST .../bus-assignments/unlock`; **`db/seed.py` được viết lại** — thêm 4 chuyến HCM↔Đà Nẵng (trước
+  đó chỉ có chuyến HN, chính là nguyên nhân gốc của A1), và bus phải có 1 xe cho mỗi tổ hợp
+  (site, điểm đón, khung giờ) — lần đầu chỉ làm 1 xe/khung giờ đã tạo ra 74 người bị `no_compatible_bus`,
+  phải sửa thành đủ xe cho từng điểm đón mới về 0.
+- **P3 `ef769bc`** — `hold_seat` đếm held+confirmed để chặn giữ vượt quota; **lượt bù tự động**
+  (`GalaTurn.is_makeup`, migration mới) — khi hàng chờ rỗng, team nào `expired`/`skipped` mà chưa đủ
+  quota được tự động thêm 1 lượt bù vào cuối hàng và kích hoạt ngay (tối đa 1 lượt bù/team); `draw()`
+  yêu cầu đã đóng đăng ký + đủ tổng ghế; `GalaTurnOut.has_representative`; `DashboardOut.gala_unseated_count`;
+  xoá 2 chỗ code chết (`get_seat_lock_owner`, optimistic-version re-check dư thừa trong `confirm_seat`).
+- **P4 `df0f382`** — `worker/tasks/email.py` raise `Retry` khi lỗi SMTP tạm thời (thay vì exception
+  thường mà ARQ không tự retry); `email_service.build_email_context()` dùng lại
+  `journey_service.build_journey` cho mọi mail sau công bố; `notify_employees()` gom logic
+  enqueue+dispatch copy-paste giữa `flights.py`/`buses.py`; mẫu `info_published`/`flight_changed`/
+  `bus_changed` lặp Jinja qua `journey.flights/buses/room/gala` thay vì payload rỗng;
+  `registration_confirmed` dedupe theo nội dung, không chỉ `reg.id`;
+  `GET/POST .../email-outbox(+/retry)` + panel "Nhật ký gửi" trên trang Email admin.
+- **P5 `3f7b375`** — số "Đã xếp" trên card chuyến bay tính live từ `assignments` (trước đó lấy từ
+  summary lần chạy cuối, sai sau khi chỉnh tay — U1); danh sách phân xe chuyển sang `data-table.tsx`
+  (B4); Gala admin hiện tỉ lệ `đã chọn/quota` theo thời gian thực + dòng "Ghế trống X · Cần Y".
+
+**Đã kiểm chứng:**
+- `ruff check .` sạch (trừ 1 lỗi import-sort có từ trước ở `routers/events.py`, không thuộc phạm vi
+  đợt này), `pytest` **127/127** (thêm ~50 test cho site filter, pickup/giờ xe, hold quota, lượt bù tự
+  động, draw preconditions, worker retry, dedupe email, outbox log), `tsc --noEmit` sạch, `next lint`
+  không phát sinh lỗi mới (4 lỗi/warning còn lại đều có từ trước, không nằm trong file đã sửa).
+- **Re-seed `--reset` rồi chạy lại đúng 4 câu SQL audit ban đầu** (CBNV HCM bay HAN, lệch điểm đón, lệch
+  giờ xe SB_KS/KS_SB) → cả 4 đều **0 dòng**.
+- **Xác nhận sống trên stack dev thật** (không chỉ test): `claude-in-chrome` không kết nối được trong
+  phiên này (giống tình trạng R3–R5) nên dùng `curl` trực tiếp lên API + đọc MailHog thay thế —
+  1) PATCH giờ bay của 1 chuyến đã công bố qua API thật → `notify_employees` chạy qua Redis/worker thật
+  → giải mã email MailHog nhận được: đúng tên người nhận, đúng liệt kê **cả chuyến đi lẫn chuyến về**
+  với giờ mới, không còn payload rỗng như trước; 2) gọi `GET bus-assignments` thật → thấy đúng
+  `requested_pickup_point_name`/`flight_code` theo từng dòng; 3) gọi `POST turns/skip` liên tiếp cho
+  đến khi hàng chờ Gala rỗng → **3 lượt bù tự động xuất hiện đúng cho 3 team đang bị kẹt 0 ghế (Customer
+  Success, Finance, Human Resources — đúng 3 team audit ban đầu tìm thấy)**, lượt đầu tự kích hoạt ngay,
+  không cần BTC bấm gì thêm.
+- **Chưa làm được, cần phiên sau:** click-through Chrome thật theo đúng luật CLAUDE.md (extension không
+  kết nối), kiểm khung 390px cho trang Xe/Gala admin mới sửa.
+
+---
+
 ## 6. Bảng tra cứu (để không phải audit lại)
 
 ### 6.1 Endpoint tồn tại nhưng chưa có FE nào gọi
