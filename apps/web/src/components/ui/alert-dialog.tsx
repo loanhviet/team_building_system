@@ -132,6 +132,15 @@ function AlertDialogDescription({
   return (
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
+      // base-ui renders this as a <p> by default. ConfirmDialog's
+      // `description` accepts arbitrary ReactNode (publish-readiness lists,
+      // a cancel-reason textarea, ...) and several real callers pass block
+      // content (div/ul/p) — the browser can't parse <p><div>...</div></p>,
+      // so it silently closes the <p> early and React's hydration sees a
+      // different tree than SSR produced. Rendering as a <div> instead
+      // fixes every caller at once (base-ui associates it via
+      // aria-describedby by id, not by tag, so this doesn't change a11y).
+      render={<div />}
       className={cn(
         "text-sm text-balance text-muted-foreground md:text-pretty *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className

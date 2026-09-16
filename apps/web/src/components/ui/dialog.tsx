@@ -137,6 +137,10 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
+      // renders <p> by default — same invalid-nesting trap as
+      // AlertDialogDescription (see its comment) if a caller ever passes
+      // block content. Fixed here too so it can't happen.
+      render={<div />}
       className={cn(
         "text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className
