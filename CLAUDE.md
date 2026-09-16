@@ -72,6 +72,14 @@ Run ruff with autofix: `docker compose exec api ruff check . --fix`.
 silent no-op for the web side today — `make test` only actually runs the API's pytest suite. There is no
 frontend test suite; browser verification (see "Start here") is how the web side gets checked.
 
+**Learning/debug event:** `docker compose exec api python -m app.db.seed_lab` creates
+**TBLAB** — 16 participants sized so every branch of every allocation algorithm fires
+exactly once and the whole outcome is hand-checkable. Flights/buses are left unallocated
+and Gala un-drawn on purpose. Verified expected results, the three formulas that drive the
+allocators, and six guided exercises live in **`docs/LAB-EVENT.md`**. Use this instead of
+TB2026 when reasoning about allocation behaviour — 97 participants can't be traced by hand.
+`--reset` rebuilds it and removes every `LAB*` row.
+
 **Note on `make seed`:** implemented (`apps/api/app/db/seed.py`), but as of the R0-R6 rebuild it is being
 rewritten to produce complete, realistic data (flights with real times/airports, all 4 transport legs,
 pickup points, a fully-seated Gala floor plan, a published event) instead of the previous skeletal
