@@ -45,7 +45,18 @@ export function ShellRail({
   return (
     <aside className={cn("shell-rail flex shrink-0 flex-col p-4", className)}>
       <div className="px-1 pb-5">
-        <BrandMark />
+        {/* Logo doubles as "go home" — the only other way out of an event
+            workspace used to be the small "Tất cả sự kiện" text link buried
+            in the event-picker box below, which a first-time user has no
+            reason to notice. Clicking the brand mark is what people already
+            try everywhere else on the web. */}
+        <Link
+          href="/admin"
+          onClick={onNavigate}
+          className="-m-1 block rounded-lg p-1 transition-colors hover:bg-muted"
+        >
+          <BrandMark />
+        </Link>
         {eyebrow && <p className="mt-1.5 pl-9 text-[11px] text-muted-foreground">{eyebrow}</p>}
       </div>
       {eventSlot}
