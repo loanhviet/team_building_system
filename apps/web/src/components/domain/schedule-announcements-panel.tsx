@@ -387,7 +387,7 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
               <Plus className="size-4" aria-hidden="true" />
               Thêm hoạt động mới
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[85vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingSchedule ? "Sửa mục lịch trình" : "Thêm mục lịch trình"}</DialogTitle>
               </DialogHeader>
@@ -617,7 +617,7 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
               <Plus className="size-4" aria-hidden="true" />
               Tạo thông báo mới
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[85vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingAnnouncement ? "Sửa thông báo" : "Thông báo mới"}</DialogTitle>
               </DialogHeader>
