@@ -249,6 +249,12 @@ function RegistrationForm({
         ];
   const currentStep = flow[Math.min(step, flow.length - 1)];
   const stepNumOf = (id: StepId) => flow.findIndex((s) => s.id === id) + 1;
+  // Once already submitted, editing shouldn't force a re-walk through the
+  // wizard just to reach the one field that needs changing — show every
+  // section at once so any field is a scroll + click away. First-time fill
+  // (still "draft") keeps the guided step-by-step flow.
+  const isEditingExisting = registration.status === "submitted" && !readOnly;
+  const showAll = readOnly || isEditingExisting;
 
   const outboundLegs = legs.filter((l) => l.direction === "outbound");
   const inboundLegs = legs.filter((l) => l.direction === "inbound");
@@ -383,7 +389,7 @@ function RegistrationForm({
     );
   }
 
-  const show = (id: StepId) => readOnly || currentStep?.id === id;
+  const show = (id: StepId) => showAll || currentStep?.id === id;
   const blocked = stepBlockedReason();
   const chosenShift = shifts.find((s) => s.id === shiftId);
   const chosenLegs = legs.filter((l) => needs[l.id]?.is_needed);
@@ -415,7 +421,7 @@ function RegistrationForm({
         </Callout>
       )}
 
-      {!readOnly && <StepIndicator steps={flow.map((s) => s.label)} current={Math.min(step, flow.length - 1)} />}
+      {!showAll && <StepIndicator steps={flow.map((s) => s.label)} current={Math.min(step, flow.length - 1)} />}
 
       {submitError && (
         <div id="register-error-summary" tabIndex={-1}>
@@ -425,7 +431,7 @@ function RegistrationForm({
         </div>
       )}
 
-      <div key={readOnly ? "review-all" : currentStep?.id} className="flex animate-in flex-col gap-4 fade-in slide-in-from-right-2 duration-200">
+      <div key={showAll ? "all" : currentStep?.id} className="flex animate-in flex-col gap-4 fade-in slide-in-from-right-2 duration-200">
       {show("profile") && (
         <ProfileCard
           step={stepNumOf("profile")}
@@ -631,7 +637,7 @@ function RegistrationForm({
       )}
       </div>
 
-      {!readOnly && (
+      {!showAll && (
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -659,7 +665,7 @@ function RegistrationForm({
     <aside className="hidden lg:sticky lg:top-24 lg:block">
       <div className="surface-card p-4">
         <p className="text-xs font-semibold text-muted-foreground">Tóm tắt đăng ký</p>
-        {!readOnly && (
+        {!showAll && (
           <div className="mt-3 flex flex-col gap-1.5">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Tiến trình</span>
