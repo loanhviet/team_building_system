@@ -11,8 +11,11 @@ fi
 alembic upgrade head
 
 # Seed is idempotent (skips when admin@teambuilding.vn exists), so a fresh
-# clone gets login accounts + demo events with no manual step. Set SEED_DEMO=0
-# for a real deployment — the demo accounts have known passwords.
+# clone gets one login account per role with no manual step — no event, no
+# flights/buses/Gala pre-built; set those up through the admin UI like a real
+# BTC would. Set SEED_DEMO=0 for a real deployment — the seeded accounts have
+# known passwords. For a fully populated demo event instead, seed manually:
+# `docker compose exec api python -m app.db.seed --full`.
 if [ "${SEED_DEMO:-1}" = "1" ]; then
   python -m app.db.seed
 fi

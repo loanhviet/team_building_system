@@ -67,6 +67,17 @@ EMPLOYEE_COUNT = 120
 REGISTERED_COUNT = 105  # rest (15) are seeded as "never registered"
 DECLINE_COUNT = 8  # of REGISTERED_COUNT, how many chose "Không tham gia"
 
+# Default seed on a fresh clone: login accounts covering every role, nothing
+# else pre-built — no event, no flights/buses/hotel/Gala. A tester is meant
+# to click "Tạo sự kiện" and configure it themselves through the real admin
+# screens, which is a more honest test of those screens than only ever
+# looking at data a script already built. The full operational demo (an
+# event with real flights/buses/Gala run through actual allocation) is still
+# here — opt in with `--full` — for whoever wants to see the system already
+# working at a realistic scale instead of building one up by hand.
+MINIMAL_EMPLOYEE_COUNT = 4
+MINIMAL_TEAM_DEFS = TEAM_DEFS[:2]
+
 WISH_NOTES = [
     "Mong có hoạt động team building ngoài trời nhiều hơn năm ngoái.",
     "Đề xuất có thực đơn chay cho một số thành viên.",
@@ -93,10 +104,16 @@ def make_full_name(rng: random.Random) -> str:
     return f"{rng.choice(LAST_NAMES)} {rng.choice(MIDDLE_NAMES)} {rng.choice(FIRST_NAMES)}"
 
 
-async def seed_org(db: AsyncSession, rng: random.Random) -> tuple[list[Site], list[Team], list[Employee]]:
+async def seed_org(
+    db: AsyncSession,
+    rng: random.Random,
+    *,
+    employee_count: int = EMPLOYEE_COUNT,
+    team_defs: list[tuple[str, str]] = TEAM_DEFS,
+) -> tuple[list[Site], list[Team], list[Employee]]:
     sites = [Site(code="HN", name="Hà Nội"), Site(code="HCM", name="Hồ Chí Minh")]
     db.add_all(sites)
-    teams = [Team(code=code, name=name) for code, name in TEAM_DEFS]
+    teams = [Team(code=code, name=name) for code, name in team_defs]
     db.add_all(teams)
     await db.flush()
 
@@ -105,7 +122,7 @@ async def seed_org(db: AsyncSession, rng: random.Random) -> tuple[list[Site], li
 
     employees: list[Employee] = []
     leader_assigned: set[int] = set()
-    for i in range(1, EMPLOYEE_COUNT + 1):
+    for i in range(1, employee_count + 1):
         employee_code = f"NV{i:03d}"
         team = teams[i % len(teams)]
         site = sites[i % len(sites)]
@@ -531,9 +548,33 @@ async def seed_event_b_config(db: AsyncSession, event_b: Event, sites: list[Site
     await seed_event_config(db, event_b, sites)
 
 
+async def seed_minimal(db: AsyncSession, rng: random.Random) -> None:
+    sites, teams, employees = await seed_org(
+        db, rng, employee_count=MINIMAL_EMPLOYEE_COUNT, team_defs=MINIMAL_TEAM_DEFS
+    )
+    await db.commit()
+    leaders = employees[: len(teams)]  # seed_org makes the first employee per team its leader
+    print(
+        f"Seeded (minimal): 1 super_admin, 1 organizer, {len(sites)} sites, {len(teams)} teams, "
+        f"{len(employees)} employees ({len(leaders)} team_leader, {len(employees) - len(leaders)} employee). "
+        "No event — create one from the admin UI. Run with --full for a fully populated demo event instead."
+    )
+    print("Login: admin@teambuilding.vn / admin123 (super_admin)")
+    print("       btc@teambuilding.vn / btc123 (organizer)")
+    for e in leaders:
+        print(f"       {e.email} / {e.employee_code} (team_leader)")
+    for e in employees[len(teams):]:
+        print(f"       {e.email} / {e.employee_code} (employee)")
+
+
 async def seed() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reset", action="store_true", help="Delete all data before seeding")
+    parser.add_argument(
+        "--full", action="store_true",
+        help="Seed the full operational demo (TB2026 with real flights/buses/hotel/Gala already "
+        "allocated, plus empty TB2027) instead of just login accounts.",
+    )
     args = parser.parse_args()
 
     if args.reset:
@@ -546,6 +587,11 @@ async def seed() -> None:
             return
 
         rng = random.Random(42)
+
+        if not args.full:
+            await seed_minimal(db, rng)
+            return
+
         sites, teams, employees = await seed_org(db, rng)
 
         organizer = await db.execute(select(User).where(User.email == "btc@teambuilding.vn"))

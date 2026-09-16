@@ -14,43 +14,45 @@ Tailwind, TanStack Query) · SQLite (WAL) · Redis + ARQ (queue nền + khoá gh
 Yêu cầu: Docker + Docker Compose.
 
 ```bash
-docker compose up -d --build   # clone về là chạy: migrate + seed dữ liệu mẫu tự động, không cần .env
+docker compose up -d --build   # clone về là chạy: migrate + seed tài khoản tự động, không cần .env
 ```
 
-Lần đầu mất vài phút (build image + seed 120 CBNV, 2 event + FAQ pack). Tuỳ chọn:
+Lần đầu mất vài phút để build image. Seed mặc định chỉ tạo tài khoản đăng nhập cho từng vai trò — không
+dựng sẵn sự kiện, chuyến bay, xe, khách sạn hay Gala; tự tạo sự kiện và cấu hình qua giao diện admin.
+
+Tuỳ chọn:
 
 - `cp .env.example .env` rồi chỉnh khi cần: `JWT_SECRET`, `DASHSCOPE_API_KEY` (hỏi đáp), SMTP thật.
 - `SEED_DEMO=0` trong `.env` cho môi trường thật — tài khoản mẫu có mật khẩu công khai ở bảng dưới.
-- `docker compose up` thường tự nạp `docker-compose.override.yml` (hot-reload dev). Chạy bản build
+- Muốn xem một sự kiện đã vận hành đầy đủ (chuyến bay/xe/khách sạn/Gala đã chạy phân bổ thật, ~100
+  người tham gia) thay vì tự dựng: `make seed-full` (hoặc `docker compose exec api python -m app.db.seed --full`).
+- `docker compose up` mặc định nạp `docker-compose.override.yml` (chế độ dev, hot-reload). Chạy bản build
   production-style: `docker compose -f docker-compose.yml up -d --build`.
+
+Truy cập:
 
 - Web: http://localhost:3000 — CBNV vào `/register`, `/journey`, `/gala/{id}`, `/chat`, `/team` (trưởng nhóm), `/account`
 - API docs (Swagger): http://localhost:8000/docs
 - MailHog (bắt mọi email gửi đi): http://localhost:8025
 - Qdrant (hybrid vector cho FAQ; FTS5 vẫn chạy không cần): `docker compose --profile rag up -d qdrant`
-- ChatRAG: BTC soạn FAQ tại `/admin/events/{id}/knowledge`. Corpus demo trong `apps/api/app/db/knowledge_pack.py` chỉ là seed, không phải nguồn lúc hỏi.
 
 CBNV import từ Excel lần đầu có `must_change_password` — hệ thống ép vào `/account` trước khi dùng portal.
 
-Tài khoản mẫu (seed tự chạy khi api khởi động; CBNV đổi mật khẩu lần đầu đăng nhập):
+### Tài khoản
+
+Seed tự chạy khi API khởi động; CBNV đổi mật khẩu lần đầu đăng nhập.
 
 | Vai trò | Email | Mật khẩu |
 |---|---|---|
 | super_admin | admin@teambuilding.vn | admin123 |
 | organizer (BTC) | btc@teambuilding.vn | btc123 |
-| team_leader | nv001@teambuilding.vn | NV001 |
-| employee | nv009@teambuilding.vn | NV009 |
+| team_leader | nv001@teambuilding.vn, nv002@teambuilding.vn | NV001, NV002 |
+| employee | nv003@teambuilding.vn, nv004@teambuilding.vn | NV003, NV004 |
+
+Cần thêm CBNV để test: import qua `/admin/employees` (có sẵn file mẫu Excel trong màn hình).
 
 **Kiểm tra môi trường đã lên đúng chưa:** đăng nhập `btc@teambuilding.vn` / `btc123` ở `/login`, vào được
 trang quản lý sự kiện là ổn — báo lỗi từ bước này thường là do môi trường, không phải bug thật.
-
-**Học/debug các thuật toán phân bổ (chuyến bay, xe, Gala):** dữ liệu seed mặc định 97 người tham gia,
-không tính tay lại được khi nghi ngờ một kết quả. Dùng sự kiện demo nhỏ **TBLAB** — 16 người, mỗi nhánh
-thuật toán chỉ kích hoạt đúng một lần, kết quả tính tay được:
-
-```bash
-docker compose exec api python -m app.db.seed_lab          # tạo (hoặc --reset để làm lại từ đầu)
-```
 
 ## Lệnh thường dùng
 
@@ -82,8 +84,3 @@ Xem đầy đủ trong [`.env.example`](.env.example). Đáng chú ý:
 
 File DB nằm ở `./data/teambuilding.db` (WAL mode, kèm `-wal`/`-shm`). Dừng service `api`/`worker` (hoặc
 đợi lúc không có traffic ghi) trước khi `cp` để tránh sao chép giữa chừng một transaction.
-
-## Trạng thái triển khai
-
-Toàn bộ 9 phase đã hoàn thành: Auth/RBAC, Đăng ký + Email, Chuyến bay + Auto Allocation, Khách sạn/Phòng,
-Xe + Auto Allocation, My Journey + Thông báo, Gala Dinner realtime, Chat RAG, Dashboard/Audit/Tests.

@@ -1,4 +1,4 @@
-.PHONY: up down build logs migrate seed test lint sh-api sh-web
+.PHONY: up down build logs migrate seed seed-full test lint sh-api sh-web
 
 COMPOSE = docker compose
 
@@ -22,6 +22,9 @@ migration:
 
 seed:
 	$(COMPOSE) exec api python -m app.db.seed
+
+seed-full:
+	$(COMPOSE) exec api python -m app.db.seed --full
 
 test:
 	$(COMPOSE) exec api pytest
