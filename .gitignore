@@ -31,3 +31,9 @@ data/exports/*
 
 # Logs
 *.log
+
+# Internal-only — planning docs, AI-agent instructions, original requirements
+# doc: kept locally, not shipped in the repo teammates/graders see.
+CLAUDE.md
+docs/
+*.docx

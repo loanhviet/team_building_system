@@ -2,8 +2,7 @@
 
 One-stop portal cho một kỳ Team Building: CBNV đăng ký và xem toàn bộ hành trình (chuyến bay, xe, khách
 sạn, Gala Dinner, lịch trình) trên một hệ thống; BTC quản lý dữ liệu, chạy phân bổ tự động và điều chỉnh
-ngoại lệ. Xem đầy đủ yêu cầu gốc ở [`docs/BRD.md`](docs/BRD.md) và kiến trúc/lộ trình triển khai ở
-[`docs/PLAN.md`](docs/PLAN.md) — đó là tài liệu tham chiếu chính, file này chỉ là hướng dẫn chạy nhanh.
+ngoại lệ.
 
 ## Stack
 
@@ -29,7 +28,7 @@ Lần đầu mất vài phút (build image + seed 120 CBNV, 2 event + FAQ pack).
 - API docs (Swagger): http://localhost:8000/docs
 - MailHog (bắt mọi email gửi đi): http://localhost:8025
 - Qdrant (hybrid vector cho FAQ; FTS5 vẫn chạy không cần): `docker compose --profile rag up -d qdrant`
-- ChatRAG: thiết kế + cách chạy [`docs/CHAT-RAG.md`](docs/CHAT-RAG.md). BTC soạn FAQ tại `/admin/events/{id}/knowledge`. Corpus demo trong `apps/api/app/db/knowledge_pack.py` chỉ là seed, không phải nguồn lúc hỏi.
+- ChatRAG: BTC soạn FAQ tại `/admin/events/{id}/knowledge`. Corpus demo trong `apps/api/app/db/knowledge_pack.py` chỉ là seed, không phải nguồn lúc hỏi.
 
 CBNV import từ Excel lần đầu có `must_change_password` — hệ thống ép vào `/account` trước khi dùng portal.
 
@@ -41,6 +40,17 @@ Tài khoản mẫu (seed tự chạy khi api khởi động; CBNV đổi mật k
 | organizer (BTC) | btc@teambuilding.vn | btc123 |
 | team_leader | nv001@teambuilding.vn | NV001 |
 | employee | nv009@teambuilding.vn | NV009 |
+
+**Kiểm tra môi trường đã lên đúng chưa:** đăng nhập `btc@teambuilding.vn` / `btc123` ở `/login`, vào được
+trang quản lý sự kiện là ổn — báo lỗi từ bước này thường là do môi trường, không phải bug thật.
+
+**Học/debug các thuật toán phân bổ (chuyến bay, xe, Gala):** dữ liệu seed mặc định 97 người tham gia,
+không tính tay lại được khi nghi ngờ một kết quả. Dùng sự kiện demo nhỏ **TBLAB** — 16 người, mỗi nhánh
+thuật toán chỉ kích hoạt đúng một lần, kết quả tính tay được:
+
+```bash
+docker compose exec api python -m app.db.seed_lab          # tạo (hoặc --reset để làm lại từ đầu)
+```
 
 ## Lệnh thường dùng
 
@@ -75,8 +85,5 @@ File DB nằm ở `./data/teambuilding.db` (WAL mode, kèm `-wal`/`-shm`). Dừn
 
 ## Trạng thái triển khai
 
-Toàn bộ 9 phase trong [`docs/PLAN.md`](docs/PLAN.md#9-lộ-trình-triển-khai-theo-phase) đã hoàn thành (Auth/
-RBAC, Đăng ký + Email, Chuyến bay + Auto Allocation, Khách sạn/Phòng, Xe + Auto Allocation, My Journey +
-Thông báo, Gala Dinner realtime, Chat RAG, Dashboard/Audit/Tests). Chi tiết từng phase, các lệch so với kế
-hoạch gốc và giới hạn đã biết được ghi lại ngay trong `docs/PLAN.md` theo từng mục — đọc ở đó trước khi
-tiếp tục phát triển.
+Toàn bộ 9 phase đã hoàn thành: Auth/RBAC, Đăng ký + Email, Chuyến bay + Auto Allocation, Khách sạn/Phòng,
+Xe + Auto Allocation, My Journey + Thông báo, Gala Dinner realtime, Chat RAG, Dashboard/Audit/Tests.
