@@ -25,7 +25,9 @@ Tuỳ chọn:
 - `cp .env.example .env` rồi chỉnh khi cần: `JWT_SECRET`, `DASHSCOPE_API_KEY` (hỏi đáp), SMTP thật.
 - `SEED_DEMO=0` trong `.env` cho môi trường thật — tài khoản mẫu có mật khẩu công khai ở bảng dưới.
 - Muốn xem một sự kiện đã vận hành đầy đủ (chuyến bay/xe/khách sạn/Gala đã chạy phân bổ thật, ~100
-  người tham gia) thay vì tự dựng: `make seed-full` (hoặc `docker compose exec api python -m app.db.seed --full`).
+  người tham gia) thay vì tự dựng: `make seed-full`. Nếu `docker compose up` đã tự seed minimal trước
+  đó rồi (tài khoản mẫu đã tồn tại), thêm `--reset`: `docker compose exec api python -m app.db.seed --full --reset`
+  — **xoá sạch dữ liệu hiện có** trước khi seed lại, chỉ dùng khi chưa có gì cần giữ.
 - `docker compose up` mặc định nạp `docker-compose.override.yml` (chế độ dev, hot-reload). Chạy bản build
   production-style: `docker compose -f docker-compose.yml up -d --build`.
 
