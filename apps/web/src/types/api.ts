@@ -348,6 +348,7 @@ export type RoomAssignment = {
   source: "manual" | "import";
   employee_code: string | null;
   full_name: string;
+  gender: string | null;
   team_name: string | null;
   hotel_code: string;
   hotel_name: string;
@@ -359,8 +360,30 @@ export type UnassignedEmployee = {
   employee_id: number;
   employee_code: string | null;
   full_name: string;
+  gender: string | null;
+  team_id: number | null;
   team_name: string | null;
   site_name: string | null;
+};
+
+export type RoomSuggestion = {
+  employee_id: number;
+  employee_code: string | null;
+  full_name: string;
+  gender: string | null;
+  team_name: string | null;
+  room_id: number;
+  room_number: string;
+};
+
+export type RoomSuggestPreview = {
+  assignments: RoomSuggestion[];
+  unplaced: UnassignedEmployee[];
+};
+
+export type ApplySuggestionsResult = {
+  applied: number;
+  failed: { employee_id: number; room_id: number; error: string }[];
 };
 
 export type ImportResult = {

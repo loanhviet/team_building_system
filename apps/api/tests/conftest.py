@@ -21,7 +21,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models.auth import User
-from app.models.enums import EventStatus, UserRole
+from app.models.enums import EventStatus, Gender, UserRole
 from app.models.event import Event, Shift
 from app.models.organization import Employee, Site, Team
 from app.models.registration import Registration
@@ -143,13 +143,14 @@ def auth_headers():
 
 
 async def make_employee(
-    db_session: AsyncSession, *, team: Team, site: Site, code: str, role: UserRole = UserRole.employee
+    db_session: AsyncSession, *, team: Team, site: Site, code: str, role: UserRole = UserRole.employee,
+    gender: Gender | None = None,
 ) -> SimpleNamespace:
     """Creates one Employee + its User account, flushed but not committed —
     caller commits once the rest of the scenario is set up."""
     employee = Employee(
         employee_code=code, full_name=f"Nhan vien {code}", email=f"{code.lower()}@test.vn",
-        team_id=team.id, site_id=site.id,
+        team_id=team.id, site_id=site.id, gender=gender,
     )
     db_session.add(employee)
     await db_session.flush()

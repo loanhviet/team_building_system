@@ -15,11 +15,21 @@ from app.models.event import Event
 from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.organization import Employee, Site, Team
 from app.models.registration import Registration
-from app.schemas.hotel import ImportResultOut, RoomAssignmentCreate, RoomAssignmentOut
+from app.schemas.hotel import (
+    ApplySuggestionsRequest,
+    ApplySuggestionsResult,
+    ImportResultOut,
+    RoomAssignmentCreate,
+    RoomAssignmentOut,
+    RoomSuggestionOut,
+    RoomSuggestPreviewOut,
+    UnassignedEmployeeOut,
+)
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_event_not_completed
 from app.services.importer.xlsx import load_xlsx, read_xlsx
+from app.services.room_suggestion import RoomCandidate, RoomSlot, suggest_room_assignments
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}/room-assignments", tags=["room-assignments"])
@@ -35,6 +45,7 @@ def _assignment_out(a: RoomAssignment, room: Room, hotel: Hotel) -> RoomAssignme
         source=a.source,
         employee_code=a.employee.employee_code,
         full_name=a.employee.full_name,
+        gender=a.employee.gender.value if a.employee.gender else None,
         team_name=a.employee.team.name if a.employee.team else None,
         hotel_code=hotel.code,
         hotel_name=hotel.name,
@@ -60,10 +71,14 @@ async def list_room_assignments(event_id: int, db: DbSession, _user: AdminUser) 
     return [_assignment_out(a, r, h) for a, r, h in rows]
 
 
-@router.get("/unassigned")
-async def list_unassigned(event_id: int, db: DbSession, _user: AdminUser) -> list[dict]:
-    result = await db.execute(
-        select(Employee.id, Employee.employee_code, Employee.full_name, Team.name, Site.name)
+async def _unassigned_query(db: DbSession, event_id: int):
+    """Shared by list_unassigned and the suggestion endpoint so both always
+    agree on exactly who counts as needing a room."""
+    return await db.execute(
+        select(
+            Employee.id, Employee.employee_code, Employee.full_name, Employee.gender,
+            Employee.team_id, Team.name, Site.name,
+        )
         .join(Registration, Registration.employee_id == Employee.id)
         .outerjoin(Team, Team.id == Employee.team_id)
         .outerjoin(Site, Site.id == Employee.site_id)
@@ -78,37 +93,51 @@ async def list_unassigned(event_id: int, db: DbSession, _user: AdminUser) -> lis
             RoomAssignment.id.is_(None),
         )
     )
+
+
+@router.get("/unassigned", response_model=list[UnassignedEmployeeOut])
+async def list_unassigned(event_id: int, db: DbSession, _user: AdminUser) -> list[UnassignedEmployeeOut]:
+    result = await _unassigned_query(db, event_id)
     return [
-        {
-            "employee_id": row[0],
-            "employee_code": row[1],
-            "full_name": row[2],
-            "team_name": row[3],
-            "site_name": row[4],
-        }
+        UnassignedEmployeeOut(
+            employee_id=row[0],
+            employee_code=row[1],
+            full_name=row[2],
+            gender=row[3].value if row[3] else None,
+            team_id=row[4],
+            team_name=row[5],
+            site_name=row[6],
+        )
         for row in result.all()
     ]
 
 
-@router.post("/assign", response_model=RoomAssignmentOut)
-async def assign_room(
-    event_id: int, payload: RoomAssignmentCreate, db: DbSession, user: AdminUser
+async def _assign_employee_to_room(
+    db: DbSession,
+    event_id: int,
+    employee_id: int,
+    room_id: int,
+    user_id: int,
+    accept_soft_warnings: bool,
 ) -> RoomAssignmentOut:
-    # rooms are operational data like flights/buses — a finished event's record
-    # of who slept where isn't editable any more (flights.py/buses.py already
-    # guard this; these three endpoints were the gap)
-    assert_event_not_completed(await master_data.get_or_404(db, Event, event_id))
-    room = await db.get(Room, payload.room_id)
+    """Core of a single room assignment — shared by the single-pick workbench
+    action and by applying a batch of accepted suggestions, so both go
+    through the exact same capacity/registration/gender checks."""
+    room = await db.get(Room, room_id)
     if room is None:
         raise AppError("not_found", "Room not found", status.HTTP_404_NOT_FOUND)
     hotel = await db.get(Hotel, room.hotel_id)
     if hotel is None or hotel.event_id != event_id:
         raise AppError("not_found", "Room không thuộc event này", status.HTTP_404_NOT_FOUND)
 
+    employee = await db.get(Employee, employee_id)
+    if employee is None:
+        raise AppError("not_found", "Employee not found", status.HTTP_404_NOT_FOUND)
+
     reg_result = await db.execute(
         select(Registration.id).where(
             Registration.event_id == event_id,
-            Registration.employee_id == payload.employee_id,
+            Registration.employee_id == employee_id,
             Registration.status == "submitted",
             Registration.is_participating.is_(True),
         )
@@ -120,9 +149,13 @@ async def assign_room(
             status.HTTP_400_BAD_REQUEST,
         )
 
-    result = await db.execute(select(RoomAssignment).where(RoomAssignment.room_id == room.id))
+    result = await db.execute(
+        select(RoomAssignment)
+        .options(selectinload(RoomAssignment.employee))
+        .where(RoomAssignment.room_id == room.id)
+    )
     occupants = result.scalars().all()
-    already_here = any(a.employee_id == payload.employee_id for a in occupants)
+    already_here = any(a.employee_id == employee_id for a in occupants)
     if not already_here and len(occupants) >= room.capacity:
         raise AppError(
             "room_full",
@@ -130,28 +163,43 @@ async def assign_room(
             status.HTTP_409_CONFLICT,
         )
 
+    # soft, not a hard block: BTC may have a real reason (phòng riêng, yêu cầu
+    # đặc biệt...) — flag it and require one extra click to confirm, same
+    # soft_warning_required shape flight/bus adjust already use.
+    if employee.gender and not accept_soft_warnings:
+        other_genders = {
+            a.employee.gender.value
+            for a in occupants
+            if a.employee_id != employee_id and a.employee.gender
+        }
+        if other_genders and other_genders != {employee.gender.value}:
+            raise AppError(
+                "gender_mismatch",
+                f"Phòng {room.room_number} đang có người khác giới tính. Hãy xác nhận để tiếp tục.",
+                status.HTTP_409_CONFLICT,
+            )
+
     result = await db.execute(
         select(RoomAssignment).where(
-            RoomAssignment.event_id == event_id, RoomAssignment.employee_id == payload.employee_id
+            RoomAssignment.event_id == event_id, RoomAssignment.employee_id == employee_id
         )
     )
     assignment = result.scalar_one_or_none()
     before = {"room_id": assignment.room_id} if assignment else None
     if assignment is None:
-        assignment = RoomAssignment(event_id=event_id, employee_id=payload.employee_id)
+        assignment = RoomAssignment(event_id=event_id, employee_id=employee_id)
         db.add(assignment)
     assignment.room_id = room.id
     assignment.source = "manual"
-    assignment.assigned_by = user.id
+    assignment.assigned_by = user_id
     assignment.assigned_at = utcnow()
     await db.flush()
 
     await record_audit(
-        db, actor_user_id=user.id, action="assign", entity_type="room_assignment",
-        entity_id=payload.employee_id, before=before, after={"room_id": room.id},
+        db, actor_user_id=user_id, action="assign", entity_type="room_assignment",
+        entity_id=employee_id, before=before, after={"room_id": room.id},
         event_id=event_id,
     )
-    await db.commit()
     result = await db.execute(
         select(RoomAssignment)
         .options(selectinload(RoomAssignment.employee).selectinload(Employee.team))
@@ -159,6 +207,115 @@ async def assign_room(
     )
     assignment = result.scalar_one()
     return _assignment_out(assignment, room, hotel)
+
+
+@router.post("/assign", response_model=RoomAssignmentOut)
+async def assign_room(
+    event_id: int, payload: RoomAssignmentCreate, db: DbSession, user: AdminUser
+) -> RoomAssignmentOut:
+    # rooms are operational data like flights/buses — a finished event's record
+    # of who slept where isn't editable any more (flights.py/buses.py already
+    # guard this; these three endpoints were the gap)
+    assert_event_not_completed(await master_data.get_or_404(db, Event, event_id))
+    out = await _assign_employee_to_room(
+        db, event_id, payload.employee_id, payload.room_id, user.id, payload.accept_soft_warnings
+    )
+    await db.commit()
+    return out
+
+
+@router.get("/suggest", response_model=RoomSuggestPreviewOut)
+async def suggest_room_assignments_endpoint(
+    event_id: int, hotel_id: int, db: DbSession, _user: AdminUser
+) -> RoomSuggestPreviewOut:
+    """Preview only — nothing is written. BTC reviews/edits the list and calls
+    /apply-suggestions for whichever rows they keep."""
+    await master_data.get_or_404(db, Hotel, hotel_id, event_id=event_id)
+
+    unassigned_result = await _unassigned_query(db, event_id)
+    unassigned_rows = unassigned_result.all()
+    candidates = [
+        RoomCandidate(employee_id=row[0], gender=row[3].value if row[3] else None, team_id=row[4])
+        for row in unassigned_rows
+    ]
+    by_employee_id = {row[0]: row for row in unassigned_rows}
+
+    rooms_result = await db.execute(select(Room).where(Room.hotel_id == hotel_id))
+    rooms = list(rooms_result.scalars().all())
+    occupants_result = await db.execute(
+        select(RoomAssignment)
+        .options(selectinload(RoomAssignment.employee))
+        .where(RoomAssignment.room_id.in_([r.id for r in rooms]))
+    )
+    occupants_by_room: dict[int, list[RoomAssignment]] = {}
+    for a in occupants_result.scalars().all():
+        occupants_by_room.setdefault(a.room_id, []).append(a)
+
+    slots = []
+    for room in rooms:
+        occupants = occupants_by_room.get(room.id, [])
+        slots.append(
+            RoomSlot(
+                room_id=room.id,
+                capacity=room.capacity,
+                assigned=[a.employee_id for a in occupants],
+                genders_present={a.employee.gender.value for a in occupants if a.employee.gender},
+                teams_present={a.employee.team_id for a in occupants if a.employee.team_id},
+            )
+        )
+    room_by_id = {r.id: r for r in rooms}
+
+    result = suggest_room_assignments(candidates, slots)
+
+    assignments_out = []
+    for employee_id, room_id in result.assignments.items():
+        row = by_employee_id[employee_id]
+        assignments_out.append(
+            RoomSuggestionOut(
+                employee_id=employee_id,
+                employee_code=row[1],
+                full_name=row[2],
+                gender=row[3].value if row[3] else None,
+                team_name=row[5],
+                room_id=room_id,
+                room_number=room_by_id[room_id].room_number,
+            )
+        )
+    unplaced_out = [
+        UnassignedEmployeeOut(
+            employee_id=row[0], employee_code=row[1], full_name=row[2],
+            gender=row[3].value if row[3] else None, team_id=row[4], team_name=row[5],
+            site_name=row[6],
+        )
+        for eid in result.unplaced
+        for row in [by_employee_id[eid]]
+    ]
+    return RoomSuggestPreviewOut(assignments=assignments_out, unplaced=unplaced_out)
+
+
+@router.post("/apply-suggestions", response_model=ApplySuggestionsResult)
+async def apply_room_suggestions(
+    event_id: int, payload: ApplySuggestionsRequest, db: DbSession, user: AdminUser
+) -> ApplySuggestionsResult:
+    """Applies a (possibly BTC-edited) suggestion list one row at a time, same
+    validation as a manual /assign — a stale suggestion (someone else changed
+    that room since /suggest ran) fails that one row instead of the whole
+    batch, matching the xlsx-import loop's per-row error pattern."""
+    event = await master_data.get_or_404(db, Event, event_id)
+    assert_event_not_completed(event)
+    applied = 0
+    failed: list[dict] = []
+    for item in payload.assignments:
+        try:
+            async with db.begin_nested():
+                await _assign_employee_to_room(
+                    db, event_id, item.employee_id, item.room_id, user.id, accept_soft_warnings=True
+                )
+            applied += 1
+        except AppError as exc:
+            failed.append({"employee_id": item.employee_id, "room_id": item.room_id, "error": exc.message})
+    await db.commit()
+    return ApplySuggestionsResult(applied=applied, failed=failed)
 
 
 @router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)

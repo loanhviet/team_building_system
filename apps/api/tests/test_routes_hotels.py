@@ -6,7 +6,7 @@ from openpyxl import Workbook
 from sqlalchemy import select
 
 from app.core.time import utcnow
-from app.models.enums import EventStatus
+from app.models.enums import EventStatus, Gender
 from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
 from app.models.registration import Registration
 from tests.conftest import make_employee
@@ -246,3 +246,101 @@ async def test_room_assignment_frozen_once_event_completed(
     )
     assert res.status_code == 400
     assert res.json()["error"]["code"] == "event_completed"
+
+
+async def test_room_list_and_unassigned_carry_gender(client, world, auth_headers, db_session):
+    _hotel, _rt, room = await _make_hotel_with_room(db_session, world.event.id)
+    world.employee.gender = Gender.male
+    await db_session.commit()
+
+    unassigned = await client.get(
+        f"/api/events/{world.event.id}/room-assignments/unassigned",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert unassigned.json()[0]["gender"] == "male"
+
+    await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_id": world.employee.id, "room_id": room.id},
+    )
+    listed = await client.get(
+        f"/api/events/{world.event.id}/room-assignments", headers=auth_headers(world.organizer_user)
+    )
+    assert listed.json()[0]["gender"] == "male"
+
+
+async def test_assign_into_mixed_gender_room_is_a_soft_warning(client, world, auth_headers, db_session):
+    _hotel, _rt, room = await _make_hotel_with_room(db_session, world.event.id)
+    world.employee.gender = Gender.male
+    woman = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV050", gender=Gender.female
+    )
+    reg = Registration(
+        event_id=world.event.id, employee_id=woman.employee.id, status="submitted",
+        is_participating=True,
+    )
+    db_session.add(reg)
+    await db_session.commit()
+
+    first = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_id": world.employee.id, "room_id": room.id},
+    )
+    assert first.status_code == 200
+
+    blocked = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_id": woman.employee.id, "room_id": room.id},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "gender_mismatch"
+
+    accepted = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_id": woman.employee.id, "room_id": room.id, "accept_soft_warnings": True},
+    )
+    assert accepted.status_code == 200
+
+
+async def test_suggest_and_apply_never_mixes_genders(client, world, auth_headers, db_session):
+    hotel, _rt, _room = await _make_hotel_with_room(db_session, world.event.id)
+    room2 = Room(hotel_id=hotel.id, room_number="102", capacity=2)
+    db_session.add(room2)
+    world.employee.gender = Gender.male
+    woman = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV051", gender=Gender.female
+    )
+    db_session.add(
+        Registration(
+            event_id=world.event.id, employee_id=woman.employee.id, status="submitted",
+            is_participating=True,
+        )
+    )
+    await db_session.commit()
+
+    preview = await client.get(
+        f"/api/events/{world.event.id}/room-assignments/suggest?hotel_id={hotel.id}",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert len(body["assignments"]) == 2
+    rooms_used = {row["room_id"] for row in body["assignments"]}
+    assert len(rooms_used) == 2, "mỗi giới tính phải ở phòng riêng khi phòng còn đủ"
+
+    apply_res = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/apply-suggestions",
+        headers=auth_headers(world.organizer_user),
+        json={"assignments": body["assignments"]},
+    )
+    assert apply_res.status_code == 200
+    assert apply_res.json() == {"applied": 2, "failed": []}
+
+    listed = await client.get(
+        f"/api/events/{world.event.id}/room-assignments", headers=auth_headers(world.organizer_user)
+    )
+    assert len(listed.json()) == 2

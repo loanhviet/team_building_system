@@ -1,8 +1,19 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Wand2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { AllocationKpiStrip } from "@/components/domain/allocation-workbench";
 import { FormField } from "@/components/domain/form-field";
@@ -25,7 +36,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
-import type { Event, Hotel, ImportResult, Room, RoomAssignment, RoomType, UnassignedEmployee } from "@/types/api";
+import { genderLabel } from "@/lib/labels";
+import type {
+  ApplySuggestionsResult,
+  Event,
+  Hotel,
+  ImportResult,
+  Room,
+  RoomAssignment,
+  RoomSuggestPreview,
+  RoomType,
+  UnassignedEmployee,
+} from "@/types/api";
 
 const EMPTY_HOTEL = { code: "", name: "", address: "", checkin_date: "", checkout_date: "", note: "" };
 const EMPTY_ROOM_TYPE = { name: "", capacity: "2", quantity: "0" };
@@ -51,8 +73,21 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [roomSearch, setRoomSearch] = useState("");
   const [roomFilter, setRoomFilter] = useState<"all" | "available" | "full">("available");
+  const [assignmentSearch, setAssignmentSearch] = useState("");
   const roomImportRef = useRef<HTMLInputElement>(null);
   const assignImportRef = useRef<HTMLInputElement>(null);
+
+  // set only when a click would mix genders in a room — gates a confirm
+  // dialog instead of assigning right away. Cleared on confirm/cancel.
+  const [pendingGenderConfirm, setPendingGenderConfirm] = useState<{
+    employeeId: number;
+    roomId: number;
+    roomNumber: string;
+  } | null>(null);
+
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestPreview, setSuggestPreview] = useState<RoomSuggestPreview | null>(null);
+  const [suggestRemoved, setSuggestRemoved] = useState<Set<number>>(new Set());
 
   const { data: hotels } = useQuery({
     queryKey: ["events", eventId, "hotels"],
@@ -253,15 +288,63 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   });
 
   const assignMutation = useMutation({
-    mutationFn: (vars: { employeeId: number; roomId: number }) =>
+    mutationFn: (vars: { employeeId: number; roomId: number; acceptSoftWarnings?: boolean }) =>
       apiFetch(`/api/events/${eventId}/room-assignments/assign`, {
         method: "POST",
-        body: JSON.stringify({ employee_id: vars.employeeId, room_id: vars.roomId }),
+        body: JSON.stringify({
+          employee_id: vars.employeeId,
+          room_id: vars.roomId,
+          accept_soft_warnings: vars.acceptSoftWarnings ?? false,
+        }),
       }),
     onSuccess: () => {
       toast.success("Đã gán phòng");
       setAssignEmployeeId("");
       setAssignRoomId("");
+      setPendingGenderConfirm(null);
+      invalidateAll();
+      invalidateRooms();
+    },
+    onError: (err, vars) => {
+      // safety net behind the client-side check below — data could be stale
+      // (another admin changed the room since the last fetch)
+      if (err instanceof ApiError && err.code === "gender_mismatch") {
+        const room = allRooms.find((r) => r.id === vars.roomId);
+        setPendingGenderConfirm({
+          employeeId: vars.employeeId,
+          roomId: vars.roomId,
+          roomNumber: room?.room_number ?? String(vars.roomId),
+        });
+        return;
+      }
+      toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra");
+    },
+  });
+
+  const suggestQuery = useQuery({
+    queryKey: ["events", eventId, "room-assignments", "suggest", hotelId],
+    queryFn: () =>
+      apiFetch<RoomSuggestPreview>(
+        `/api/events/${eventId}/room-assignments/suggest?hotel_id=${hotelId}`,
+      ),
+    enabled: false, // fetched on demand when the dialog opens, not on every render
+  });
+
+  const applySuggestionsMutation = useMutation({
+    mutationFn: (assignments: { employee_id: number; room_id: number }[]) =>
+      apiFetch<ApplySuggestionsResult>(`/api/events/${eventId}/room-assignments/apply-suggestions`, {
+        method: "POST",
+        body: JSON.stringify({ assignments }),
+      }),
+    onSuccess: (result) => {
+      if (result.failed.length) {
+        toast.warning(`Đã gán ${result.applied} người, ${result.failed.length} người gán lại thất bại (phòng vừa đổi)`);
+      } else {
+        toast.success(`Đã gán ${result.applied} người theo gợi ý`);
+      }
+      setSuggestOpen(false);
+      setSuggestPreview(null);
+      setSuggestRemoved(new Set());
       invalidateAll();
       invalidateRooms();
     },
@@ -296,8 +379,8 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   // plus everyone already assigned somewhere (so a wrong room can be fixed
   // without dropping them first) — union of the two lists the backend gives us.
   const assignableEmployees = [
-    ...(unassigned ?? []).map((e) => ({ employee_id: e.employee_id, employee_code: e.employee_code, full_name: e.full_name })),
-    ...allAssignments.map((a) => ({ employee_id: a.employee_id, employee_code: a.employee_code, full_name: a.full_name })),
+    ...(unassigned ?? []).map((e) => ({ employee_id: e.employee_id, employee_code: e.employee_code, full_name: e.full_name, gender: e.gender })),
+    ...allAssignments.map((a) => ({ employee_id: a.employee_id, employee_code: a.employee_code, full_name: a.full_name, gender: a.gender })),
   ];
   const employeeQuery = employeeSearch.trim().toLowerCase();
   const visibleUnassigned = (unassigned ?? []).filter((employee) =>
@@ -325,6 +408,43 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   const typeQuantityMismatch = (roomTypes ?? []).filter(
     (type) => allRooms.filter((room) => room.room_type_id === type.id).length !== type.quantity,
   ).length;
+
+  const guestsOf = (roomId: number) => allAssignments.filter((a) => a.room_id === roomId);
+  const roomGenders = (roomId: number, excludeEmployeeId?: number) =>
+    new Set(
+      guestsOf(roomId)
+        .filter((g) => g.employee_id !== excludeEmployeeId)
+        .map((g) => g.gender)
+        .filter((g): g is string => !!g),
+    );
+
+  // One tap now assigns instead of "pick person, pick room, then hunt for a
+  // confirm button": clicking a room while a person is already selected (or
+  // vice versa) commits right away. A room that would mix genders pauses for
+  // one confirm click instead — same soft-warning idea as flight/bus adjust,
+  // just surfaced before the request instead of only after a 409.
+  const attemptAssign = (employeeId: number, roomId: number) => {
+    const employee = assignableEmployees.find((e) => e.employee_id === employeeId);
+    const room = allRooms.find((r) => r.id === roomId);
+    if (!employee || !room) return;
+    const alreadyHere = guestsOf(roomId).some((g) => g.employee_id === employeeId);
+    if (alreadyHere) {
+      setAssignEmployeeId(String(employeeId));
+      setAssignRoomId(String(roomId));
+      return;
+    }
+    if (room.occupied >= room.capacity) {
+      toast.error(`Phòng ${room.room_number} đã đủ ${room.capacity} người`);
+      return;
+    }
+    const otherGenders = roomGenders(roomId, employeeId);
+    const mixes = !!employee.gender && otherGenders.size > 0 && !otherGenders.has(employee.gender);
+    if (mixes) {
+      setPendingGenderConfirm({ employeeId, roomId, roomNumber: room.room_number });
+      return;
+    }
+    assignMutation.mutate({ employeeId, roomId });
+  };
 
   const typeColumns: DataTableColumn<RoomType>[] = [
     { key: "name", header: "Tên loại", cell: (t) => t.name },
@@ -355,13 +475,84 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
     },
   ];
 
+  // One row per ROOM, not per person — a 2-4 person room used to repeat
+  // "Phòng 101" on every row, which was exactly the noise being complained
+  // about. Search still matches on any occupant so "tìm tên" still finds the
+  // right room, it just surfaces the whole room instead of one lone row.
+  type RoomGroup = { room_id: number; room_number: string; occupants: RoomAssignment[] };
+  const roomGroupsAll: RoomGroup[] = Object.values(
+    currentHotelAssignments.reduce<Record<number, RoomGroup>>((acc, a) => {
+      (acc[a.room_id] ??= { room_id: a.room_id, room_number: a.room_number, occupants: [] }).occupants.push(a);
+      return acc;
+    }, {}),
+  );
+  const assignmentQuery = assignmentSearch.trim().toLowerCase();
+  const visibleRoomGroups = roomGroupsAll.filter((group) =>
+    [group.room_number, ...group.occupants.flatMap((a) => [a.full_name, a.employee_code, a.team_name])]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(assignmentQuery),
+  );
+
+  const assignmentColumns: DataTableColumn<RoomGroup>[] = [
+    {
+      key: "room",
+      header: "Phòng",
+      cell: (group) => {
+        const genders = roomGenders(group.room_id);
+        return (
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            {group.room_number}
+            {genders.size > 1 && (
+              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                Lẫn giới tính
+              </span>
+            )}
+          </span>
+        );
+      },
+      sortValue: (group) => group.room_number,
+    },
+    {
+      key: "occupants",
+      header: "Nhân sự",
+      cell: (group) => (
+        <div className="flex flex-col gap-1">
+          {group.occupants.map((a) => (
+            <div key={a.id} className="flex items-center gap-1.5">
+              <span className="truncate">{a.full_name}</span>
+              {a.gender && <span className="shrink-0 text-xs text-muted-foreground">({genderLabel(a.gender)})</span>}
+              {a.team_name && <span className="shrink-0 text-xs text-muted-foreground">· {a.team_name}</span>}
+              <ConfirmDialog
+                trigger={<Button size="sm" variant="ghost" className="h-6 px-1.5 text-[11px]">Bỏ</Button>}
+                title="Bỏ gán phòng?"
+                description={`${a.full_name} sẽ trở lại danh sách chưa có phòng.`}
+                confirmLabel="Bỏ gán"
+                destructive
+                onConfirm={() => unassignMutation.mutate(a.id)}
+              />
+            </div>
+          ))}
+        </div>
+      ),
+      sortValue: (group) => group.occupants.map((a) => a.full_name).join(", "),
+    },
+    {
+      key: "count",
+      header: "Số người",
+      cell: (group) => `${group.occupants.length}/${allRooms.find((r) => r.id === group.room_id)?.capacity ?? "?"}`,
+      sortValue: (group) => group.occupants.length,
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-2xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <div className="mr-auto">
             <h2 className="font-display text-lg font-semibold">Workbench phân phòng</h2>
-            <p className="text-sm text-muted-foreground">Chọn nhân sự bên trái, chọn phòng còn chỗ bên phải rồi xác nhận.</p>
+            <p className="text-sm text-muted-foreground">Chọn nhân sự bên trái rồi bấm phòng còn chỗ bên phải — gán luôn, không cần xác nhận thêm.</p>
           </div>
           <Select value={hotelId ? String(hotelId) : undefined} onValueChange={(v) => {
             setSelectedHotelId(Number(v));
@@ -406,6 +597,21 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
           <Button variant="outline" size="sm" onClick={() => apiDownload(`/api/events/${eventId}/room-assignments/import-template`, `room_assignments_template_event_${eventId}.xlsx`).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))}>File mẫu phân phòng</Button>
           <Button variant="outline" size="sm" onClick={() => assignImportRef.current?.click()}>Import phân phòng</Button>
           <Button variant="outline" size="sm" onClick={() => apiDownload(`/api/events/${eventId}/room-assignments/export`, `room_assignments_event_${eventId}.xlsx`).catch((err) => toast.error(err instanceof ApiError ? err.message : "Tải file thất bại"))}>Export Excel</Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            disabled={!hotelId || suggestQuery.isFetching}
+            onClick={async () => {
+              setSuggestRemoved(new Set());
+              const { data } = await suggestQuery.refetch();
+              if (data) setSuggestPreview(data);
+              setSuggestOpen(true);
+            }}
+          >
+            <Wand2 className="size-4" aria-hidden="true" />
+            {suggestQuery.isFetching ? "Đang tính..." : "Gợi ý tự động"}
+          </Button>
         </div>
       </div>
 
@@ -446,8 +652,23 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
               </div>
               <div className="max-h-[520px] flex-1 overflow-y-auto p-2">
                 {visibleUnassigned.length === 0 ? <p className="p-6 text-center text-sm text-muted-foreground">Không còn nhân sự phù hợp bộ lọc.</p> : visibleUnassigned.map((employee) => (
-                  <button key={employee.employee_id} type="button" onClick={() => setAssignEmployeeId(String(employee.employee_id))} className={`mb-1 w-full rounded-xl border px-3 py-2 text-left transition-colors ${assignEmployeeId === String(employee.employee_id) ? "border-primary bg-primary/5" : "border-transparent hover:bg-muted"}`}>
-                    <span className="block truncate text-sm font-medium">{employee.full_name}</span>
+                  <button
+                    key={employee.employee_id}
+                    type="button"
+                    onClick={() => {
+                      if (assignRoomId) attemptAssign(employee.employee_id, Number(assignRoomId));
+                      else setAssignEmployeeId(String(employee.employee_id));
+                    }}
+                    className={`mb-1 w-full rounded-xl border px-3 py-2 text-left transition-colors ${assignEmployeeId === String(employee.employee_id) ? "border-primary bg-primary/5" : "border-transparent hover:bg-muted"}`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="block truncate text-sm font-medium">{employee.full_name}</span>
+                      {employee.gender && (
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          {genderLabel(employee.gender)}
+                        </span>
+                      )}
+                    </span>
                     <span className="block truncate text-xs text-muted-foreground">{[employee.employee_code, employee.team_name, employee.site_name].filter(Boolean).join(" · ") || "Chưa có mã"}</span>
                   </button>
                 ))}
@@ -481,10 +702,51 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
                   const guests = allAssignments.filter((assignment) => assignment.room_id === room.id);
                   const full = room.occupied >= room.capacity;
                   const active = assignRoomId === String(room.id);
+                  const mixedGenders = roomGenders(room.id).size > 1;
                   return (
-                    <div key={room.id} role="button" tabIndex={0} onClick={() => !full && setAssignRoomId(String(room.id))} onKeyDown={(event) => { if (!full && (event.key === "Enter" || event.key === " ")) setAssignRoomId(String(room.id)); }} className={`rounded-xl border p-3 transition-colors ${active ? "border-primary bg-primary/5 ring-1 ring-primary" : full ? "cursor-not-allowed bg-muted/50 opacity-70" : "cursor-pointer hover:border-primary/40 hover:bg-muted/40"}`}>
-                      <div className="flex items-start justify-between gap-2"><div><p className="font-semibold">Phòng {room.room_number}</p><p className="text-xs text-muted-foreground">{roomTypes?.find((type) => type.id === room.room_type_id)?.name ?? "Chưa có loại"} · {room.occupied}/{room.capacity}</p></div><Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={(event) => { event.stopPropagation(); openEditRoom(room); }}>Sửa</Button></div>
-                      <div className="mt-2 space-y-1">{guests.length ? guests.map((guest) => <div key={guest.id} className="flex items-center gap-1"><button type="button" className="min-w-0 flex-1 truncate text-left text-xs hover:underline" onClick={(event) => { event.stopPropagation(); setAssignEmployeeId(String(guest.employee_id)); setAssignRoomId(String(room.id)); }}>{guest.full_name}</button><ConfirmDialog trigger={<Button variant="ghost" className="h-6 px-1.5 text-[11px]">Bỏ</Button>} title="Bỏ gán phòng?" description={`${guest.full_name} sẽ trở lại danh sách chưa có phòng.`} confirmLabel="Bỏ gán" destructive onConfirm={() => unassignMutation.mutate(guest.id)} /></div>) : <p className="text-xs text-muted-foreground">Phòng trống</p>}</div>
+                    <div
+                      key={room.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        if (full) return;
+                        if (assignEmployeeId) attemptAssign(Number(assignEmployeeId), room.id);
+                        else setAssignRoomId(String(room.id));
+                      }}
+                      onKeyDown={(event) => {
+                        if (full || !(event.key === "Enter" || event.key === " ")) return;
+                        if (assignEmployeeId) attemptAssign(Number(assignEmployeeId), room.id);
+                        else setAssignRoomId(String(room.id));
+                      }}
+                      className={`rounded-xl border p-3 transition-colors ${active ? "border-primary bg-primary/5 ring-1 ring-primary" : full ? "cursor-not-allowed bg-muted/50 opacity-70" : "cursor-pointer hover:border-primary/40 hover:bg-muted/40"}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="flex items-center gap-1.5 font-semibold">
+                            Phòng {room.room_number}
+                            {mixedGenders && (
+                              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                                Lẫn giới tính
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{roomTypes?.find((type) => type.id === room.room_type_id)?.name ?? "Chưa có loại"} · {room.occupied}/{room.capacity}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={(event) => { event.stopPropagation(); openEditRoom(room); }}>Sửa</Button>
+                      </div>
+                      <div className="mt-2 space-y-1">{guests.length ? guests.map((guest) => (
+                        <div key={guest.id} className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center gap-1 truncate text-left text-xs hover:underline"
+                            onClick={(event) => { event.stopPropagation(); attemptAssign(guest.employee_id, room.id); }}
+                          >
+                            <span className="truncate">{guest.full_name}</span>
+                            {guest.gender && <span className="shrink-0 text-muted-foreground">({genderLabel(guest.gender)})</span>}
+                          </button>
+                          <ConfirmDialog trigger={<Button variant="ghost" className="h-6 px-1.5 text-[11px]">Bỏ</Button>} title="Bỏ gán phòng?" description={`${guest.full_name} sẽ trở lại danh sách chưa có phòng.`} confirmLabel="Bỏ gán" destructive onConfirm={() => unassignMutation.mutate(guest.id)} />
+                        </div>
+                      )) : <p className="text-xs text-muted-foreground">Phòng trống</p>}</div>
                       <div className="mt-2 border-t border-border pt-1"><ConfirmDialog trigger={<Button variant="ghost" className="h-6 px-0 text-[11px] text-muted-foreground">Xoá phòng</Button>} title="Xoá phòng này?" description="Chỉ xoá được khi phòng không còn người." confirmLabel="Xoá" destructive onConfirm={() => deleteRoomMutation.mutate(room.id)} /></div>
                     </div>
                   );
@@ -494,13 +756,134 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
             </section>
           </div>
 
-          <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
-            <div className="mr-auto"><p className="text-xs text-muted-foreground">Đang phân</p><p className="text-sm font-medium">{selectedEmployee ? `${selectedEmployee.employee_code ?? "—"} · ${selectedEmployee.full_name}` : "Chọn nhân sự bên trái"} → {selectedRoom ? `Phòng ${selectedRoom.room_number}` : "chọn phòng bên phải"}</p></div>
-            <Button variant="ghost" size="sm" onClick={() => { setAssignEmployeeId(""); setAssignRoomId(""); }}>Bỏ chọn</Button>
-            <Button disabled={!assignEmployeeId || !assignRoomId || !!selectedRoom && selectedRoom.occupied >= selectedRoom.capacity || assignMutation.isPending} onClick={() => assignMutation.mutate({ employeeId: Number(assignEmployeeId), roomId: Number(assignRoomId) })}>Gán / đổi phòng</Button>
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <DataTable
+              columns={assignmentColumns}
+              rows={visibleRoomGroups}
+              rowKey={(group) => group.room_id}
+              emptyMessage="Khách sạn này chưa có ai được gán phòng."
+              pageSize={15}
+              toolbar={
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="mr-auto font-medium">Danh sách đã gán · {currentHotel?.code} ({roomGroupsAll.length} phòng · {currentHotelAssignments.length} người)</h3>
+                  <Input
+                    className="w-56"
+                    value={assignmentSearch}
+                    onChange={(e) => setAssignmentSearch(e.target.value)}
+                    placeholder="Tìm tên, mã NV, team, số phòng..."
+                  />
+                </div>
+              }
+            />
           </div>
+
+          {(selectedEmployee || selectedRoom) && (
+            <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
+              <div className="mr-auto">
+                <p className="text-xs text-muted-foreground">{assignMutation.isPending ? "Đang gán..." : "Đã chọn"}</p>
+                <p className="text-sm font-medium">{selectedEmployee ? `${selectedEmployee.employee_code ?? "—"} · ${selectedEmployee.full_name}` : "chưa chọn người"} → {selectedRoom ? `Phòng ${selectedRoom.room_number}` : "bấm một phòng còn chỗ để gán"}</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => { setAssignEmployeeId(""); setAssignRoomId(""); }}>Bỏ chọn</Button>
+            </div>
+          )}
         </>
       )}
+
+      {/* Gender-mismatch soft warning: clicking a room that already has a
+          different known gender pauses here instead of assigning right away. */}
+      <AlertDialog open={!!pendingGenderConfirm} onOpenChange={(open) => !open && setPendingGenderConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Phòng {pendingGenderConfirm?.roomNumber} đang có người khác giới tính</AlertDialogTitle>
+            <AlertDialogDescription>Vẫn có thể gán nếu đây là trường hợp đặc biệt (phòng riêng, yêu cầu cụ thể...). Xác nhận để tiếp tục.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Huỷ</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={assignMutation.isPending}
+              onClick={() => {
+                if (pendingGenderConfirm) {
+                  assignMutation.mutate({
+                    employeeId: pendingGenderConfirm.employeeId,
+                    roomId: pendingGenderConfirm.roomId,
+                    acceptSoftWarnings: true,
+                  });
+                }
+              }}
+            >
+              Vẫn gán
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Auto-suggest preview — nothing is written until "Áp dụng" below.
+          BTC can drop any row before applying; the rest go through the same
+          /assign validation apply-suggestions uses under the hood. */}
+      <Dialog open={suggestOpen} onOpenChange={setSuggestOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Gợi ý phân phòng — {currentHotel?.code}</DialogTitle>
+          </DialogHeader>
+          {suggestQuery.isFetching ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Đang tính gợi ý...</p>
+          ) : !suggestPreview || suggestPreview.assignments.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Không còn ai cần gợi ý phòng ở khách sạn này.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                Gợi ý cho {suggestPreview.assignments.length} người, cùng giới tính mỗi phòng, ưu tiên giữ cùng Team.
+                Bỏ dòng nào không muốn trước khi áp dụng.
+              </p>
+              <div className="flex max-h-[360px] flex-col gap-1 overflow-y-auto">
+                {suggestPreview.assignments
+                  .filter((row) => !suggestRemoved.has(row.employee_id))
+                  .map((row) => (
+                    <div key={row.employee_id} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate">
+                        {row.full_name} {row.gender && <span className="text-xs text-muted-foreground">({genderLabel(row.gender)})</span>}
+                        {row.team_name && <span className="text-xs text-muted-foreground"> · {row.team_name}</span>}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-primary">Phòng {row.room_number}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        onClick={() => setSuggestRemoved((prev) => new Set(prev).add(row.employee_id))}
+                      >
+                        Bỏ
+                      </Button>
+                    </div>
+                  ))}
+              </div>
+              {suggestPreview.unplaced.length > 0 && (
+                <p className="text-xs text-amber-700">
+                  Không tìm được phòng phù hợp cho {suggestPreview.unplaced.length} người
+                  ({suggestPreview.unplaced.map((u) => u.full_name).join(", ")}) — gán tay cho những người này.
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              disabled={
+                !suggestPreview ||
+                suggestPreview.assignments.filter((r) => !suggestRemoved.has(r.employee_id)).length === 0 ||
+                applySuggestionsMutation.isPending
+              }
+              onClick={() => {
+                if (!suggestPreview) return;
+                const toApply = suggestPreview.assignments
+                  .filter((row) => !suggestRemoved.has(row.employee_id))
+                  .map((row) => ({ employee_id: row.employee_id, room_id: row.room_id }));
+                applySuggestionsMutation.mutate(toApply);
+              }}
+            >
+              Áp dụng {suggestPreview ? suggestPreview.assignments.filter((r) => !suggestRemoved.has(r.employee_id)).length : 0} gợi ý
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

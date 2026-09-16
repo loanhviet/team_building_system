@@ -97,6 +97,9 @@ class RoomOut(BaseModel):
 class RoomAssignmentCreate(BaseModel):
     employee_id: int
     room_id: int
+    # set true to go ahead anyway after the API already answered once with
+    # gender_mismatch — same soft-warning shape as flight/bus adjust
+    accept_soft_warnings: bool = False
 
 
 class RoomAssignmentOut(BaseModel):
@@ -106,6 +109,7 @@ class RoomAssignmentOut(BaseModel):
     source: str
     employee_code: str | None
     full_name: str
+    gender: str | None
     team_name: str | None
     hotel_code: str
     hotel_name: str
@@ -115,7 +119,48 @@ class RoomAssignmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UnassignedEmployeeOut(BaseModel):
+    employee_id: int
+    employee_code: str | None
+    full_name: str
+    gender: str | None
+    team_id: int | None
+    team_name: str | None
+    site_name: str | None
+
+
 class ImportResultOut(BaseModel):
     ok_rows: int
     error_rows: int
     errors: list[dict]
+
+
+class RoomSuggestionOut(BaseModel):
+    employee_id: int
+    employee_code: str | None
+    full_name: str
+    gender: str | None
+    team_name: str | None
+    room_id: int
+    room_number: str
+
+
+class RoomSuggestPreviewOut(BaseModel):
+    assignments: list[RoomSuggestionOut]
+    # couldn't fit anywhere without mixing genders or exceeding capacity —
+    # same idea as allocation's "no_slot": surfaced, not silently dropped
+    unplaced: list[UnassignedEmployeeOut]
+
+
+class ApplySuggestionItem(BaseModel):
+    employee_id: int
+    room_id: int
+
+
+class ApplySuggestionsRequest(BaseModel):
+    assignments: list[ApplySuggestionItem]
+
+
+class ApplySuggestionsResult(BaseModel):
+    applied: int
+    failed: list[dict]

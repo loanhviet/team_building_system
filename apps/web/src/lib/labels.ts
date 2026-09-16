@@ -14,6 +14,12 @@ function makeLookup(map: Record<string, string>) {
   };
 }
 
+export const genderLabel = makeLookup({
+  male: "Nam",
+  female: "Nữ",
+  other: "Khác",
+});
+
 export const directionLabel = makeLookup({
   outbound: "Chiều đi",
   inbound: "Chiều về",
