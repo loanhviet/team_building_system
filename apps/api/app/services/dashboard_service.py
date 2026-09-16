@@ -2,7 +2,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bus import Bus, BusAssignment
-from app.models.event import Shift, TransportLeg
+from app.models.event import Event, Shift, TransportLeg
 from app.models.flight import Flight, FlightAssignment
 from app.models.gala import GalaSeat, GalaTable, GalaTurn
 from app.models.hotel import Hotel, Room, RoomAssignment
@@ -15,9 +15,12 @@ from app.schemas.dashboard import (
     LegTransportCount,
     ShiftCount,
 )
+from app.services.event_service import is_accepting_registration
+from app.services.registration_service import remindable_employees
 
 
 async def build_dashboard(db: AsyncSession, event_id: int) -> DashboardOut:
+    event = await db.get(Event, event_id)
     total_employees = (
         await db.execute(select(func.count(Employee.id)).where(Employee.is_active.is_(True)))
     ).scalar_one()
@@ -162,6 +165,11 @@ async def build_dashboard(db: AsyncSession, event_id: int) -> DashboardOut:
         total_employees=total_employees,
         registered_count=registered_count,
         not_registered_count=max(total_employees - registered_count, 0),
+        remindable_count=(
+            len(await remindable_employees(db, event_id))
+            if event is not None and is_accepting_registration(event)
+            else 0
+        ),
         participating_count=participating_count,
         not_participating_count=not_participating_count,
         by_shift=by_shift,

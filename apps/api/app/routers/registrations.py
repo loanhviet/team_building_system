@@ -29,11 +29,17 @@ from app.schemas.registration import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.event_service import (
+    DEFAULT_TERMS_VERSION,
+    get_setting,
+    is_accepting_registration,
+)
 from app.services.notification.email_service import dispatch_email, enqueue_email
 from app.services.registration_service import (
     assert_can_edit,
     cancel_registration,
     get_or_create_registration,
+    remindable_employees,
     replace_transport_needs,
     submit_registration,
 )
@@ -49,6 +55,14 @@ me_router = APIRouter(prefix="/registrations", tags=["registrations"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
 settings = get_settings()
+
+# mirror of apps/web/src/lib/labels.ts — the export is the one place the API
+# renders a label itself instead of handing the enum to the frontend
+REGISTRATION_STATUS_LABELS = {
+    "draft": "Nháp",
+    "submitted": "Đã gửi",
+    "cancelled": "Đã huỷ",
+}
 
 
 async def _current_employee(db: DbSession, user: User) -> Employee:
@@ -189,11 +203,17 @@ async def submit_my_registration(
     reg = await get_or_create_registration(db, event_id, employee.id)
     assert_can_edit(event, reg)
 
+    # the version recorded as agreed is the event's own current one, never the
+    # client's copy of it — otherwise the consent record (which is the whole
+    # point of agreed_terms_at/terms_version) is whatever the browser posted
+    current_terms_version = await get_setting(
+        db, event_id, "terms_version", DEFAULT_TERMS_VERSION
+    )
     submit_registration(
         reg,
         is_participating=payload.is_participating,
         agreed_terms=payload.agreed_terms,
-        terms_version=payload.terms_version,
+        terms_version=str(current_terms_version),
     )
     await db.flush()
 
@@ -342,19 +362,23 @@ async def remind_unsubmitted(
     user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
-    """Nhắc CBNV còn bản nháp chưa gửi. Gửi qua worker, không spam trùng trong ngày."""
-    await master_data.get_or_404(db, Event, event_id)
-    result = await db.execute(
-        select(Registration).where(
-            Registration.event_id == event_id,
-            Registration.status == "draft",
+    """Nhắc mọi CBNV chưa trả lời đăng ký (kể cả người chưa từng mở form).
+    Gửi qua worker, mỗi người tối đa một email/ngày."""
+    event = await master_data.get_or_404(db, Event, event_id)
+    # Guard added with the widened target set: without it BTC could mail
+    # "nhớ đăng ký nhé" to everyone who never registered for an event that
+    # already closed (or finished) — 15 people on the demo's completed event.
+    if not is_accepting_registration(event):
+        raise AppError(
+            "registration_not_open",
+            "Chỉ nhắc được khi sự kiện đang trong thời gian mở đăng ký",
+            status.HTTP_400_BAD_REQUEST,
         )
-    )
-    drafts = result.scalars().all()
-    if not drafts:
+    targets = await remindable_employees(db, event_id)
+    if not targets:
         raise AppError(
             "nothing_to_remind",
-            "Không còn hồ sơ nháp để nhắc",
+            "Không còn ai cần nhắc hôm nay (mọi người đã trả lời hoặc đã được nhắc)",
             status.HTTP_400_BAD_REQUEST,
         )
     await record_audit(
@@ -363,12 +387,12 @@ async def remind_unsubmitted(
         action="remind",
         entity_type="registration",
         entity_id=event_id,
-        after={"count": len(drafts)},
+        after={"count": len(targets)},
         event_id=event_id,
     )
     await db.commit()
     await queue.enqueue_job("remind_unsubmitted_task", event_id)
-    return {"queued": len(drafts)}
+    return {"queued": len(targets)}
 
 
 @router.get("/export")
@@ -382,6 +406,9 @@ async def export_registrations(
     shift_id: int | None = None,
 ) -> StreamingResponse:
     regs = await _admin_list_query(db, event_id, search, status_filter, team_id, shift_id)
+    # the list endpoint resolves both of these; the export used to dump the raw
+    # enum value and the raw shift *id* into a Vietnamese spreadsheet
+    shifts = {s.id: s.name for s in await master_data.list_all(db, Shift, event_id=event_id)}
 
     wb = Workbook()
     ws = wb.active
@@ -393,9 +420,9 @@ async def export_registrations(
             reg.employee.full_name,
             reg.employee.email,
             reg.employee.team.name if reg.employee.team else "",
-            reg.status,
+            REGISTRATION_STATUS_LABELS.get(reg.status, reg.status),
             "Có" if reg.is_participating else ("Không" if reg.is_participating is False else ""),
-            reg.shift_id or "",
+            shifts.get(reg.shift_id, "") if reg.shift_id else "",
             reg.wish_note or "",
         ])
 

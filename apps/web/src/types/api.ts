@@ -373,6 +373,7 @@ export type Dashboard = {
   total_employees: number;
   registered_count: number;
   not_registered_count: number;
+  remindable_count: number;
   participating_count: number;
   not_participating_count: number;
   by_shift: { shift_name: string; count: number }[];

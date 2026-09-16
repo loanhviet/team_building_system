@@ -64,9 +64,13 @@ async def send_bulk_emails_task(
 
 
 async def remind_unsubmitted_task(ctx: dict, event_id: int) -> None:
-    """One reminder per draft (not yet submitted) registration. Deduped per
-    employee per UTC day so BTC can nudge again tomorrow without spamming."""
+    """One reminder per CBNV who hasn't answered this event's registration —
+    same set the endpoint counted and BTC confirmed (see
+    `registration_service.unsubmitted_employees`), which includes people with
+    no registration row at all, not just drafts. Deduped per employee per UTC
+    day so BTC can nudge again tomorrow without spamming."""
     from app.core.time import utcnow
+    from app.services.registration_service import reminder_dedupe_key, unsubmitted_employees
 
     async with AsyncSessionLocal() as db:
         event = await db.get(Event, event_id)
@@ -74,15 +78,7 @@ async def remind_unsubmitted_task(ctx: dict, event_id: int) -> None:
             logger.error("remind_unsubmitted_task: event %s not found", event_id)
             return
 
-        result = await db.execute(
-            select(Employee)
-            .join(Registration, Registration.employee_id == Employee.id)
-            .where(
-                Registration.event_id == event_id,
-                Registration.status == "draft",
-            )
-        )
-        employees = result.scalars().all()
+        employees = await unsubmitted_employees(db, event_id)
         day = utcnow().date().isoformat()
         outbox_ids = []
         for employee in employees:
@@ -96,7 +92,7 @@ async def remind_unsubmitted_task(ctx: dict, event_id: int) -> None:
                     "event_name": event.name,
                     "app_url": settings.app_base_url,
                 },
-                dedupe_key=f"registration_reminder:{event_id}:{employee.id}:{day}",
+                dedupe_key=reminder_dedupe_key(event_id, employee.id, day),
             )
             outbox_ids.append(outbox_id)
         await db.commit()

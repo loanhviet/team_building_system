@@ -94,7 +94,6 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
 
   const submitted = rows.filter((r) => r.status === "submitted").length;
   const participating = rows.filter((r) => r.is_participating).length;
-  const drafts = rows.filter((r) => r.status === "draft").length;
 
   const handleExport = async () => {
     setDownloading(true);
@@ -109,6 +108,11 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
       setDownloading(false);
     }
   };
+
+  // count comes from the API, not from `rows`: the list only contains people who
+  // already have a registration row, and the reminder deliberately also targets
+  // CBNV who never opened the form. 0 when the window isn't open.
+  const remindable = dashboard?.remindable_count ?? 0;
 
   const remindMutation = useMutation({
     mutationFn: () =>
@@ -155,13 +159,13 @@ export function RegistrationsTable({ eventId }: { eventId: number }) {
         <div className="flex flex-wrap items-center gap-2">
           <ConfirmDialog
             trigger={
-              <Button variant="outline" disabled={drafts === 0 || remindMutation.isPending}>
+              <Button variant="outline" disabled={remindable === 0 || remindMutation.isPending}>
                 <Mail className="size-4" aria-hidden="true" />
-                Nhắc nhở chưa gửi ({drafts})
+                Nhắc nhở chưa gửi ({remindable})
               </Button>
             }
             title="Gửi email nhắc những người chưa nộp đăng ký?"
-            description={`Sẽ xếp hàng ${drafts} email tới hồ sơ còn nháp. Mỗi người tối đa một nhắc trong ngày.`}
+            description={`Sẽ xếp hàng ${remindable} email tới toàn bộ CBNV chưa gửi đăng ký — gồm cả người chưa từng mở form. Người đã huỷ đăng ký không bị nhắc. Mỗi người tối đa một nhắc trong ngày.`}
             confirmLabel="Gửi nhắc"
             onConfirm={async () => {
               await remindMutation.mutateAsync();

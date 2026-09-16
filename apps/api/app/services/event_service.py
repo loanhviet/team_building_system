@@ -22,6 +22,18 @@ DEFAULT_TERMS_VERSION = "v1"
 ALLOCATION_ALLOWED_STATUSES = {EventStatus.registration_closed, EventStatus.allocation_processing}
 
 
+def is_accepting_registration(event: Event) -> bool:
+    """Whether the registration form is open *right now* — status plus the
+    open/close window. Shared by `/events/mine`, `/events/current` and the
+    reminder endpoint so they can't disagree about whether a window is open."""
+    now = utcnow()
+    return (
+        event.status == EventStatus.registration_open
+        and (event.registration_open_at is None or event.registration_open_at <= now)
+        and (event.registration_close_at is None or now <= event.registration_close_at)
+    )
+
+
 def assert_allocation_allowed(event: Event) -> None:
     """Flight/bus auto-allocation is only meaningful once registration is closed
     and before the event is fully wrapped up — running it while registration is

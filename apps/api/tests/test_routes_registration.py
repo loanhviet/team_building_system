@@ -9,7 +9,10 @@ from openpyxl import load_workbook
 
 from app.core.time import utcnow
 from app.models.enums import EventStatus
+from app.models.notification import EmailOutbox
 from app.models.registration import Registration
+from app.services.event_service import upsert_setting
+from app.services.registration_service import remindable_employees, reminder_dedupe_key
 from tests.conftest import make_employee
 
 
@@ -221,3 +224,134 @@ async def test_registration_confirmed_dedupes_by_content_not_just_registration_i
         )
     ).scalars().all()
     assert len(rows) == 2
+
+
+async def test_remind_reaches_employees_who_never_opened_the_form(
+    client, world, auth_headers, db_session
+):
+    """The group that most needs the nudge has no registration row at all — a
+    draft only exists once they've visited the page."""
+    never_opened = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV020"
+    )
+    drafted = await make_employee(db_session, team=world.team, site=world.site, code="NV021")
+    db_session.add(
+        Registration(event_id=world.event.id, employee_id=drafted.employee.id, status="draft")
+    )
+    opted_out = await make_employee(db_session, team=world.team, site=world.site, code="NV022")
+    db_session.add(
+        Registration(
+            event_id=world.event.id, employee_id=opted_out.employee.id, status="cancelled"
+        )
+    )
+    await db_session.commit()
+
+    targets = await remindable_employees(db_session, world.event.id)
+    ids = {e.id for e in targets}
+
+    assert never_opened.employee.id in ids
+    assert drafted.employee.id in ids
+    assert opted_out.employee.id not in ids, "huỷ đăng ký là câu trả lời, không nhắc"
+    # world.employee already submitted
+    assert world.employee.id not in ids
+
+    res = await client.post(
+        f"/api/events/{world.event.id}/registrations/remind",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert res.status_code == 202
+    assert res.json()["queued"] == len(targets)
+
+    dashboard = await client.get(
+        f"/api/events/{world.event.id}/dashboard", headers=auth_headers(world.organizer_user)
+    )
+    # the number BTC confirms in the dialog is the number that gets mailed
+    assert dashboard.json()["remindable_count"] == len(targets)
+
+
+async def test_remind_blocked_once_registration_window_is_closed(
+    client, world, auth_headers, db_session
+):
+    await make_employee(db_session, team=world.team, site=world.site, code="NV023")
+    world.event.status = EventStatus.event_completed
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/events/{world.event.id}/registrations/remind",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "registration_not_open"
+
+    dashboard = await client.get(
+        f"/api/events/{world.event.id}/dashboard", headers=auth_headers(world.organizer_user)
+    )
+    assert dashboard.json()["remindable_count"] == 0
+
+
+async def test_submitted_terms_version_comes_from_the_event_not_the_client(
+    client, world, auth_headers, db_session
+):
+    await upsert_setting(db_session, world.event.id, "terms_version", "v7")
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/submit",
+        headers=auth_headers(world.employee_user),
+        json={"is_participating": True, "agreed_terms": True, "terms_version": "hacked"},
+    )
+    assert res.status_code == 200
+    assert res.json()["terms_version"] == "v7"
+
+
+async def test_already_nudged_today_drops_out_of_the_remind_count(
+    client, world, auth_headers, db_session
+):
+    """The count BTC confirms must be what actually gets mailed: the worker
+    dedupes per employee per UTC day, so a second click on the same day used to
+    still answer "queued: 119" while sending nothing."""
+    await make_employee(db_session, team=world.team, site=world.site, code="NV040")
+    await db_session.commit()
+
+    targets = await remindable_employees(db_session, world.event.id)
+    assert len(targets) >= 1
+
+    # simulate the worker having mailed all but one of them today
+    day = utcnow().date().isoformat()
+    for employee in targets[:-1]:
+        db_session.add(
+            EmailOutbox(
+                event_id=world.event.id, to_email=employee.email,
+                template_code="registration_reminder", payload_json={},
+                dedupe_key=reminder_dedupe_key(world.event.id, employee.id, day),
+            )
+        )
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/events/{world.event.id}/registrations/remind",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert res.json()["queued"] == 1
+
+    dashboard = await client.get(
+        f"/api/events/{world.event.id}/dashboard", headers=auth_headers(world.organizer_user)
+    )
+    assert dashboard.json()["remindable_count"] == 1
+
+    # and once the last one is nudged too, the button has nothing left to do
+    db_session.add(
+        EmailOutbox(
+            event_id=world.event.id, to_email=targets[-1].email,
+            template_code="registration_reminder", payload_json={},
+            dedupe_key=reminder_dedupe_key(world.event.id, targets[-1].id, day),
+        )
+    )
+    await db_session.commit()
+
+    exhausted = await client.post(
+        f"/api/events/{world.event.id}/registrations/remind",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert exhausted.status_code == 400
+    assert exhausted.json()["error"]["code"] == "nothing_to_remind"

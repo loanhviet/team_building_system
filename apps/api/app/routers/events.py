@@ -30,6 +30,7 @@ from app.services.event_service import (
     DEFAULT_TERMS_VERSION,
     get_event_settings,
     get_setting,
+    is_accepting_registration,
     save_event_settings,
     transition_event,
 )
@@ -41,15 +42,6 @@ from app.services.team_roster_service import build_team_roster, resolve_roster_t
 router = APIRouter(prefix="/events", tags=["events"])
 
 AdminUser = Annotated[User, Depends(require_admin)]
-
-
-def _accepting_registration(event: Event) -> bool:
-    now = utcnow()
-    return (
-        event.status == EventStatus.registration_open
-        and (event.registration_open_at is None or event.registration_open_at <= now)
-        and (event.registration_close_at is None or now <= event.registration_close_at)
-    )
 
 
 def _validate_event_ranges(event: Event, data: dict) -> None:
@@ -150,12 +142,12 @@ async def list_my_events(db: DbSession, user: CurrentUser) -> list[EmployeeEvent
         for event, reg in owned.all():
             row = by_id.get(event.id) or EmployeeEventOut(
                 **_event_out(event).model_dump(),
-                can_register=_accepting_registration(event),
+                can_register=is_accepting_registration(event),
                 has_journey=False,
                 registration_status=None,
             )
             row.registration_status = reg.status
-            row.can_register = _accepting_registration(event)
+            row.can_register = is_accepting_registration(event)
             row.has_journey = (
                 reg.status == "submitted"
                 and reg.is_participating is True

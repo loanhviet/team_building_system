@@ -43,3 +43,7 @@ class DashboardOut(BaseModel):
     # can be short of seats because its turn expired/was skipped with no
     # makeup yet activated, or (rarer) config.fixed_quota changed after draw
     gala_unseated_count: int
+    # how many CBNV the "Nhắc nhở chưa gửi" action would actually email right
+    # now — 0 when the registration window isn't open, so the button disables
+    # itself instead of offering an action the endpoint would reject
+    remindable_count: int
