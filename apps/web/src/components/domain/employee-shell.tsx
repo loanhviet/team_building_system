@@ -5,7 +5,6 @@ import {
   CalendarRange,
   ChevronDown,
   ClipboardList,
-  HelpCircle,
   LogOut,
   Menu,
   MessageCircle,
@@ -255,24 +254,11 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex min-w-0 items-center gap-2">
-            <Link
-              href="/chat"
-              className="hidden items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-[11px] font-bold text-orange-800 hover:bg-orange-100 sm:inline-flex"
-            >
-              Hỏi đáp 24/7
-            </Link>
             {events.length > 1 && (
               <div className="hidden sm:block">
                 <EmployeeEventPicker compact />
               </div>
             )}
-            <Link
-              href="/chat"
-              className="hidden size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground lg:inline-flex"
-              aria-label="Trợ giúp"
-            >
-              <HelpCircle className="size-5" />
-            </Link>
             <DropdownMenu>
               <DropdownMenuTrigger className="flex min-w-0 items-center gap-2 rounded-full py-1 pl-1 pr-2 hover:bg-muted">
                 <span className="relative">
