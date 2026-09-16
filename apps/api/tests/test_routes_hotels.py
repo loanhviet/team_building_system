@@ -6,6 +6,7 @@ from openpyxl import Workbook
 from sqlalchemy import select
 
 from app.core.time import utcnow
+from app.models.enums import EventStatus
 from app.models.hotel import Hotel, Room, RoomAssignment, RoomType
 from app.models.registration import Registration
 from tests.conftest import make_employee
@@ -149,3 +150,99 @@ async def test_room_import_uses_hotel_code_when_room_numbers_repeat(
         )
     ).scalar_one()
     assert assignment.room_id == room_b.id
+
+
+async def test_rooms_import_upserts_instead_of_failing_on_re_import(
+    client, world, auth_headers, db_session
+):
+    """Re-importing a corrected room list must update in place — a blind insert
+    hit uq_room_hotel_number and reported every unchanged row as a raw
+    'UNIQUE constraint failed' error."""
+    hotel, _room_type, _room = await _make_hotel_with_room(db_session, world.event.id)
+
+    def _file(capacity: int, note: str) -> dict:
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["room_number", "capacity", "note"])
+        ws.append(["101", capacity, note])
+        ws.append(["102", 2, ""])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return {"file": ("rooms.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+
+    first = await client.post(
+        f"/api/events/{world.event.id}/hotels/{hotel.id}/rooms/import",
+        headers=auth_headers(world.organizer_user), files=_file(2, "view bien"),
+    )
+    assert first.status_code == 200
+    assert first.json() == {"ok_rows": 2, "error_rows": 0, "errors": []}
+
+    second = await client.post(
+        f"/api/events/{world.event.id}/hotels/{hotel.id}/rooms/import",
+        headers=auth_headers(world.organizer_user), files=_file(3, "view nui"),
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["error_rows"] == 0
+
+    listed = await client.get(
+        f"/api/events/{world.event.id}/hotels/{hotel.id}/rooms",
+        headers=auth_headers(world.organizer_user),
+    )
+    rooms = listed.json()
+    assert len(rooms) == 2, "re-import must not duplicate rooms"
+    updated = next(r for r in rooms if r["room_number"] == "101")
+    assert (updated["capacity"], updated["note"]) == (3, "view nui")
+
+
+async def test_rooms_import_refuses_shrinking_below_occupancy(
+    client, world, auth_headers, db_session
+):
+    hotel, _rt, room = await _make_hotel_with_room(db_session, world.event.id)
+    roommate = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV030"
+    )
+    db_session.add_all([
+        RoomAssignment(
+            event_id=world.event.id, room_id=room.id, employee_id=world.employee.id,
+            source="manual", assigned_at=utcnow(),
+        ),
+        RoomAssignment(
+            event_id=world.event.id, room_id=room.id, employee_id=roommate.employee.id,
+            source="manual", assigned_at=utcnow(),
+        ),
+    ])
+    await db_session.commit()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["room_number", "capacity"])
+    ws.append(["101", 1])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    res = await client.post(
+        f"/api/events/{world.event.id}/hotels/{hotel.id}/rooms/import",
+        headers=auth_headers(world.organizer_user),
+        files={"file": ("rooms.xlsx", buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert res.status_code == 200
+    assert res.json()["error_rows"] == 1
+    assert "đang có 2 người" in res.json()["errors"][0]["error"]
+
+
+async def test_room_assignment_frozen_once_event_completed(
+    client, world, auth_headers, db_session
+):
+    _hotel, _rt, room = await _make_hotel_with_room(db_session, world.event.id)
+    world.event.status = EventStatus.event_completed
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"room_id": room.id, "employee_id": world.employee.id},
+    )
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "event_completed"

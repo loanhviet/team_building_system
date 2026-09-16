@@ -1,15 +1,28 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class GalaConfigIn(BaseModel):
     name: str
     stage_label: str = "SÂN KHẤU"
-    turn_duration_seconds: int = 60
-    hold_ttl_seconds: int = 30
-    seat_quota_rule: str = "by_team_size"
-    fixed_quota: int | None = None
+    turn_duration_seconds: int = Field(default=60, ge=5)
+    hold_ttl_seconds: int = Field(default=30, ge=5)
+    seat_quota_rule: Literal["by_team_size", "fixed"] = "by_team_size"
+    fixed_quota: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _fixed_rule_needs_a_quota(self) -> "GalaConfigIn":
+        # `compute_team_quota` returns `fixed_quota or 0` for this rule, so a
+        # missing/zero value drew a full queue of quota-0 turns where the very
+        # first seat click answered `quota_exceeded` — an unrecoverable Gala
+        # (draw_turns refuses to re-draw once turns exist).
+        if self.seat_quota_rule == "fixed" and not self.fixed_quota:
+            raise ValueError(
+                "Chọn quy tắc 'Hạn mức cố định' thì phải nhập số ghế mỗi Team (tối thiểu 1)"
+            )
+        return self
 
 
 class GalaConfigOut(BaseModel):

@@ -402,4 +402,9 @@ async def gala_ws(
             # clients don't send anything meaningful; just keep the connection open
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
+        # `finally`, not just the WebSocketDisconnect branch: any other error on
+        # the socket used to leave a dead connection in the manager's set for
+        # the life of the process, and every later broadcast re-tried it
         gala_manager.disconnect(event_id, websocket)

@@ -45,3 +45,18 @@ def test_production_accepts_https_and_strong_secret():
         jwt_secret="a-strong-production-secret-that-is-over-32-characters",
     )
     assert settings.app_env == "production"
+
+
+async def test_custom_validator_error_returns_422_not_500(client, world, auth_headers):
+    """A schema-level `model_validator` raising ValueError must come back as the
+    app's normal 422 error body. Pydantic v2 stores the live exception in
+    ctx["error"], which used to make the JSON response itself blow up."""
+    res = await client.put(
+        f"/api/events/{world.event.id}/gala/config",
+        headers=auth_headers(world.organizer_user),
+        json={"name": "Gala Dinner", "seat_quota_rule": "fixed"},
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"]["code"] == "validation_error"
+    assert "Hạn mức cố định" in str(body["error"]["details"])

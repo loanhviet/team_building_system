@@ -414,13 +414,20 @@ async def _flight_preflight(db: DbSession, event_id: int, direction: str) -> dic
             "code": "flight_site_required",
             "message": "Sự kiện có nhiều địa điểm; mọi chuyến bay phải được gán site",
         })
+    # A seat shortfall is a warning, not a blocker. The allocator is built for
+    # exactly this case — it places everyone it can and writes the overflow as
+    # `flight_id=None, flag_reason="no_slot"` rows so BTC can resolve them in the
+    # workbench (BRD §5.3). Blocking the run instead meant a single missing seat
+    # made flight allocation impossible for the other 96 people, and BTC could
+    # never even reach the flagged-case workflow the workbench exists for.
     for site_id in sorted(participant_sites):
         needed = sum(1 for row in participant_rows if row[0] == site_id)
         capacity = sum(f.capacity for f in flights if f.site_id in (None, site_id))
         if capacity < needed:
-            blockers.append({
+            warnings.append({
                 "code": "insufficient_capacity",
-                "message": f"Site #{site_id} thiếu {needed - capacity} chỗ bay",
+                "message": f"Site #{site_id} thiếu {needed - capacity} chỗ bay — "
+                f"{needed - capacity} người sẽ bị gắn cờ 'chưa có chỗ' để BTC xử lý tay",
             })
     if any(row[0] is None for row in participant_rows):
         warnings.append({

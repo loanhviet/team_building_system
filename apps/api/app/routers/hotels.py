@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
@@ -308,13 +308,38 @@ async def import_rooms(
         row = {headers[i]: raw_row[i] for i in range(len(headers)) if headers[i]}
         try:
             async with db.begin_nested():
-                room = Room(
-                    hotel_id=hotel_id,
-                    room_number=str(row["room_number"]).strip(),
-                    capacity=int(row["capacity"]) if row.get("capacity") else 2,
-                    note=str(row["note"]).strip() if row.get("note") else None,
+                room_number = str(row["room_number"]).strip()
+                if not room_number:
+                    raise ValueError("room_number trống")
+                capacity = int(row["capacity"]) if row.get("capacity") else 2
+                # Upsert on (hotel_id, room_number) — the same shape the flight
+                # import uses. Blind-inserting hit the uq_room_hotel_number
+                # constraint, so re-importing a corrected file reported every
+                # unchanged row as a raw "UNIQUE constraint failed: ..." error.
+                existing = await db.execute(
+                    select(Room).where(
+                        Room.hotel_id == hotel_id, Room.room_number == room_number
+                    )
                 )
-                db.add(room)
+                room = existing.scalar_one_or_none()
+                if room is None:
+                    room = Room(hotel_id=hotel_id, room_number=room_number)
+                    db.add(room)
+                else:
+                    occupied = (
+                        await db.execute(
+                            select(func.count(RoomAssignment.id)).where(
+                                RoomAssignment.room_id == room.id
+                            )
+                        )
+                    ).scalar_one()
+                    if capacity < occupied:
+                        raise ValueError(
+                            f"Phòng {room_number} đang có {occupied} người, "
+                            f"không thể đặt sức chứa {capacity}"
+                        )
+                room.capacity = capacity
+                room.note = str(row["note"]).strip() if row.get("note") else None
                 await db.flush()
             ok_rows += 1
         except Exception as exc:  # noqa: BLE001

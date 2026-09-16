@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -36,9 +37,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    # jsonable_encoder, not the raw exc.errors(): for a custom field/model
+    # validator Pydantic v2 puts the live exception object in each error's
+    # `ctx["error"]`, which json.dumps can't serialize — so the response itself
+    # raised TypeError and the client got a 500 with no body instead of a 422.
+    # That silently made `model_validator` unusable anywhere in the app.
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=_error_body("validation_error", "Invalid request", exc.errors()),
+        content=_error_body(
+            "validation_error", "Invalid request", jsonable_encoder(exc.errors())
+        ),
     )
 
 

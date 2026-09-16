@@ -11,11 +11,14 @@ from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.time import utcnow
 from app.models.auth import User
+from app.models.event import Event
 from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.organization import Employee, Site, Team
 from app.models.registration import Registration
 from app.schemas.hotel import ImportResultOut, RoomAssignmentCreate, RoomAssignmentOut
+from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.event_service import assert_event_not_completed
 from app.services.importer.xlsx import load_xlsx, read_xlsx
 from app.services.xlsx_export import xlsx_file
 
@@ -91,6 +94,10 @@ async def list_unassigned(event_id: int, db: DbSession, _user: AdminUser) -> lis
 async def assign_room(
     event_id: int, payload: RoomAssignmentCreate, db: DbSession, user: AdminUser
 ) -> RoomAssignmentOut:
+    # rooms are operational data like flights/buses — a finished event's record
+    # of who slept where isn't editable any more (flights.py/buses.py already
+    # guard this; these three endpoints were the gap)
+    assert_event_not_completed(await master_data.get_or_404(db, Event, event_id))
     room = await db.get(Room, payload.room_id)
     if room is None:
         raise AppError("not_found", "Room not found", status.HTTP_404_NOT_FOUND)
@@ -156,6 +163,7 @@ async def assign_room(
 
 @router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def unassign_room(event_id: int, assignment_id: int, db: DbSession, user: AdminUser) -> None:
+    assert_event_not_completed(await master_data.get_or_404(db, Event, event_id))
     assignment = await db.get(RoomAssignment, assignment_id)
     if assignment is None or assignment.event_id != event_id:
         raise AppError("not_found", "Room assignment not found", status.HTTP_404_NOT_FOUND)
@@ -180,6 +188,7 @@ async def download_room_assignment_template(event_id: int, _user: AdminUser) -> 
 @router.post("/import", response_model=ImportResultOut)
 async def import_room_assignments(event_id: int, db: DbSession, user: AdminUser, file: UploadFile) -> ImportResultOut:
     """Import by employee identity plus stable hotel_code and room_number."""
+    assert_event_not_completed(await master_data.get_or_404(db, Event, event_id))
     content = await read_xlsx(file)
     workbook = load_xlsx(content)
     sheet = workbook.active

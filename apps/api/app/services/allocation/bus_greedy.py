@@ -51,7 +51,19 @@ def bus_compatible(
     registration or the leg requires it; preflight explains the same issue to
     the organizer before a run starts.
     """
-    if pickup_point_id is not None and bus_pickup_point_id != pickup_point_id:
+    # A bus with no pickup point serves everyone (same rule as a flight with no
+    # site in runner.py's `_site_ok`): destination-side legs — airport -> hotel,
+    # hotel -> airport — have no home pickup point at all, while the CBNV's
+    # registration carries their home pickup point on *every* leg. Comparing the
+    # two unconditionally made every destination-leg bus incompatible with
+    # everyone, so those legs allocated zero people and BTC couldn't even start
+    # the run (preflight blocked it). Only a bus actually tied to a pickup point
+    # has to match.
+    if (
+        pickup_point_id is not None
+        and bus_pickup_point_id is not None
+        and bus_pickup_point_id != pickup_point_id
+    ):
         return False
 
     if flight_timing not in ("before_flight", "after_flight"):

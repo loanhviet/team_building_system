@@ -76,10 +76,18 @@ async def draw_turns(db: AsyncSession, event_id: int, config: GalaConfig, team_i
         team_id: await compute_team_quota(db, event_id, team_id, config) for team_id in team_ids
     }
     total_quota = sum(quota_by_team.values())
+    # count real, selectable `gala_seats` rows rather than summing
+    # `GalaTable.seat_count`: seats BTC has blocked (reserved for khách mời)
+    # can never be confirmed by a team, so counting them here let a draw
+    # through that the floor plan can't actually satisfy
     total_seats = (
         await db.execute(
-            select(func.coalesce(func.sum(GalaTable.seat_count), 0)).where(
-                GalaTable.event_id == event_id, GalaTable.is_active.is_(True)
+            select(func.count(GalaSeat.id))
+            .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+            .where(
+                GalaTable.event_id == event_id,
+                GalaTable.is_active.is_(True),
+                GalaSeat.status != "blocked",
             )
         )
     ).scalar_one()
@@ -196,9 +204,17 @@ async def _spawn_makeup_turns(db: AsyncSession, event_id: int) -> list[GalaTurn]
             continue
         seen_teams.add(turn.team_id)
         max_order += 1
+        # full original quota, NOT the remainder: every quota check in this
+        # module (`_confirmed_seat_count`, `_held_or_confirmed_count`) counts a
+        # team's seats cumulatively across the whole event, so a makeup turn
+        # carrying only the remainder made those checks compare a cumulative
+        # count against a partial quota — a team that had confirmed 6 of 12
+        # before its turn ran out got `quota_exceeded` on the first click of
+        # its makeup turn (6 >= 12-6) and could never use it. The admin panel
+        # already derives "còn lại" itself from quota - confirmed.
         new_turn = GalaTurn(
             event_id=event_id, team_id=turn.team_id, order_no=max_order,
-            seat_quota=turn.seat_quota - confirmed, status="waiting", is_makeup=True,
+            seat_quota=turn.seat_quota, status="waiting", is_makeup=True,
         )
         db.add(new_turn)
         spawned.append(new_turn)
@@ -245,6 +261,32 @@ async def start_turn(db: AsyncSession, event_id: int, config: GalaConfig) -> Gal
     return waiting
 
 
+async def _release_team_holds(
+    db: AsyncSession, redis: Redis, event_id: int, team_id: int
+) -> None:
+    """Free every seat this team is still merely *holding*. Called whenever the
+    team's turn ends — skipped or expired — so the next team never inherits a
+    dead hold. Expiry used to rely on each seat's own `hold_expires_at`
+    instead, which only works while `hold_ttl_seconds < turn_duration_seconds`;
+    both are BTC-configurable, so a longer hold TTL parked the previous team's
+    seats into the next team's turn."""
+    result = await db.execute(
+        select(GalaSeat).where(GalaSeat.status == "held", GalaSeat.held_by_team_id == team_id)
+    )
+    for seat in result.scalars().all():
+        table = await db.get(GalaTable, seat.table_id)
+        if table is None or table.event_id != event_id:
+            continue
+        await release_seat_lock(redis, seat.id, team_id)
+        seat.status = "available"
+        seat.held_by_team_id = None
+        seat.hold_expires_at = None
+        seat.version += 1
+        await publish_gala_event(
+            redis, event_id, {"type": "seat_update", "seat_id": seat.id, "status": "available"}
+        )
+
+
 async def skip_turn(
     db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig
 ) -> GalaTurn | None:
@@ -253,21 +295,7 @@ async def skip_turn(
         raise AppError("no_active_turn", "Không có lượt đang chạy để bỏ qua", status.HTTP_400_BAD_REQUEST)
     active.status = "skipped"
 
-    result = await db.execute(
-        select(GalaSeat).where(GalaSeat.status == "held", GalaSeat.held_by_team_id == active.team_id)
-    )
-    for seat in result.scalars().all():
-        table = await db.get(GalaTable, seat.table_id)
-        if table is None or table.event_id != event_id:
-            continue
-        await release_seat_lock(redis, seat.id, active.team_id)
-        seat.status = "available"
-        seat.held_by_team_id = None
-        seat.hold_expires_at = None
-        seat.version += 1
-        await publish_gala_event(
-            redis, event_id, {"type": "seat_update", "seat_id": seat.id, "status": "available"}
-        )
+    await _release_team_holds(db, redis, event_id, active.team_id)
 
     next_turn = await _activate_next_waiting(db, event_id, config)
     await publish_gala_event(
@@ -339,6 +367,9 @@ async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: Ga
     if turn is not None and turn.expires_at is not None and turn.expires_at < now:
         active = turn
         active.status = "expired"
+        # same as skip_turn: the team's turn is over, so its holds go back to
+        # the pool now rather than whenever each seat's own TTL happens to run out
+        await _release_team_holds(db, redis, event_id, active.team_id)
         next_turn = await advance_turn(db, event_id, config)
         await publish_gala_event(
             redis, event_id,
@@ -365,6 +396,11 @@ async def hold_seat(
     table = await db.get(GalaTable, seat.table_id)
     if table is None or table.event_id != event_id:
         raise AppError("not_found", "Ghế không thuộc event này", status.HTTP_404_NOT_FOUND)
+    # the seat map hides inactive tables, but the frontend only hides UI — a
+    # deactivated table's seats are excluded from the drawn capacity, so
+    # letting one be held would overshoot the floor plan
+    if not table.is_active:
+        raise AppError("table_inactive", "Bàn này đã bị vô hiệu hoá", status.HTTP_409_CONFLICT)
     if seat.status != "available":
         raise AppError("seat_unavailable", "Ghế đã có người chọn", status.HTTP_409_CONFLICT)
 

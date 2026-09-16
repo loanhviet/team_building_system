@@ -175,3 +175,37 @@ async def test_turns_flag_teams_without_a_team_leader(client, world, auth_header
     by_team = {t["team_id"]: t for t in resp.json()["turns"]}
     assert by_team[world.team.id]["has_representative"] is True
     assert by_team[no_leader_team.id]["has_representative"] is False
+
+
+async def test_fixed_quota_rule_requires_a_quota(client, world, auth_headers):
+    """`compute_team_quota` returns `fixed_quota or 0` for this rule, so saving
+    it empty drew a queue of quota-0 turns where the first seat click answered
+    quota_exceeded — and draw_turns refuses to re-draw."""
+    bad = await client.put(
+        f"/api/events/{world.event.id}/gala/config",
+        headers=auth_headers(world.organizer_user),
+        json={"name": "Gala Dinner", "seat_quota_rule": "fixed"},
+    )
+    assert bad.status_code == 422
+
+    zero = await client.put(
+        f"/api/events/{world.event.id}/gala/config",
+        headers=auth_headers(world.organizer_user),
+        json={"name": "Gala Dinner", "seat_quota_rule": "fixed", "fixed_quota": 0},
+    )
+    assert zero.status_code == 422
+
+    ok = await client.put(
+        f"/api/events/{world.event.id}/gala/config",
+        headers=auth_headers(world.organizer_user),
+        json={"name": "Gala Dinner", "seat_quota_rule": "fixed", "fixed_quota": 8},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["fixed_quota"] == 8
+
+    unknown = await client.put(
+        f"/api/events/{world.event.id}/gala/config",
+        headers=auth_headers(world.organizer_user),
+        json={"name": "Gala Dinner", "seat_quota_rule": "by_headcount"},
+    )
+    assert unknown.status_code == 422

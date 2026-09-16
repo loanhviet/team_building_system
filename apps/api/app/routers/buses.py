@@ -319,13 +319,21 @@ async def _bus_preflight(db: DbSession, event_id: int, leg_id: int) -> dict:
     if not buses:
         blockers.append({"code": "no_buses", "message": "Chưa có xe cho chặng này"})
     if sum(b.capacity for b in buses) < len(needs):
-        blockers.append({
+        # warning, not a blocker — same reasoning as the flight preflight: the
+        # allocator records the overflow as flagged `bus_id=None` rows for BTC
+        # instead of refusing to run
+        warnings.append({
             "code": "insufficient_capacity",
-            "message": f"Chặng xe thiếu {len(needs) - sum(b.capacity for b in buses)} chỗ",
+            "message": f"Chặng xe thiếu {len(needs) - sum(b.capacity for b in buses)} chỗ — "
+            "số người dôi ra sẽ bị gắn cờ để BTC xếp tay",
         })
     requested_points = {row[1] for row in needs if row[1] is not None}
     served_points = {b.pickup_point_id for b in buses if b.pickup_point_id is not None}
-    missing_points = requested_points - served_points
+    # a bus with no pickup point picks up everyone (see bus_compatible), so one
+    # of those on the leg covers every requested point — destination legs are
+    # entirely made of those and used to be blocked here for all 4 points
+    serves_any_point = any(b.pickup_point_id is None for b in buses)
+    missing_points = set() if serves_any_point else requested_points - served_points
     if missing_points:
         blockers.append({
             "code": "pickup_not_served",
@@ -360,14 +368,23 @@ async def _bus_preflight(db: DbSession, event_id: int, leg_id: int) -> dict:
             ):
                 no_compatible_bus.append(employee_id)
         if missing_flight_data:
-            blockers.append({
+            # A blocker only when flight allocation hasn't run for this direction
+            # at all — that's the case bus_runner itself refuses, because every
+            # candidate would fall through with no flight time to compare
+            # against. When *some* people have flights, the missing few are
+            # normally just the `no_slot` overflow from the flight run; those
+            # come out flagged per-person, so don't stop BTC from allocating the
+            # other 80.
+            issue = {
                 "code": "flight_allocation_required",
                 "message": f"Có {len(missing_flight_data)} người chưa có chuyến/giờ bay phù hợp",
-            })
+            }
+            (blockers if not flight_by_employee else warnings).append(issue)
         if no_compatible_bus:
-            blockers.append({
+            warnings.append({
                 "code": "no_compatible_bus",
-                "message": f"Có {len(no_compatible_bus)} người chưa có xe khớp điểm đón và giờ bay",
+                "message": f"Có {len(no_compatible_bus)} người chưa có xe khớp điểm đón và giờ bay "
+                "— sẽ bị gắn cờ để BTC xếp tay",
             })
     if any(row[1] is None for row in needs):
         warnings.append({

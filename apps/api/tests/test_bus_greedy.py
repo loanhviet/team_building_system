@@ -116,3 +116,29 @@ def test_bus_compatible_blocks_missing_required_timing_data():
     # leg has no flight relationship at all (flight_timing=None) — never
     # blocked on timing regardless of what the raw times would say
     assert bus_compatible(1, DAY.replace(hour=8), 1, DAY.replace(hour=9), None, None)
+
+
+def test_bus_without_pickup_point_serves_any_registered_pickup():
+    # Destination-side legs (airport -> hotel, hotel -> airport) have buses with
+    # no pickup point, while the CBNV's registration carries their *home* pickup
+    # point on every leg. Those buses must still take them — otherwise both
+    # destination legs allocate nobody at all.
+    candidates = [
+        BusCandidate(employee_id=1, team_id=1, flight_id=10, pickup_point_id=4,
+                     flight_arrive_at=DAY.replace(hour=7, minute=50)),
+    ]
+    buses = [BusSlot(bus_id=1, capacity=5, pickup_point_id=None,
+                     depart_at=DAY.replace(hour=8, minute=30))]
+
+    result = allocate_buses(candidates, buses, flight_timing="after_flight")
+
+    assert result.assignments == {1: 1}
+    assert not result.flagged
+
+
+def test_pickup_scoped_bus_still_rejects_other_points():
+    # the relaxation above must not re-open the audited bug: a bus that IS tied
+    # to a pickup point still only takes people registered for that point
+    assert bus_compatible(1, None, 2, None, None, None) is False
+    assert bus_compatible(None, None, 2, None, None, None) is True
+    assert bus_compatible(2, None, 2, None, None, None) is True
