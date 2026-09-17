@@ -396,8 +396,13 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
         >
           {blockMode ? "Đang khoá ghế" : "Khoá ghế"}
         </Button>
-        <Link href={`/gala/${eventId}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Mở sơ đồ CBNV
+        <Link
+          href={`/gala/${eventId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          Mở sơ đồ CBNV ↗
         </Link>
       </div>
 
