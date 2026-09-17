@@ -38,23 +38,35 @@ export function EmployeeEventProvider({ children }: { children: ReactNode }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+    // Key by user id: this ran unscoped before, so switching accounts on the
+    // same browser kept showing the previous user's last-picked event.
+    if (!user) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (stored) setSelectedId(Number(stored));
-    } catch {
-      /* ignore */
+      setSelectedId(null);
+      return;
     }
-  }, []);
-
-  const setEventId = useCallback((next: number) => {
-    setSelectedId(next);
     try {
-      localStorage.setItem(STORAGE_KEY, String(next));
+      const stored = localStorage.getItem(`${STORAGE_KEY}:${user.id}`);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedId(stored ? Number(stored) : null);
     } catch {
-      /* ignore */
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedId(null);
     }
-  }, []);
+  }, [user]);
+
+  const setEventId = useCallback(
+    (next: number) => {
+      setSelectedId(next);
+      if (!user) return;
+      try {
+        localStorage.setItem(`${STORAGE_KEY}:${user.id}`, String(next));
+      } catch {
+        /* ignore */
+      }
+    },
+    [user],
+  );
 
   const { data: mine = [], isLoading } = useQuery({
     queryKey: ["events", "mine"],
