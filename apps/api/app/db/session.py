@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -31,6 +31,19 @@ def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:
 
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def lock_sqlite_write_transaction(session: AsyncSession) -> None:
+    """Acquire SQLite's database-wide write lock before a capacity check.
+
+    `SELECT ... FOR UPDATE` protects the same paths on PostgreSQL, but SQLite
+    ignores it. `BEGIN IMMEDIATE` makes concurrent requests wait before they
+    read occupancy, so the second request sees the first committed assignment.
+    Call this before any query in a capacity-sensitive request.
+    """
+    bind = session.get_bind()
+    if bind.dialect.name == "sqlite":
+        await session.execute(text("BEGIN IMMEDIATE"))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

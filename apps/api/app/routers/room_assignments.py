@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.time import utcnow
+from app.db.session import lock_sqlite_write_transaction
 from app.models.auth import User
 from app.models.event import Event
 from app.models.hotel import Hotel, Room, RoomAssignment
@@ -222,6 +223,7 @@ async def assign_room(
     # rooms are operational data like flights/buses — a finished event's record
     # of who slept where isn't editable any more (flights.py/buses.py already
     # guard this; these three endpoints were the gap)
+    await lock_sqlite_write_transaction(db)
     assert_event_not_completed(await master_data.get_or_404(db, Event, event_id))
     out = await _assign_employee_to_room(
         db, event_id, payload.employee_id, payload.room_id, user.id, payload.accept_soft_warnings
@@ -307,6 +309,7 @@ async def apply_room_suggestions(
     validation as a manual /assign — a stale suggestion (someone else changed
     that room since /suggest ran) fails that one row instead of the whole
     batch, matching the xlsx-import loop's per-row error pattern."""
+    await lock_sqlite_write_transaction(db)
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
     applied = 0

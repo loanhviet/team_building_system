@@ -12,6 +12,7 @@ from app.core.deps import DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.time import utcnow
+from app.db.session import lock_sqlite_write_transaction
 from app.models.auth import User
 from app.models.bus import Bus, BusAssignment
 from app.models.event import Event, PickupPoint, TransportLeg
@@ -478,6 +479,7 @@ async def adjust_bus_assignments(
     user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
+    await lock_sqlite_write_transaction(db)
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
     target_bus = (

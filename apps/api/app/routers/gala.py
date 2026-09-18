@@ -10,6 +10,7 @@ from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.security import decode_access_token
 from app.core.ws_manager import gala_manager, publish_gala_event
+from app.db.session import lock_sqlite_write_transaction
 from app.models.auth import User
 from app.models.enums import EventStatus, UserRole
 from app.models.event import Event
@@ -316,6 +317,7 @@ async def hold(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaSeat:
     _require_representative(user)
+    await lock_sqlite_write_transaction(db)
     team_id = await _my_team_id(db, user)
     config = await _get_or_create_config(db, event_id)
     seat = await hold_seat(db, queue, event_id, config, seat_id, team_id)
@@ -332,6 +334,7 @@ async def confirm(
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaSeat:
     _require_representative(user)
+    await lock_sqlite_write_transaction(db)
     team_id = await _my_team_id(db, user)
     config = await _get_or_create_config(db, event_id)
     seat = await confirm_seat(db, queue, event_id, config, seat_id, team_id)
