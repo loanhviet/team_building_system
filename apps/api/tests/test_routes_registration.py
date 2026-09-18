@@ -8,7 +8,10 @@ from datetime import timedelta
 from openpyxl import load_workbook
 
 from app.core.time import utcnow
+from app.models.bus import Bus, BusAssignment
 from app.models.enums import EventStatus
+from app.models.flight import Flight, FlightAssignment
+from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.notification import EmailOutbox
 from app.models.registration import Registration
 from app.services.event_service import upsert_setting
@@ -61,6 +64,42 @@ async def test_edit_blocked_before_registration_open_time(
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "registration_not_open"
+
+
+async def test_cancel_removes_locked_operational_assignments(
+    client, world, auth_headers, db_session
+):
+    from app.models.event import TransportLeg
+
+    flight = Flight(event_id=world.event.id, flight_code="VN1", direction="outbound", capacity=10)
+    leg = TransportLeg(
+        event_id=world.event.id, code="L1", name="Ra sân bay", direction="outbound"
+    )
+    hotel = Hotel(event_id=world.event.id, code="H1", name="Hotel")
+    db_session.add_all([flight, leg, hotel])
+    await db_session.flush()
+    room = Room(hotel_id=hotel.id, room_number="101", capacity=2)
+    bus = Bus(event_id=world.event.id, leg_id=leg.id, code="B1", capacity=10)
+    db_session.add_all([room, bus])
+    await db_session.flush()
+    db_session.add_all([
+        FlightAssignment(event_id=world.event.id, flight_id=flight.id, employee_id=world.employee.id, direction="outbound", is_locked=True),
+        RoomAssignment(event_id=world.event.id, room_id=room.id, employee_id=world.employee.id),
+        BusAssignment(event_id=world.event.id, leg_id=leg.id, bus_id=bus.id, employee_id=world.employee.id, is_locked=True),
+    ])
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/cancel",
+        headers=auth_headers(world.employee_user), json={"reason": "Không tham gia được"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "cancelled"
+    from sqlalchemy import select
+
+    assert (await db_session.execute(select(FlightAssignment))).scalars().all() == []
+    assert (await db_session.execute(select(RoomAssignment))).scalars().all() == []
+    assert (await db_session.execute(select(BusAssignment))).scalars().all() == []
 
 
 async def test_latest_registration_survives_registration_closed(client, world, auth_headers, db_session):

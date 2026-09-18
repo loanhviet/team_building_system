@@ -7,7 +7,7 @@ from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
@@ -15,8 +15,11 @@ from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.models.auth import User
+from app.models.bus import BusAssignment
 from app.models.enums import EventStatus
 from app.models.event import Event, PickupPoint, Shift, TransportLeg
+from app.models.flight import FlightAssignment
+from app.models.hotel import RoomAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.schemas.registration import (
@@ -272,9 +275,28 @@ async def cancel_my_registration(
     reg = await get_or_create_registration(db, event_id, employee.id)
     assert_can_edit(event, reg)
     cancel_registration(reg, payload.reason)
+    # A cancelled attendee must stop consuming operational capacity right
+    # away. In particular, manual (locked) assignments are not eligible for a
+    # later allocation run to clean up on its own.
+    await db.execute(
+        delete(FlightAssignment).where(
+            FlightAssignment.event_id == event_id, FlightAssignment.employee_id == employee.id
+        )
+    )
+    await db.execute(
+        delete(RoomAssignment).where(
+            RoomAssignment.event_id == event_id, RoomAssignment.employee_id == employee.id
+        )
+    )
+    await db.execute(
+        delete(BusAssignment).where(
+            BusAssignment.event_id == event_id, BusAssignment.employee_id == employee.id
+        )
+    )
     await record_audit(
         db, actor_user_id=user.id, action="cancel", entity_type="registration", entity_id=reg.id,
         reason=payload.reason, event_id=event_id,
+        after={"operational_assignments_removed": True},
     )
     await db.commit()
     return await _registration_out(db, reg)

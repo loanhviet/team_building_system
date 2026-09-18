@@ -184,7 +184,7 @@ async def export_employees(
     wb = Workbook()
     ws = wb.active
     ws.title = "CBNV"
-    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone", "position", "is_active"])
+    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone", "gender", "position", "is_active"])
     for emp in result.scalars().all():
         ws.append([
             emp.employee_code or "",
@@ -193,6 +193,7 @@ async def export_employees(
             emp.team.code if emp.team else "",
             emp.site.code if emp.site else "",
             emp.phone or "",
+            emp.gender.value if emp.gender else "",
             emp.position or "",
             "1" if emp.is_active else "0",
         ])
@@ -211,8 +212,8 @@ async def download_employee_template(_user: AdminUser) -> StreamingResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "CBNV"
-    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone", "position", "is_active"])
-    ws.append(["NV999", "Nguyen Van A", "nva@company.vn", "MKT", "HN", "0901234567", "Chuyên viên", 1])
+    ws.append(["employee_code", "full_name", "email", "team_code", "site_code", "phone", "gender", "position", "is_active"])
+    ws.append(["NV999", "Nguyen Van A", "nva@company.vn", "MKT", "HN", "0901234567", "male", "Chuyên viên", 1])
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)

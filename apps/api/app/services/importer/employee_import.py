@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.security import generate_temporary_password, hash_password
 from app.models.auth import User
-from app.models.enums import UserRole
+from app.models.enums import Gender, UserRole
 from app.models.organization import Employee, Site, Team
 from app.services.notification.email_service import enqueue_email
 
@@ -17,6 +17,7 @@ KNOWN_HEADERS = {
     "team_code",
     "site_code",
     "phone",
+    "gender",
     "position",
     "is_active",
 }
@@ -85,6 +86,12 @@ async def _upsert_employee_and_user(db: AsyncSession, row: dict) -> int | None:
     site_id = await _resolve_site_id(db, row.get("site_code"))
     phone = str(row["phone"]).strip() if row.get("phone") else None
     position = str(row["position"]).strip() if row.get("position") else None
+    gender = None
+    if row.get("gender") not in (None, ""):
+        try:
+            gender = Gender(str(row["gender"]).strip().lower())
+        except ValueError as exc:
+            raise RowError("gender phải là male, female hoặc other") from exc
     active_value = row.get("is_active")
     is_active: bool | None = None
     if active_value not in (None, ""):
@@ -103,6 +110,7 @@ async def _upsert_employee_and_user(db: AsyncSession, row: dict) -> int | None:
             team_id=team_id,
             site_id=site_id,
             phone=phone,
+            gender=gender,
             position=position,
             is_active=True if is_active is None else is_active,
         )
@@ -113,6 +121,8 @@ async def _upsert_employee_and_user(db: AsyncSession, row: dict) -> int | None:
         employee.team_id = team_id if team_id is not None else employee.team_id
         employee.site_id = site_id if site_id is not None else employee.site_id
         employee.phone = phone or employee.phone
+        if gender is not None:
+            employee.gender = gender
         employee.position = position if position is not None else employee.position
         if is_active is not None:
             employee.is_active = is_active

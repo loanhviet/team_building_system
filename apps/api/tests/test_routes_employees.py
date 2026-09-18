@@ -48,6 +48,16 @@ async def test_employee_deactivation_disables_linked_account(
     assert account.is_active is False
 
 
+async def test_employee_gender_can_be_updated(client, world, auth_headers):
+    response = await client.patch(
+        f"/api/employees/{world.employee.id}",
+        headers=auth_headers(world.organizer_user),
+        json={"gender": "female"},
+    )
+    assert response.status_code == 200
+    assert response.json()["gender"] == "female"
+
+
 async def test_employee_import_accepts_xlsx_only(client, world, auth_headers):
     response = await client.post(
         "/api/employees/import",

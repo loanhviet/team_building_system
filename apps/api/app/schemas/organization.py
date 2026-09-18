@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr
 
+from app.models.enums import Gender
+
 
 class TeamCreate(BaseModel):
     code: str
@@ -51,7 +53,7 @@ class EmployeeCreate(BaseModel):
     team_id: int | None = None
     site_id: int | None = None
     phone: str | None = None
-    gender: str | None = None
+    gender: Gender | None = None
     position: str | None = None
     send_welcome: bool = False
 
@@ -63,7 +65,7 @@ class EmployeeUpdate(BaseModel):
     team_id: int | None = None
     site_id: int | None = None
     phone: str | None = None
-    gender: str | None = None
+    gender: Gender | None = None
     position: str | None = None
     is_active: bool | None = None
 
