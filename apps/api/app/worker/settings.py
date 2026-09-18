@@ -14,7 +14,7 @@ from app.worker.tasks.gala import expire_gala_holds_task
 from app.worker.tasks.imports import import_employees_task
 from app.worker.tasks.notifications import remind_unsubmitted_task, send_bulk_emails_task
 from app.worker.tasks.rag import reindex_rag_task
-from app.worker.tasks.system import ping
+from app.worker.tasks.system import ping, worker_heartbeat_task
 
 settings = get_settings()
 
@@ -43,6 +43,7 @@ class WorkerSettings:
         arq_func(send_email, max_tries=3),
     ]
     cron_jobs: ClassVar[list] = [
+        cron(worker_heartbeat_task, second=set(range(0, 60, 5))),
         cron(expire_gala_holds_task, second=set(range(0, 60, 5))),
     ]
     on_startup = startup

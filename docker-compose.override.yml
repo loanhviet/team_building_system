@@ -14,7 +14,9 @@ services:
     volumes:
       - ./apps/api:/app
       - ./data:/data
-    command: arq app.worker.settings.WorkerSettings --watch .
+    # Keep the same Redis liveness watchdog in development; code changes still
+    # take effect after Docker restarts the worker.
+    command: python -m app.worker.supervisor
 
   web:
     build:

@@ -82,7 +82,10 @@ services:
       # missing tables on a fresh DB if it started first.
       api:
         condition: service_healthy
-    command: arq app.worker.settings.WorkerSettings
+    # The supervisor exits if ARQ loses Redis and stops consuming work; the
+    # restart policy then brings it back instead of leaving jobs queued forever.
+    command: python -m app.worker.supervisor
+    restart: unless-stopped
 
   web:
     build:
