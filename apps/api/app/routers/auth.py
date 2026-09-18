@@ -107,7 +107,7 @@ async def me(user: CurrentUser) -> UserOut:
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
-    payload: ChangePasswordRequest, user: CurrentUser, db: DbSession
+    payload: ChangePasswordRequest, response: Response, user: CurrentUser, db: DbSession
 ) -> None:
     if not verify_password(payload.current_password, user.password_hash):
         raise AppError(
@@ -116,4 +116,9 @@ async def change_password(
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False
     await revoke_all_refresh_tokens(db, user.id)
+    # Revoking every refresh token used to revoke the cookie belonging to this
+    # very browser as well. Issue its replacement in the same transaction so a
+    # reload immediately after changing a password remains signed in.
+    _access_token, refresh_token = await issue_tokens(db, user, None)
     await db.commit()
+    _set_refresh_cookie(response, refresh_token)

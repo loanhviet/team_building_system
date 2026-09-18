@@ -2,7 +2,7 @@ from collections.abc import Callable, Coroutine
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, Header, status
+from fastapi import Depends, Header, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -16,6 +16,7 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 async def get_current_user(
     db: DbSession,
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> User:
     if not authorization or not authorization.startswith("Bearer "):
@@ -33,6 +34,18 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise AppError("unauthorized", "User not found or inactive", status.HTTP_401_UNAUTHORIZED)
+    # A temporary password is only for getting into the password-change screen.
+    # Keep this guard at the authentication boundary so a newly added protected
+    # endpoint cannot accidentally bypass the policy.
+    if user.must_change_password and request.url.path not in {
+        "/api/auth/me",
+        "/api/auth/change-password",
+    }:
+        raise AppError(
+            "password_change_required",
+            "Bạn cần đổi mật khẩu trước khi sử dụng các chức năng khác",
+            status.HTTP_403_FORBIDDEN,
+        )
     return user
 
 
