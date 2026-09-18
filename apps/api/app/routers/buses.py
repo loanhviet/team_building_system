@@ -431,7 +431,7 @@ async def run_bus_allocation_endpoint(
 
     run = AllocationRun(
         event_id=event_id, type="bus",
-        params_json={"leg_id": payload.leg_id, "preset": payload.preset},
+        params_json={"leg_id": payload.leg_id, "preset": payload.preset or "event_settings"},
         status="running", created_by=user.id,
     )
     db.add(run)
@@ -451,7 +451,7 @@ async def run_bus_allocation_endpoint(
 
     arq_job = await queue.enqueue_job(
         "run_bus_allocation_task", job.id, run.id, event_id, payload.leg_id,
-        preset_weights("bus", payload.preset),
+        preset_weights("bus", payload.preset) if payload.preset else None,
     )
     if arq_job is not None:
         job.arq_job_id = arq_job.job_id
@@ -480,7 +480,13 @@ async def adjust_bus_assignments(
 ) -> dict:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
-    target_bus = await master_data.get_or_404(db, Bus, payload.bus_id, event_id=event_id)
+    target_bus = (
+        await db.execute(
+            select(Bus).where(Bus.id == payload.bus_id, Bus.event_id == event_id).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if target_bus is None:
+        raise AppError("not_found", "Bus not found", status.HTTP_404_NOT_FOUND)
 
     employee_ids = set(payload.employee_ids)
     if payload.team_id is not None:
@@ -583,7 +589,7 @@ async def adjust_bus_assignments(
             BusAssignment.event_id == event_id,
             BusAssignment.leg_id == target_bus.leg_id,
             BusAssignment.bus_id == target_bus.id,
-        )
+        ).with_for_update()
     )
     current_on_target = {a.employee_id for a in result.scalars().all()}
     moving_in = employee_ids - current_on_target
@@ -603,7 +609,7 @@ async def adjust_bus_assignments(
                 BusAssignment.event_id == event_id,
                 BusAssignment.leg_id == target_bus.leg_id,
                 BusAssignment.employee_id == employee_id,
-            )
+            ).with_for_update()
         )
         assignment = result.scalar_one_or_none()
         before = {"bus_id": assignment.bus_id} if assignment else None

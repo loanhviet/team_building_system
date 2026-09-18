@@ -80,7 +80,7 @@ export type EventSettings = {
   } & Record<string, number>;
 };
 
-export type AllocationPreset = "balanced" | "shift_first" | "team_first";
+export type AllocationPreset = "event_settings" | "balanced" | "shift_first" | "team_first";
 
 export type AllocationPreflight = {
   ready: boolean;

@@ -344,3 +344,35 @@ async def test_suggest_and_apply_never_mixes_genders(client, world, auth_headers
         f"/api/events/{world.event.id}/room-assignments", headers=auth_headers(world.organizer_user)
     )
     assert len(listed.json()) == 2
+
+
+async def test_apply_suggestions_rejects_btc_edited_gender_mismatch(
+    client, world, auth_headers, db_session
+):
+    _hotel, _rt, room = await _make_hotel_with_room(db_session, world.event.id)
+    world.employee.gender = Gender.male
+    woman = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV052", gender=Gender.female
+    )
+    db_session.add(
+        Registration(
+            event_id=world.event.id, employee_id=woman.employee.id, status="submitted",
+            is_participating=True,
+        )
+    )
+    await db_session.commit()
+
+    first = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/assign",
+        headers=auth_headers(world.organizer_user),
+        json={"employee_id": world.employee.id, "room_id": room.id},
+    )
+    assert first.status_code == 200
+    applied = await client.post(
+        f"/api/events/{world.event.id}/room-assignments/apply-suggestions",
+        headers=auth_headers(world.organizer_user),
+        json={"assignments": [{"employee_id": woman.employee.id, "room_id": room.id}]},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["applied"] == 0
+    assert applied.json()["failed"][0]["employee_id"] == woman.employee.id

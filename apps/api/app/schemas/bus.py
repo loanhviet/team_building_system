@@ -65,7 +65,8 @@ class BusOut(BaseModel):
 
 class BusAllocationRequest(BaseModel):
     leg_id: int
-    preset: Literal["balanced", "shift_first", "team_first"] = "balanced"
+    # Omit preset to use the BTC-managed Event Settings weights.
+    preset: Literal["balanced", "shift_first", "team_first"] | None = None
 
 
 class BusAssignmentOut(BaseModel):

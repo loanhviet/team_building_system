@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from app.core.time import utcnow
 from app.models.audit import AuditLog
+from app.models.enums import EventStatus
 from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Site
 from app.models.registration import Registration
@@ -53,6 +54,26 @@ async def test_adjust_over_capacity_cannot_be_forced(client, world, auth_headers
     )
     logs = result.scalars().all()
     assert len(logs) == 0
+
+
+async def test_allocation_uses_event_settings_when_preset_is_omitted(
+    client, world, auth_headers, db_session
+):
+    world.event.status = EventStatus.registration_closed
+    db_session.add(
+        Flight(event_id=world.event.id, flight_code="VN-SET", direction="outbound", capacity=5)
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/events/{world.event.id}/allocations/flight",
+        headers=auth_headers(world.organizer_user),
+        json={"direction": "outbound"},
+    )
+    assert response.status_code == 202
+    name, args, _kwargs = client.fake_queue.jobs[-1]  # type: ignore[attr-defined]
+    assert name == "run_flight_allocation_task"
+    assert args[-1] is None
 
 
 async def test_adjust_rejects_employee_not_registered_in_event(client, world, auth_headers, db_session):

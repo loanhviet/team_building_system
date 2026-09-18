@@ -123,10 +123,13 @@ async def _activate_turn(db: AsyncSession, config: GalaConfig, turn: GalaTurn) -
     turn.expires_at = utcnow() + timedelta(seconds=config.turn_duration_seconds)
 
 
-async def get_active_turn(db: AsyncSession, event_id: int) -> GalaTurn | None:
-    result = await db.execute(
-        select(GalaTurn).where(GalaTurn.event_id == event_id, GalaTurn.status == "active")
-    )
+async def get_active_turn(
+    db: AsyncSession, event_id: int, *, for_update: bool = False
+) -> GalaTurn | None:
+    stmt = select(GalaTurn).where(GalaTurn.event_id == event_id, GalaTurn.status == "active")
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
 
@@ -363,7 +366,7 @@ async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: Ga
             redis, event_id, {"type": "seat_update", "seat_id": seat.id, "status": "available"}
         )
 
-    turn = await get_active_turn(db, event_id)
+    turn = await get_active_turn(db, event_id, for_update=True)
     if turn is not None and turn.expires_at is not None and turn.expires_at < now:
         active = turn
         active.status = "expired"
@@ -386,11 +389,15 @@ async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: Ga
 async def hold_seat(
     db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig, seat_id: int, team_id: int
 ) -> GalaSeat:
-    turn = await get_active_turn(db, event_id)
+    # The active turn is the per-team quota mutex. Locking it before counting
+    # seats serializes simultaneous holds/confirms from different leaders.
+    turn = await get_active_turn(db, event_id, for_update=True)
     if turn is None or turn.team_id != team_id:
         raise AppError("not_your_turn", "Chưa đến lượt của Team bạn", status.HTTP_403_FORBIDDEN)
 
-    seat = await db.get(GalaSeat, seat_id)
+    seat = (
+        await db.execute(select(GalaSeat).where(GalaSeat.id == seat_id).with_for_update())
+    ).scalar_one_or_none()
     if seat is None:
         raise AppError("not_found", "Ghế không tồn tại", status.HTTP_404_NOT_FOUND)
     table = await db.get(GalaTable, seat.table_id)
@@ -454,7 +461,9 @@ async def confirm_seat(
     db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig, seat_id: int,
     team_id: int, employee_id: int | None = None,
 ) -> GalaSeat:
-    turn = await get_active_turn(db, event_id)
+    # See hold_seat: lock the team's active turn before reading its confirmed
+    # count, otherwise concurrent confirms can both pass the quota check.
+    turn = await get_active_turn(db, event_id, for_update=True)
     if turn is None or turn.team_id != team_id:
         raise AppError("not_your_turn", "Chưa đến lượt của Team bạn", status.HTTP_403_FORBIDDEN)
 
@@ -464,7 +473,9 @@ async def confirm_seat(
             "quota_exceeded", f"Team đã chọn đủ {turn.seat_quota} ghế", status.HTTP_409_CONFLICT
         )
 
-    seat = await db.get(GalaSeat, seat_id)
+    seat = (
+        await db.execute(select(GalaSeat).where(GalaSeat.id == seat_id).with_for_update())
+    ).scalar_one_or_none()
     if seat is None or seat.status != "held" or seat.held_by_team_id != team_id:
         raise AppError("seat_not_held", "Ghế không ở trạng thái bạn đang giữ", status.HTTP_409_CONFLICT)
 

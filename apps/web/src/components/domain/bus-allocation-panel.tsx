@@ -78,7 +78,7 @@ const EMPTY_BUS = {
 export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const [legId, setLegId] = useState<number | null>(null);
-  const [preset, setPreset] = useState<AllocationPreset>("balanced");
+  const [preset, setPreset] = useState<AllocationPreset>("event_settings");
   const [focusBusId, setFocusBusId] = useState<number | "all">("all");
   const [busDialogOpen, setBusDialogOpen] = useState(false);
   const [editingBus, setEditingBus] = useState<Bus | null>(null);
@@ -230,7 +230,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
     mutationFn: () =>
       apiFetch<AllocationEnqueued>(`/api/events/${eventId}/allocations/bus`, {
         method: "POST",
-        body: JSON.stringify({ leg_id: currentLegId, preset }),
+        body: JSON.stringify({ leg_id: currentLegId, ...(preset === "event_settings" ? {} : { preset }) }),
       }),
     onSuccess: (data) => {
       toast.info("Đang chạy phân xe...");

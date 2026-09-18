@@ -12,11 +12,12 @@ export function AllocationPresetSelect({
   onChange: (value: AllocationPreset) => void;
 }) {
   return (
-    <Select value={value} onValueChange={(v) => onChange((v ?? "balanced") as AllocationPreset)}>
+    <Select value={value} onValueChange={(v) => onChange((v ?? "event_settings") as AllocationPreset)}>
       <SelectTrigger className="w-52" aria-label="Chiến lược phân bổ">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value="event_settings">Theo cấu hình sự kiện</SelectItem>
         <SelectItem value="balanced">Cân bằng</SelectItem>
         <SelectItem value="shift_first">Ưu tiên đúng ca/chuyến</SelectItem>
         <SelectItem value="team_first">Ưu tiên cùng đội</SelectItem>

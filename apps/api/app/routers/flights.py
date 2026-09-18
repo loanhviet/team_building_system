@@ -477,7 +477,7 @@ async def run_flight_allocation_endpoint(
     run = AllocationRun(
         event_id=event_id,
         type="flight",
-        params_json={"direction": payload.direction, "preset": payload.preset},
+        params_json={"direction": payload.direction, "preset": payload.preset or "event_settings"},
         status="running",
         created_by=user.id,
     )
@@ -499,7 +499,7 @@ async def run_flight_allocation_endpoint(
 
     arq_job = await queue.enqueue_job(
         "run_flight_allocation_task", job.id, run.id, event_id, payload.direction,
-        preset_weights("flight", payload.preset),
+        preset_weights("flight", payload.preset) if payload.preset else None,
     )
     if arq_job is not None:
         job.arq_job_id = arq_job.job_id
@@ -529,7 +529,18 @@ async def adjust_flight_assignments(
 ) -> dict:
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
-    target_flight = await master_data.get_or_404(db, Flight, payload.flight_id, event_id=event_id)
+    # Lock the resource before measuring capacity. Every manual move into a
+    # flight uses this same lock, preventing concurrent requests from all
+    # accepting the same final seat.
+    target_flight = (
+        await db.execute(
+            select(Flight)
+            .where(Flight.id == payload.flight_id, Flight.event_id == event_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if target_flight is None:
+        raise AppError("not_found", "Flight not found", status.HTTP_404_NOT_FOUND)
 
     employee_ids = set(payload.employee_ids)
     if payload.team_id is not None:
@@ -595,7 +606,7 @@ async def adjust_flight_assignments(
             FlightAssignment.event_id == event_id,
             FlightAssignment.direction == target_flight.direction,
             FlightAssignment.flight_id == target_flight.id,
-        )
+        ).with_for_update()
     )
     current_on_target = {a.employee_id for a in result.scalars().all()}
     moving_in = employee_ids - current_on_target
@@ -635,7 +646,7 @@ async def adjust_flight_assignments(
                 FlightAssignment.event_id == event_id,
                 FlightAssignment.direction == target_flight.direction,
                 FlightAssignment.employee_id == employee_id,
-            )
+            ).with_for_update()
         )
         assignment = result.scalar_one_or_none()
         before = (

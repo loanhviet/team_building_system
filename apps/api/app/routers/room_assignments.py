@@ -123,7 +123,12 @@ async def _assign_employee_to_room(
     """Core of a single room assignment — shared by the single-pick workbench
     action and by applying a batch of accepted suggestions, so both go
     through the exact same capacity/registration/gender checks."""
-    room = await db.get(Room, room_id)
+    # Every assignment into this room takes the same row lock. The capacity
+    # calculation and write below are therefore one critical section on DBs
+    # with row-level locks (our production database).
+    room = (
+        await db.execute(select(Room).where(Room.id == room_id).with_for_update())
+    ).scalar_one_or_none()
     if room is None:
         raise AppError("not_found", "Room not found", status.HTTP_404_NOT_FOUND)
     hotel = await db.get(Hotel, room.hotel_id)
@@ -153,6 +158,7 @@ async def _assign_employee_to_room(
         select(RoomAssignment)
         .options(selectinload(RoomAssignment.employee))
         .where(RoomAssignment.room_id == room.id)
+        .with_for_update()
     )
     occupants = result.scalars().all()
     already_here = any(a.employee_id == employee_id for a in occupants)
@@ -309,7 +315,7 @@ async def apply_room_suggestions(
         try:
             async with db.begin_nested():
                 await _assign_employee_to_room(
-                    db, event_id, item.employee_id, item.room_id, user.id, accept_soft_warnings=True
+                    db, event_id, item.employee_id, item.room_id, user.id, accept_soft_warnings=False
                 )
             applied += 1
         except AppError as exc:

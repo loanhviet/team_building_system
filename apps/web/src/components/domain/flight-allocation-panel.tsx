@@ -79,7 +79,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
-  const [preset, setPreset] = useState<AllocationPreset>("balanced");
+  const [preset, setPreset] = useState<AllocationPreset>("event_settings");
   const [focusFlightId, setFocusFlightId] = useState<number | "all">("all");
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -161,7 +161,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     mutationFn: () =>
       apiFetch<AllocationEnqueued>(`/api/events/${eventId}/allocations/flight`, {
         method: "POST",
-        body: JSON.stringify({ direction, preset }),
+        body: JSON.stringify({ direction, ...(preset === "event_settings" ? {} : { preset }) }),
       }),
     onSuccess: (data) => {
       toast.info("Đang chạy phân bổ...");
