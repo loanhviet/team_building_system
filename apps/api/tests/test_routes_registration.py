@@ -6,6 +6,7 @@ import io
 from datetime import timedelta
 
 from openpyxl import load_workbook
+from sqlalchemy import select
 
 from app.core.time import utcnow
 from app.models.bus import Bus, BusAssignment
@@ -50,6 +51,50 @@ async def test_edit_blocked_after_registration_closed(client, world, auth_header
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "registration_closed"
+
+
+async def test_viewing_registration_never_creates_a_draft(client, world, auth_headers, db_session):
+    await db_session.delete(world.registration)
+    await db_session.commit()
+
+    response = await client.get(
+        f"/api/events/{world.event.id}/registrations/me", headers=auth_headers(world.employee_user)
+    )
+    assert response.status_code == 200
+    assert response.json() is None
+    rows = (
+        await db_session.execute(
+            select(Registration).where(Registration.event_id == world.event.id)
+        )
+    ).scalars().all()
+    assert rows == []
+
+
+async def test_explicit_draft_endpoint_creates_registration(client, world, auth_headers, db_session):
+    await db_session.delete(world.registration)
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/draft",
+        headers=auth_headers(world.employee_user),
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "draft"
+
+
+async def test_registration_note_and_cancel_reason_have_length_limits(client, world, auth_headers):
+    note = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"wish_note": "x" * 2001},
+    )
+    assert note.status_code == 422
+    reason = await client.post(
+        f"/api/events/{world.event.id}/registrations/me/cancel",
+        headers=auth_headers(world.employee_user),
+        json={"reason": "x" * 501},
+    )
+    assert reason.status_code == 422
 
 
 async def test_edit_blocked_before_registration_open_time(

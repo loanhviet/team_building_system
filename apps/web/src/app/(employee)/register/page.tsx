@@ -63,12 +63,12 @@ function SectionTitle({
 
 export default function RegisterPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { event, eventId, canRegister, isLoading: eventLoading } = useEmployeeEvent();
   const isOpenForEditing = canRegister;
 
-  // The scoped endpoint auto-creates a draft row — only call it while
-  // registration is actually open. Once closed, `latestReg` (already fetched
-  // above) is the registration to show, read-only.
+  // Reading a registration never creates a draft. A draft is only created by
+  // the explicit "Bắt đầu đăng ký" action below.
   const {
     data: registration,
     isLoading: registrationLoading,
@@ -77,7 +77,7 @@ export default function RegisterPage() {
     queryKey: ["events", eventId, "registrations", "me", isOpenForEditing],
     queryFn: () =>
       isOpenForEditing
-        ? apiFetch<Registration>(`/api/events/${eventId}/registrations/me`)
+        ? apiFetch<Registration | null>(`/api/events/${eventId}/registrations/me`)
         : apiFetch<Registration | null>(`/api/registrations/me?event_id=${eventId}`),
     enabled: !!eventId,
   });
@@ -112,6 +112,15 @@ export default function RegisterPage() {
     enabled: !!eventId && isOpenForEditing,
   });
 
+  const createDraftMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<Registration>(`/api/events/${eventId}/registrations/me/draft`, { method: "POST" }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["events", eventId, "registrations", "me"] }),
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : "Không thể bắt đầu đăng ký"),
+  });
+
   const isLoading = eventLoading;
 
   if (isLoading) {
@@ -139,8 +148,22 @@ export default function RegisterPage() {
     );
   }
 
-  if (isOpenForEditing && (registrationLoading || !registration)) {
+  if (isOpenForEditing && registrationLoading) {
     return <PageSkeleton rows={3} />;
+  }
+
+  if (isOpenForEditing && !registration) {
+    return (
+      <EmptyState
+        title="Bạn chưa bắt đầu đăng ký"
+        description="Bắt đầu để điền thông tin tham gia chương trình."
+        action={
+          <Button onClick={() => createDraftMutation.mutate()} disabled={createDraftMutation.isPending}>
+            Bắt đầu đăng ký
+          </Button>
+        }
+      />
+    );
   }
 
   if (!effectiveRegistration) {

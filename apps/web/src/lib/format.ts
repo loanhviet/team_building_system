@@ -1,11 +1,11 @@
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString("vi-VN");
+  return new Date(value).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 }
 
 export function formatTime(value: string | null | undefined): string {
   if (!value) return "—";
-  return new Date(value).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  return new Date(value).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh" });
 }
 
 export function formatDate(value: string | null | undefined): string {
@@ -14,7 +14,7 @@ export function formatDate(value: string | null | undefined): string {
     const [y, m, d] = value.split("-").map(Number);
     return new Date(y, m - 1, d).toLocaleDateString("vi-VN");
   }
-  return new Date(value).toLocaleDateString("vi-VN");
+  return new Date(value).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 }
 
 export function formatLongDate(value: string | null | undefined): string {
@@ -28,6 +28,7 @@ export function formatLongDate(value: string | null | undefined): string {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: "Asia/Ho_Chi_Minh",
   });
 }
 

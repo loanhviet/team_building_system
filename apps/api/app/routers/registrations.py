@@ -127,10 +127,31 @@ async def get_my_latest_registration(
     return await _registration_out(db, reg) if reg is not None else None
 
 
-@router.get("/me", response_model=RegistrationOut)
-async def get_my_registration(event_id: int, db: DbSession, user: CurrentUser) -> RegistrationOut:
+@router.get("/me", response_model=RegistrationOut | None)
+async def get_my_registration(
+    event_id: int, db: DbSession, user: CurrentUser
+) -> RegistrationOut | None:
+    """Read a registration without creating a draft as a side effect."""
     employee = await _current_employee(db, user)
     await master_data.get_or_404(db, Event, event_id)
+    result = await db.execute(
+        select(Registration).where(
+            Registration.event_id == event_id, Registration.employee_id == employee.id
+        )
+    )
+    reg = result.scalar_one_or_none()
+    return await _registration_out(db, reg) if reg is not None else None
+
+
+@router.post("/me/draft", response_model=RegistrationOut, status_code=status.HTTP_201_CREATED)
+async def create_my_registration_draft(
+    event_id: int, db: DbSession, user: CurrentUser
+) -> RegistrationOut:
+    """Create a draft only after the employee explicitly starts the form."""
+    employee = await _current_employee(db, user)
+    event = await master_data.get_or_404(db, Event, event_id)
+    # Do the state check before get_or_create so closed events stay untouched.
+    assert_can_edit(event, Registration(status="draft"))
     reg = await get_or_create_registration(db, event_id, employee.id)
     await db.commit()
     return await _registration_out(db, reg)
@@ -142,6 +163,9 @@ async def update_my_registration(
 ) -> RegistrationOut:
     employee = await _current_employee(db, user)
     event = await master_data.get_or_404(db, Event, event_id)
+    # Avoid materialising drafts for requests that are rejected because the
+    # event is closed; an explicit draft is only created by POST /me/draft.
+    assert_can_edit(event, Registration(status="draft"))
     reg = await get_or_create_registration(db, event_id, employee.id)
     assert_can_edit(event, reg)
 
@@ -203,6 +227,7 @@ async def submit_my_registration(
 ) -> RegistrationOut:
     employee = await _current_employee(db, user)
     event = await master_data.get_or_404(db, Event, event_id)
+    assert_can_edit(event, Registration(status="draft"))
     reg = await get_or_create_registration(db, event_id, employee.id)
     assert_can_edit(event, reg)
 
@@ -272,7 +297,14 @@ async def cancel_my_registration(
 ) -> RegistrationOut:
     employee = await _current_employee(db, user)
     event = await master_data.get_or_404(db, Event, event_id)
-    reg = await get_or_create_registration(db, event_id, employee.id)
+    result = await db.execute(
+        select(Registration).where(
+            Registration.event_id == event_id, Registration.employee_id == employee.id
+        )
+    )
+    reg = result.scalar_one_or_none()
+    if reg is None:
+        raise AppError("not_found", "Chưa có đăng ký để huỷ", status.HTTP_404_NOT_FOUND)
     assert_can_edit(event, reg)
     cancel_registration(reg, payload.reason)
     # A cancelled attendee must stop consuming operational capacity right
