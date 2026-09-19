@@ -98,6 +98,15 @@ async def run_bus_allocation(
             if fid is not None:
                 slots[a.bus_id].flight_ids_present.add(fid)
 
+    # Only home-pickup legs require a point. Destination legs (airport →
+    # hotel, hotel → airport) intentionally have buses without pickup points.
+    requires_pickup = any(slot.pickup_point_id is not None for slot in slots.values())
+    # A missing required pickup is not a wildcard. Keep the person visible as
+    # a flagged unassigned row so BTC can follow up instead of silently placing
+    # them on an arbitrary bus.
+    missing_pickup_ids = {
+        eid for eid, _tid, pickup_point_id in rows if requires_pickup and pickup_point_id is None
+    }
     candidates = [
         BusCandidate(
             employee_id=eid, team_id=tid, pickup_point_id=pickup_point_id,
@@ -106,7 +115,7 @@ async def run_bus_allocation(
             flight_arrive_at=flight_by_employee.get(eid, (None, None, None))[2],
         )
         for eid, tid, pickup_point_id in rows
-        if eid not in locked_employee_ids
+        if eid not in locked_employee_ids and (pickup_point_id is not None or not requires_pickup)
     ]
 
     from app.services.event_service import get_setting
@@ -115,6 +124,7 @@ async def run_bus_allocation(
     weights = merge_weights(raw if isinstance(raw, dict) else {}, DEFAULT_BUS_WEIGHTS)
     flight_timing = leg.flight_timing if leg is not None else None
     outcome = allocate_buses(candidates, list(slots.values()), weights, flight_timing)
+    outcome.flagged.update({employee_id: "pickup_missing" for employee_id in missing_pickup_ids})
 
     await db.execute(
         delete(BusAssignment).where(

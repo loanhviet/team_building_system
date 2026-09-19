@@ -60,3 +60,25 @@ async def test_custom_validator_error_returns_422_not_500(client, world, auth_he
     body = res.json()
     assert body["error"]["code"] == "validation_error"
     assert "Hạn mức cố định" in str(body["error"]["details"])
+
+
+async def test_huge_entity_ids_are_rejected_before_database_binding(client, world, auth_headers):
+    huge = "99999999999999999999"
+    for path in [
+        f"/api/events/{huge}",
+        f"/api/jobs/{huge}",
+        f"/api/employees?team_id={huge}",
+        f"/api/journey/me?event_id={huge}&employee_id=1",
+    ]:
+        response = await client.get(path, headers=auth_headers(world.organizer_user))
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+
+
+async def test_event_settings_reject_non_finite_weights(client, world, auth_headers):
+    response = await client.put(
+        f"/api/events/{world.event.id}/settings",
+        headers=auth_headers(world.organizer_user),
+        content='{"flight_allocation_weights":{"same_shift":NaN}}',
+    )
+    assert response.status_code == 422

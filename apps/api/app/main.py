@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import get_settings
@@ -47,6 +48,7 @@ from app.routers import (
 setup_logging()
 
 settings = get_settings()
+MAX_ENTITY_ID = 2_147_483_647
 
 
 @asynccontextmanager
@@ -74,6 +76,31 @@ async def capture_client_ip(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     set_client_ip(request.client.host if request.client else None)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def reject_out_of_range_entity_ids(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Reject IDs SQLite cannot bind instead of leaking a 500 response."""
+    values = [part for part in request.url.path.split("/") if part.isdigit()]
+    values.extend(
+        value
+        for key, value in request.query_params.multi_items()
+        if key == "id" or key.endswith("_id")
+    )
+    if any(value.isdigit() and int(value) > MAX_ENTITY_ID for value in values):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "validation_error",
+                    "message": "ID vượt quá giới hạn cho phép",
+                    "details": None,
+                }
+            },
+        )
     return await call_next(request)
 
 app.add_exception_handler(AppError, app_error_handler)

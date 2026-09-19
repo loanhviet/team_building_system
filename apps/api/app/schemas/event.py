@@ -1,7 +1,8 @@
+import math
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import EventStatus
 
@@ -52,6 +53,13 @@ class EventSettingsUpdate(BaseModel):
     terms_version: str | None = None
     flight_allocation_weights: dict[str, float] | None = None
     bus_allocation_weights: dict[str, float] | None = None
+
+    @field_validator("flight_allocation_weights", "bus_allocation_weights")
+    @classmethod
+    def weights_must_be_finite(cls, value: dict[str, float] | None) -> dict[str, float] | None:
+        if value is not None and any(not math.isfinite(weight) for weight in value.values()):
+            raise ValueError("Trọng số phải là số hữu hạn")
+        return value
 
 
 class EventOut(BaseModel):

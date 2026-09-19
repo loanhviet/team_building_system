@@ -110,3 +110,31 @@ async def test_bus_timing_window_matches_flight(db_session, world):
 
     assert summary["total_assigned"] == 1
     assert summary["total_flagged"] == 0
+
+
+async def test_missing_pickup_is_flagged_instead_of_auto_assigned(db_session, world):
+    leg = TransportLeg(
+        event_id=world.event.id, code="HOME", name="Văn phòng → Sân bay", direction="outbound"
+    )
+    point = PickupPoint(event_id=world.event.id, site_id=world.site.id, name="Văn phòng")
+    db_session.add_all([leg, point])
+    await db_session.flush()
+    await _needs_bus(db_session, world, leg, pickup_point_id=None)
+    bus = Bus(
+        event_id=world.event.id, leg_id=leg.id, code="XE-HOME", capacity=5,
+        pickup_point_id=point.id,
+    )
+    run = AllocationRun(event_id=world.event.id, type="bus", status="running")
+    db_session.add_all([bus, run])
+    await db_session.commit()
+
+    summary = await run_bus_allocation(db_session, world.event.id, leg.id, run.id)
+    assert summary["total_assigned"] == 0
+    assignment = (
+        await db_session.execute(
+            select(BusAssignment).where(BusAssignment.employee_id == world.employee.id)
+        )
+    ).scalar_one()
+    assert assignment.bus_id is None
+    assert assignment.flag_reason == "pickup_missing"
+    assert summary["total_flagged"] == 1

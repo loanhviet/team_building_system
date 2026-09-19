@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TransportNeedIn(BaseModel):
@@ -20,7 +20,7 @@ class TransportNeedOut(BaseModel):
 class RegistrationUpdate(BaseModel):
     is_participating: bool | None = None
     shift_id: int | None = None
-    wish_note: str | None = None
+    wish_note: str | None = Field(default=None, max_length=2000)
     transport_needs: list[TransportNeedIn] | None = None
 
 
@@ -31,7 +31,7 @@ class RegistrationSubmit(BaseModel):
 
 
 class RegistrationCancel(BaseModel):
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class RegistrationOut(BaseModel):

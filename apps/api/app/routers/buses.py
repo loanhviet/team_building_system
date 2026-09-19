@@ -387,7 +387,7 @@ async def _bus_preflight(db: DbSession, event_id: int, leg_id: int) -> dict:
                 "message": f"Có {len(no_compatible_bus)} người chưa có xe khớp điểm đón và giờ bay "
                 "— sẽ bị gắn cờ để BTC xếp tay",
             })
-    if any(row[1] is None for row in needs):
+    if any(bus.pickup_point_id is not None for bus in buses) and any(row[1] is None for row in needs):
         warnings.append({
             "code": "pickup_missing",
             "message": "Có nhân sự cần xe nhưng chưa chọn điểm đón",
