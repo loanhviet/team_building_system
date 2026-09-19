@@ -318,8 +318,12 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const assignedCount = (flightId: number) =>
     (assignments ?? []).filter((a) => a.flight_id === flightId).length;
   const remainingCount = (f: Flight) => f.capacity - assignedCount(f.id);
-  const canReceiveSelection = (flight: Flight) =>
-    remainingCount(flight) >= selected.size &&
+  const canReceiveSelection = (flight: Flight) => {
+    const alreadyOnTarget = (assignments ?? []).filter(
+      (assignment) => selected.has(assignment.employee_id) && assignment.flight_id === flight.id,
+    ).length;
+    return (
+      remainingCount(flight) >= selected.size - alreadyOnTarget &&
     (assignments ?? [])
       .filter((assignment) => selected.has(assignment.employee_id))
       .every(
@@ -327,7 +331,9 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           flight.site_id == null ||
           assignment.employee_site_id == null ||
           assignment.employee_site_id === flight.site_id,
-      );
+      )
+    );
+  };
 
   const splitTeamNames = new Set(
     (summary?.split_team_ids ?? [])
@@ -364,6 +370,15 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   });
   const allVisibleSelected =
     visibleAssignments.length > 0 && visibleAssignments.every((a) => selected.has(a.employee_id));
+
+  const openAdjustmentFor = (employeeId: number) => {
+    setSelected(new Set([employeeId]));
+    setMoveTeamId("");
+    setMoveTarget("");
+    setOverCapacityMsg(null);
+    setSoftWarning(false);
+    setAdjustOpen(true);
+  };
 
   const assignmentColumns: DataTableColumn<FlightAssignment>[] = [
     {
@@ -447,15 +462,16 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
     {
       key: "actions",
       header: "",
-      className: "w-10 text-right",
+      className: "w-28 text-right",
       cell: (a) => (
         <Button
           size="sm"
-          variant="ghost"
-          onClick={() => setSelected(new Set([a.employee_id]))}
-          aria-label={`Chuyển ${a.full_name} sang chuyến khác`}
+          variant={a.is_flagged ? "outline" : "ghost"}
+          onClick={() => openAdjustmentFor(a.employee_id)}
+          aria-label={`Chuyển ${a.full_name} sang chuyến khác ngay`}
         >
           <ArrowLeftRight className="size-4" aria-hidden="true" />
+          <span className="ml-1.5">Chuyển</span>
         </Button>
       ),
     },
@@ -797,6 +813,13 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             </Button>
           </div>
 
+          {filterTab === "flag" && flagCount > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              Các dòng dưới đây cần BTC xử lý. Bấm <b>Chuyển</b> ngay tại từng dòng để chọn
+              chuyến thay thế và ghi lý do; không cần cuộn xuống cuối trang.
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             <span>Hoặc chuyển cả Team:</span>
             <Select value={moveTeamId} onValueChange={(v) => setMoveTeamId(v ?? "")}>
@@ -839,6 +862,49 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             </Button>
           </div>
 
+          {selected.size > 0 && (
+            <div className="sticky top-3 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
+              <span className="text-sm font-medium">{selected.size} đã chọn</span>
+              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Chuyển tới chuyến" />
+                </SelectTrigger>
+                <SelectContent>
+                  {flights
+                    ?.filter((f) => f.direction === direction)
+                    .map((f) => (
+                      <SelectItem key={f.id} value={String(f.id)} disabled={!canReceiveSelection(f)}>
+                        {f.flight_code} · còn {remainingCount(f)}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                disabled={!moveTarget}
+                onClick={() => {
+                  setMoveTeamId("");
+                  setOverCapacityMsg(null);
+                  setSoftWarning(false);
+                  setAdjustOpen(true);
+                }}
+              >
+                Điều chỉnh
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={unlockMutation.isPending}
+                onClick={() => unlockMutation.mutate()}
+              >
+                Bỏ ghim
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                Bỏ chọn
+              </Button>
+            </div>
+          )}
+
           <DataTable
             columns={assignmentColumns}
             rows={visibleAssignments}
@@ -849,49 +915,6 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           />
         </div>
       </div>
-
-      {selected.size > 0 && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
-          <span className="text-sm font-medium">{selected.size} đã chọn</span>
-          <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Chuyển tới chuyến" />
-            </SelectTrigger>
-            <SelectContent>
-              {flights
-                ?.filter((f) => f.direction === direction)
-                .map((f) => (
-                  <SelectItem key={f.id} value={String(f.id)} disabled={!canReceiveSelection(f)}>
-                    {f.flight_code} · còn {remainingCount(f)}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            disabled={!moveTarget}
-            onClick={() => {
-              setMoveTeamId("");
-              setOverCapacityMsg(null);
-              setSoftWarning(false);
-              setAdjustOpen(true);
-            }}
-          >
-            Chuyển
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={unlockMutation.isPending}
-            onClick={() => unlockMutation.mutate()}
-          >
-            Bỏ ghim
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-            Bỏ chọn
-          </Button>
-        </div>
-      )}
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>
@@ -906,6 +929,24 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
               Cần ghi lý do (audit log).
             </p>
             <div className="flex flex-col gap-1.5">
+              <Label>Chuyển tới chuyến</Label>
+              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Chọn chuyến thay thế" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dirFlights.map((flight) => (
+                    <SelectItem key={flight.id} value={String(flight.id)} disabled={!canReceiveSelection(flight)}>
+                      {flight.flight_code} · còn {remainingCount(flight)} chỗ
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Chuyến không đủ chỗ hoặc sai địa điểm phục vụ sẽ không thể chọn.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
               <Label>Lý do</Label>
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
               {softWarning && adjustReason.trim() === DEFAULT_ADJUST_REASON && (
@@ -919,7 +960,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           <DialogFooter>
             {!overCapacityMsg ? (
               <Button
-                disabled={!adjustReason.trim() || adjustMutation.isPending}
+                disabled={!moveTarget || !adjustReason.trim() || adjustMutation.isPending}
                 onClick={() => moveTarget && adjustMutation.mutate({ flightId: Number(moveTarget), acceptSoftWarnings: false })}
               >
                 Xác nhận
@@ -927,6 +968,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             ) : softWarning ? (
               <Button
                 disabled={
+                  !moveTarget ||
                   !adjustReason.trim() ||
                   adjustReason.trim() === DEFAULT_ADJUST_REASON ||
                   adjustMutation.isPending
