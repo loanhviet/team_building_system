@@ -1,0 +1,2 @@
+# Shell entrypoints must remain executable LF scripts when cloned on Windows.
+*.sh text eol=lf

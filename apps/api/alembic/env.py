@@ -18,6 +18,19 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+
+def include_object(object_, name, type_, reflected, compare_to) -> bool:
+    """Keep SQLite FTS5 virtual-table internals out of autogenerate.
+
+    FTS5 creates its own shadow tables (``_data``, ``_idx`` …). They are not
+    ORM tables and Alembic must neither report nor drop them.
+    """
+    if type_ == "table" and name and (
+        name == "rag_chunks_fts" or name.startswith("rag_chunks_fts_")
+    ):
+        return False
+    return True
+
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
@@ -27,6 +40,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -35,7 +49,9 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, include_object=include_object
+    )
     with context.begin_transaction():
         context.run_migrations()
 
