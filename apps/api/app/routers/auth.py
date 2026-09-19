@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.errors import AppError
 from app.core.queue import get_queue
+from app.core.request_context import get_client_ip
 from app.core.security import hash_password, verify_password
 from app.models.auth import User
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, UserOut
@@ -65,7 +66,7 @@ async def login(
     queue: Annotated[ArqRedis, Depends(get_queue)],
     user_agent: str | None = Header(default=None),
 ) -> LoginResponse:
-    await check_login_rate(queue, payload.email)
+    await check_login_rate(queue, payload.email, get_client_ip())
     user = await authenticate_user(db, payload.email, payload.password)
     access_token, refresh_token = await issue_tokens(db, user, user_agent)
     await db.commit()

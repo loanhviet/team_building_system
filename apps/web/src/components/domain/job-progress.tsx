@@ -1,7 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { parseApiDateTime } from "@/lib/format";
 import { jobStatusLabel } from "@/lib/labels";
 import type { Job } from "@/types/api";
 
@@ -12,6 +14,11 @@ import type { Job } from "@/types/api";
  * "Đang chạy phân bổ..." string with no progress, no elapsed time, no result.
  */
 export function JobProgress({ jobId }: { jobId: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1200);
+    return () => clearInterval(timer);
+  }, []);
   const { data: job } = useQuery({
     queryKey: ["jobs", jobId],
     queryFn: () => apiFetch<Job>(`/api/jobs/${jobId}`),
@@ -26,12 +33,15 @@ export function JobProgress({ jobId }: { jobId: number | null }) {
 
   if (job.status === "queued" || job.status === "running") {
     const pct = job.total ? Math.round((job.progress / job.total) * 100) : null;
+    const stale = job.status === "queued" &&
+      now - parseApiDateTime(job.created_at).getTime() > 2 * 60 * 1000;
     return (
       <div className="flex flex-col gap-1 text-sm">
         <p className="text-muted-foreground">
           {jobStatusLabel(job.status)}
           {pct !== null && ` — ${job.progress}/${job.total} (${pct}%)`}
         </p>
+        {stale && <p className="text-amber-700">Tác vụ chờ quá 2 phút. Hãy kiểm tra worker và Redis.</p>}
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
             className="h-full bg-primary transition-all"

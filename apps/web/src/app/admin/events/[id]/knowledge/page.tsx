@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, ApiError } from "@/lib/api";
+import { formatUtcDateTime } from "@/lib/format";
 import { jobStatusLabel } from "@/lib/labels";
 import type { Event, Job, KnowledgeCopyResult, KnowledgeDocument } from "@/types/api";
 
@@ -188,7 +189,7 @@ export default function KnowledgePage({ params }: { params: Promise<{ id: string
     {
       key: "updated",
       header: "Cập nhật lần cuối",
-      cell: (row) => new Date(row.updated_at).toLocaleString("vi-VN"),
+      cell: (row) => formatUtcDateTime(row.updated_at),
       sortValue: (row) => row.updated_at,
     },
     {

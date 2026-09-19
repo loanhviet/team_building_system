@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch, ApiError } from "@/lib/api";
+import { formatUtcDateTime, parseApiDateTime } from "@/lib/format";
 import { emailOutboxStatusLabel } from "@/lib/labels";
 import type { EmailOutboxEntry } from "@/types/api";
 
@@ -53,7 +54,7 @@ export function EmailOutboxPanel({
   });
 
   const isStuck = (row: EmailOutboxEntry) =>
-    row.status === "queued" && Date.now() - new Date(row.created_at).getTime() > STUCK_AFTER_MS;
+    row.status === "queued" && Date.now() - parseApiDateTime(row.created_at).getTime() > STUCK_AFTER_MS;
 
   const columns: DataTableColumn<EmailOutboxEntry>[] = [
     {
@@ -88,7 +89,7 @@ export function EmailOutboxPanel({
     {
       key: "created_at",
       header: "Tạo lúc",
-      cell: (r) => new Date(r.created_at).toLocaleString("vi-VN"),
+      cell: (r) => formatUtcDateTime(r.created_at),
       sortValue: (r) => r.created_at,
     },
     {

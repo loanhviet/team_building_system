@@ -96,6 +96,9 @@ async def reset_all_tables() -> None:
         await conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
         for table in reversed(Base.metadata.sorted_tables):
             await conn.execute(table.delete())
+        # FTS5 is a virtual table outside Base.metadata. Clearing only mapped
+        # rows leaves old search entries that can reuse new chunk rowids.
+        await conn.exec_driver_sql("DELETE FROM rag_chunks_fts")
         await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
     print("Reset: all tables cleared.")
 
@@ -419,14 +422,29 @@ async def seed_gala(
     seat_pool = list(seats)
     now = utcnow()
     n_done = 5
+    attendee_rows = await db.execute(
+        select(Employee.team_id, Registration.employee_id)
+        .join(Registration, Registration.employee_id == Employee.id)
+        .where(
+            Registration.event_id == event.id,
+            Registration.status == "submitted",
+            Registration.is_participating.is_(True),
+        )
+        .order_by(Registration.id)
+    )
+    attendees_by_team: dict[int, list[int]] = {}
+    for team_id, employee_id in attendee_rows.all():
+        if team_id is not None:
+            attendees_by_team.setdefault(team_id, []).append(employee_id)
     for i, team_id in enumerate(order, start=1):
         quota = team_participating_count.get(team_id, 0)
         if i <= n_done:
             status, started_at, expires_at = "done", now - timedelta(hours=1), now - timedelta(minutes=55)
             take, seat_pool = seat_pool[:quota], seat_pool[quota:]
-            for seat in take:
+            for seat, employee_id in zip(take, attendees_by_team.get(team_id, []), strict=True):
                 seat.status = "confirmed"
                 seat.team_id = team_id
+                seat.employee_id = employee_id
         elif i == n_done + 1:
             status, started_at, expires_at = "active", now, now + timedelta(seconds=config.turn_duration_seconds)
         else:
@@ -632,6 +650,13 @@ async def seed() -> None:
         await seed_knowledge(db, event_b)
 
         await db.commit()
+
+        # The demo FAQ is created outside the admin publish routes. Build its
+        # FTS index now so a fresh --full seed can answer policy questions.
+        from app.services.rag.reindex import reindex_event
+
+        await reindex_event(db, event_a.id)
+        await reindex_event(db, event_b.id)
 
         participating = sum(1 for r in registrations if r.is_participating)
         print(

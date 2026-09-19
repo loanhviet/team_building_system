@@ -62,6 +62,10 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
   const { connected } = useGalaWebSocket(
     eventId,
     (raw) => {
+      if ((raw as Record<string, unknown>).type === "occupant_update") {
+        queryClient.invalidateQueries({ queryKey });
+        return;
+      }
       queryClient.setQueryData<GalaState | undefined>(queryKey, (prev) =>
         prev ? applyGalaMessage(prev, raw as Record<string, unknown>) : prev,
       );
@@ -107,6 +111,18 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
     mutationFn: (seatId: number) =>
       apiFetch(`/api/events/${eventId}/gala/seats/${seatId}/release`, { method: "POST" }),
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+  const occupantMutation = useMutation({
+    mutationFn: ({ seatId, employeeId }: { seatId: number; employeeId: number | null }) =>
+      apiFetch<GalaSeat>(`/api/events/${eventId}/gala/seats/${seatId}/occupant`, {
+        method: "PUT", body: JSON.stringify({ employee_id: employeeId }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ["journey", "me", eventId] });
+      toast.success("Đã cập nhật người ngồi");
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không thể gán ghế"),
   });
 
   const onSeatClick = (seat: GalaSeat) => {
@@ -408,6 +424,47 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
                   ))}
                 </ul>
               )}
+            </section>
+          )}
+
+          {isLeader && confirmedMine.length > 0 && (
+            <section className="surface-card p-4">
+              <p className="text-sm font-bold">Gán ghế cho nhân viên</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {confirmedMine.filter((seat) => seat.employee_id != null).length}/{confirmedMine.length} ghế đã có người ngồi. Thông tin này sẽ hiện trong My Journey và dùng cho thẻ tên, điểm danh.
+              </p>
+              <ul className="mt-3 space-y-3">
+                {confirmedMine.map((seat) => {
+                  const table = state.tables.find((item) => item.id === seat.table_id);
+                  return (
+                    <li key={seat.id} className="flex flex-wrap items-center gap-2 text-sm">
+                      <label htmlFor={`occupant-${seat.id}`} className="min-w-24 font-medium">
+                        {table?.code ?? "Bàn"} · Ghế {seat.seat_number}
+                      </label>
+                      <select
+                        id={`occupant-${seat.id}`}
+                        className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2"
+                        value={seat.employee_id ?? ""}
+                        disabled={occupantMutation.isPending}
+                        onChange={(e) => occupantMutation.mutate({
+                          seatId: seat.id,
+                          employeeId: e.target.value ? Number(e.target.value) : null,
+                        })}
+                      >
+                        <option value="">Chưa gán nhân viên</option>
+                        {roster?.members
+                          .filter((member) => member.registration_status === "submitted" && member.is_participating)
+                          .filter((member) => member.employee_id === seat.employee_id || !confirmedMine.some((other) => other.employee_id === member.employee_id))
+                          .map((member) => (
+                            <option key={member.employee_id} value={member.employee_id}>
+                              {member.full_name}{member.employee_code ? ` · ${member.employee_code}` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
           )}
 

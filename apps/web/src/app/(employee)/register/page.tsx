@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch, ApiError } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatUtcDateTime } from "@/lib/format";
+import { eventDisplayName } from "@/lib/event-status";
 import { useAuth } from "@/lib/auth-context";
 import { useEmployeeEvent } from "@/lib/use-employee-event";
 import type {
@@ -424,8 +425,8 @@ function RegistrationForm({
         title="Phiếu đăng ký tham gia"
         description={
           event.registration_close_at && !readOnly
-            ? `${event.name} · Hạn chỉnh sửa: ${formatDateTime(event.registration_close_at)}`
-            : event.name
+            ? `${eventDisplayName(event)} · Hạn chỉnh sửa: ${formatDateTime(event.registration_close_at)}`
+            : eventDisplayName(event)
         }
       />
 
@@ -437,7 +438,7 @@ function RegistrationForm({
 
       {registration.status === "submitted" && !readOnly && (
         <Callout tone="ok">
-          Đã gửi lúc {formatDateTime(registration.submitted_at)}.
+          Đã gửi lúc {formatUtcDateTime(registration.submitted_at)}.
           {event.registration_close_at
             ? ` Bạn có thể sửa đến ${formatDateTime(event.registration_close_at)}.`
             : " Bạn vẫn sửa được trước khi BTC đóng đăng ký."}

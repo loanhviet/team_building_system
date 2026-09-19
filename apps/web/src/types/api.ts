@@ -278,6 +278,7 @@ export type Journey = {
   gala: {
     status: "setup" | "drawing" | "in_progress" | "finished";
     name: string;
+    my_seat: { table_code: string; table_name: string | null; seat_number: number; label: string | null } | null;
     tables: { table_code: string; table_name: string | null; seats: { seat_number: number; label: string | null }[] }[];
   } | null;
   schedule: {
@@ -498,6 +499,7 @@ export type GalaSeat = {
   held_by_team_id: number | null;
   hold_expires_at: string | null;
   team_id: number | null;
+  employee_id: number | null;
   version: number;
 };
 

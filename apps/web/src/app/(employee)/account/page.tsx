@@ -173,6 +173,9 @@ export default function AccountPage() {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
+            {newPassword.length > 0 && newPassword.length < 8 && (
+              <p className="text-xs text-destructive">Mật khẩu mới tối thiểu 8 ký tự</p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="confirm-password">Nhập lại mật khẩu mới</Label>

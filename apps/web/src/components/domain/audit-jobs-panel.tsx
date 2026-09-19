@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, ApiError } from "@/lib/api";
+import { formatUtcDateTime } from "@/lib/format";
 import { auditActionLabel, auditEntityTypeLabel, jobStatusLabel, jobTypeLabel } from "@/lib/labels";
 import type { AuditLogEntry, Job } from "@/types/api";
 
@@ -157,7 +158,7 @@ export function AuditJobsPanel({ eventId }: { eventId: number }) {
                 {auditEntityTypeLabel(log.entity_type)} #{log.entity_id}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {new Date(log.created_at).toLocaleString("vi-VN")} · {log.actor_email ?? "Hệ thống"}
+                {formatUtcDateTime(log.created_at)} · {log.actor_email ?? "Hệ thống"}
                 {log.reason ? ` · ${log.reason}` : ""}
               </p>
               <JsonDiff before={log.before_json} after={log.after_json} />

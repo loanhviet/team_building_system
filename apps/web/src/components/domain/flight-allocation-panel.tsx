@@ -44,7 +44,7 @@ import {
   fromDatetimeLocal,
   toDatetimeLocal,
 } from "@/lib/datetime";
-import { formatTime } from "@/lib/format";
+import { formatTime, formatUtcDateTime } from "@/lib/format";
 import { directionLabel, flagReasonLabel } from "@/lib/labels";
 import type {
   AllocationEnqueued,
@@ -561,7 +561,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
                     return (
                       <div key={run.id} className="rounded-md border p-2 text-xs">
                         <div className="flex items-center justify-between">
-                          <span>{new Date(run.created_at).toLocaleString("vi-VN")}</span>
+                          <span>{formatUtcDateTime(run.created_at)}</span>
                           <Badge variant={run.status === "succeeded" ? "default" : run.status === "failed" ? "destructive" : "outline"}>
                             {run.status}
                           </Badge>

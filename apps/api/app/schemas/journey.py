@@ -46,10 +46,18 @@ class JourneyGalaTable(BaseModel):
     seats: list[JourneyGalaSeat]
 
 
+class JourneyGalaPersonalSeat(BaseModel):
+    table_code: str
+    table_name: str | None = None
+    seat_number: int
+    label: str | None = None
+
+
 class JourneyGala(BaseModel):
     status: str
     name: str
     tables: list[JourneyGalaTable]
+    my_seat: JourneyGalaPersonalSeat | None = None
 
 
 class JourneyScheduleItem(BaseModel):

@@ -27,6 +27,14 @@ async def ensure_fts(db: AsyncSession) -> None:
     await db.execute(text(FTS_DDL))
 
 
+async def delete_orphan_fts(db: AsyncSession) -> None:
+    # Older databases could retain FTS rows after their mapped chunks were
+    # deleted. They are invisible to joined queries but can be reused by ID.
+    await db.execute(text(
+        "DELETE FROM rag_chunks_fts WHERE rowid NOT IN (SELECT id FROM rag_chunks)"
+    ))
+
+
 async def upsert_chunk_fts(
     db: AsyncSession,
     *,

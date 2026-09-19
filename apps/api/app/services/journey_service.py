@@ -16,6 +16,7 @@ from app.schemas.journey import (
     JourneyBus,
     JourneyFlight,
     JourneyGala,
+    JourneyGalaPersonalSeat,
     JourneyGalaSeat,
     JourneyGalaTable,
     JourneyOut,
@@ -115,6 +116,7 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
     gala_config = result.scalar_one_or_none()
     if gala_config is not None:
         tables_out: list[JourneyGalaTable] = []
+        my_seat: JourneyGalaPersonalSeat | None = None
         if employee.team_id is not None:
             result = await db.execute(
                 select(GalaSeat, GalaTable)
@@ -128,6 +130,11 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
             )
             by_table: dict[int, JourneyGalaTable] = {}
             for seat, table in result.all():
+                if seat.employee_id == employee.id:
+                    my_seat = JourneyGalaPersonalSeat(
+                        table_code=table.code, table_name=table.name,
+                        seat_number=seat.seat_number, label=seat.label,
+                    )
                 entry = by_table.get(table.id)
                 if entry is None:
                     entry = JourneyGalaTable(
@@ -138,7 +145,10 @@ async def build_journey(db: AsyncSession, event: Event, employee: Employee) -> J
                     JourneyGalaSeat(seat_number=seat.seat_number, label=seat.label)
                 )
             tables_out = list(by_table.values())
-        gala = JourneyGala(status=gala_config.status, name=gala_config.name, tables=tables_out)
+        gala = JourneyGala(
+            status=gala_config.status, name=gala_config.name,
+            tables=tables_out, my_seat=my_seat,
+        )
 
     result = await db.execute(
         select(Registration).where(

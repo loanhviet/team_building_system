@@ -67,6 +67,26 @@ make lint                    # ruff check (api) + next lint (web)
 make sh-api / make sh-web    # mở shell trong container
 ```
 
+Trên Windows PowerShell không cần cài `make`; dùng trực tiếp Docker Compose:
+
+```powershell
+docker compose up -d --build
+docker compose exec api alembic upgrade head
+docker compose exec api python -m app.db.seed
+docker compose exec api pytest
+docker compose exec web npm test --if-present
+docker compose exec api ruff check .
+docker compose exec web npm run lint
+docker compose logs -f worker
+```
+
+Sau khi nâng cấp một cơ sở dữ liệu cũ có FAQ đã công bố nhưng chưa có chỉ mục ChatRAG,
+worker sẽ tự xếp tác vụ lập chỉ mục khi khởi động. BTC cũng có thể bấm **Lập chỉ mục lại**
+trong mục **Hỏi đáp** của sự kiện. Nếu không chạy Qdrant, tìm kiếm FTS5 vẫn hoạt động.
+
+Trong Gala Dinner, trưởng nhóm gán từng ghế đã xác nhận cho nhân viên đăng ký tham gia.
+Ghế cá nhân xuất hiện trong My Journey; BTC xuất danh sách thẻ tên/điểm danh ở màn Gala.
+
 **Sau khi sửa code trong `apps/api`, luôn rebuild cả hai image:**
 `docker compose build api worker` — `api` và `worker` build từ cùng Dockerfile nhưng Compose coi là hai
 image riêng, `build api` một mình sẽ không cập nhật `worker`.

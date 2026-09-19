@@ -7,7 +7,7 @@ from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
@@ -19,6 +19,7 @@ from app.models.bus import BusAssignment
 from app.models.enums import EventStatus
 from app.models.event import Event, PickupPoint, Shift, TransportLeg
 from app.models.flight import FlightAssignment
+from app.models.gala import GalaSeat, GalaTable
 from app.models.hotel import RoomAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
@@ -103,6 +104,19 @@ async def _registration_out(db: DbSession, reg: Registration) -> RegistrationOut
     )
 
 
+async def _remove_operational_assignments(db: DbSession, event_id: int, employee_id: int) -> None:
+    for model in (FlightAssignment, RoomAssignment, BusAssignment):
+        await db.execute(
+            delete(model).where(model.event_id == event_id, model.employee_id == employee_id)
+        )
+    seat_ids = select(GalaSeat.id).join(GalaTable, GalaTable.id == GalaSeat.table_id).where(
+        GalaTable.event_id == event_id, GalaSeat.employee_id == employee_id
+    )
+    await db.execute(
+        update(GalaSeat).where(GalaSeat.id.in_(seat_ids)).values(employee_id=None)
+    )
+
+
 @me_router.get("/me", response_model=RegistrationOut | None)
 async def get_my_latest_registration(
     db: DbSession, user: CurrentUser, event_id: int | None = None
@@ -176,6 +190,8 @@ async def update_my_registration(
             raise AppError("invalid_shift", "Ca không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST)
     for key, value in data.items():
         setattr(reg, key, value)
+    if reg.status == "submitted" and reg.is_participating is False:
+        await _remove_operational_assignments(db, event_id, employee.id)
 
     if payload.transport_needs is not None:
         leg_ids = {n.leg_id for n in payload.transport_needs}
@@ -243,6 +259,8 @@ async def submit_my_registration(
         agreed_terms=payload.agreed_terms,
         terms_version=str(current_terms_version),
     )
+    if not reg.is_participating:
+        await _remove_operational_assignments(db, event_id, employee.id)
     await db.flush()
 
     shift_name = None
@@ -310,21 +328,7 @@ async def cancel_my_registration(
     # A cancelled attendee must stop consuming operational capacity right
     # away. In particular, manual (locked) assignments are not eligible for a
     # later allocation run to clean up on its own.
-    await db.execute(
-        delete(FlightAssignment).where(
-            FlightAssignment.event_id == event_id, FlightAssignment.employee_id == employee.id
-        )
-    )
-    await db.execute(
-        delete(RoomAssignment).where(
-            RoomAssignment.event_id == event_id, RoomAssignment.employee_id == employee.id
-        )
-    )
-    await db.execute(
-        delete(BusAssignment).where(
-            BusAssignment.event_id == event_id, BusAssignment.employee_id == employee.id
-        )
-    )
+    await _remove_operational_assignments(db, event_id, employee.id)
     await record_audit(
         db, actor_user_id=user.id, action="cancel", entity_type="registration", entity_id=reg.id,
         reason=payload.reason, event_id=event_id,

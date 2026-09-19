@@ -33,7 +33,7 @@ import {
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ROLE_LABEL } from "@/lib/format";
-import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS } from "@/lib/event-status";
+import { ALL_EVENT_STATUSES, EVENT_FORWARD_TRANSITIONS, EVENT_STATUS_LABELS, eventDisplayName } from "@/lib/event-status";
 import { useCurrentEventId } from "@/lib/use-current-event-id";
 import type { Dashboard, Event, EventStatus, PublishReadiness } from "@/types/api";
 
@@ -196,7 +196,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
         eventSlot={
           <div className="mb-4 rounded-xl border border-border bg-muted/40 p-3">
             <p className="text-[11px] font-medium text-muted-foreground">Kỳ đang thao tác</p>
-            <p className="mt-1 truncate text-sm font-semibold">{event.name}</p>
+            <p className="mt-1 truncate text-sm font-semibold">{eventDisplayName(event)}</p>
             <div className="mt-2">
               <EventStatusBadge status={event.status} />
             </div>
@@ -230,7 +230,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-4 py-3 sm:px-6">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-medium text-muted-foreground">Quản lý sự kiện</p>
-            <h1 className="truncate font-display text-lg font-semibold sm:text-xl">{event.name}</h1>
+            <h1 className="truncate font-display text-lg font-semibold sm:text-xl">{eventDisplayName(event)}</h1>
           </div>
           <EventStatusBadge status={event.status} />
           {nextStatuses.map((status) => (

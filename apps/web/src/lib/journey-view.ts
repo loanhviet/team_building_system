@@ -1,4 +1,4 @@
-import { formatDate, formatDateTime, formatLongDate, formatTime } from "@/lib/format";
+import { formatDate, formatDateTime, formatLongDate, formatTime, parseEventDateTime } from "@/lib/format";
 import { directionLabel } from "@/lib/labels";
 import type { Journey } from "@/types/api";
 
@@ -52,8 +52,18 @@ export const KIND_LABEL: Record<TimelineKind, string> = {
 };
 
 export function galaTableLabel(name: string | null, code: string): string {
-  const value = name ?? code;
+  const value = name?.trim() || code;
   return /^bàn\s/i.test(value) ? value : `Bàn ${value}`;
+}
+
+function personalGalaSeatLines(journey: Journey): string[] {
+  const personal = journey.gala?.my_seat;
+  if (personal) {
+    return [`Ghế của bạn: ${galaTableLabel(personal.table_name, personal.table_code)} · ghế ${personal.seat_number}`];
+  }
+  return journey.gala?.tables.length
+    ? ["Team đã chọn ghế; trưởng nhóm chưa gán ghế cho bạn"]
+    : [];
 }
 
 function isGenericFlightSchedule(title: string): boolean {
@@ -63,17 +73,21 @@ function isGenericFlightSchedule(title: string): boolean {
 function dayKeyFromIso(value: string | null | undefined): string | null {
   if (!value) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const d = new Date(value);
+  const d = parseEventDateTime(value);
   if (Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Ho_Chi_Minh",
+  }).formatToParts(d);
+  const valueOf = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const y = valueOf("year");
+  const m = valueOf("month");
+  const day = valueOf("day");
   return `${y}-${m}-${day}`;
 }
 
 function ms(value: string | null | undefined): number | null {
   if (!value) return null;
-  const t = new Date(value).getTime();
+  const t = parseEventDateTime(value).getTime();
   return Number.isNaN(t) ? null : t;
 }
 
@@ -102,6 +116,12 @@ export function journeyGaps(journey: Journey): JourneyGap[] {
     gaps.push({
       id: "gala",
       label: isGalaSelectable(journey) ? "Team chưa chọn ghế Gala" : "Team chưa có ghế Gala",
+      href: `/gala/${journey.event_id}`,
+    });
+  } else if (journey.gala && !journey.gala.my_seat) {
+    gaps.push({
+      id: "gala",
+      label: "Trưởng nhóm chưa gán ghế Gala cho bạn",
       href: `/gala/${journey.event_id}`,
     });
   }
@@ -168,11 +188,7 @@ export function buildTimeline(journey: Journey): TimelineDay[] {
     });
   }
 
-  const galaSeatLines =
-    journey.gala?.tables.map((t) => {
-      const seat = t.seats.map((s) => s.label ?? s.seat_number).join(", ");
-      return `${galaTableLabel(t.table_name, t.table_code)}${seat ? ` · ghế ${seat}` : ""}`;
-    }) ?? [];
+  const galaSeatLines = personalGalaSeatLines(journey);
 
   journey.schedule.forEach((s, i) => {
     if (journey.flights.length > 0 && isGenericFlightSchedule(s.title)) return;
@@ -362,11 +378,7 @@ export function buildJourneyStages(journey: Journey): JourneyStage[] {
     });
   }
 
-  const galaSeatLines =
-    journey.gala?.tables.map((t) => {
-      const seat = t.seats.map((s) => s.label ?? s.seat_number).join(", ");
-      return `${galaTableLabel(t.table_name, t.table_code)}${seat ? ` · ghế ${seat}` : ""}`;
-    }) ?? [];
+  const galaSeatLines = personalGalaSeatLines(journey);
 
   journey.schedule.forEach((s, i) => {
     if (journey.flights.length > 0 && isGenericFlightSchedule(s.title)) return;
@@ -436,7 +448,7 @@ export function firstUpcomingAt(journey: Journey): string | null {
   }
   for (const s of journey.schedule) if (s.start_at) times.push(s.start_at);
   const future = times
-    .map((t) => ({ t, at: new Date(t).getTime() }))
+    .map((t) => ({ t, at: parseEventDateTime(t).getTime() }))
     .filter((x) => !Number.isNaN(x.at) && x.at >= now)
     .sort((a, b) => a.at - b.at);
   return future[0]?.t ?? times[0] ?? null;

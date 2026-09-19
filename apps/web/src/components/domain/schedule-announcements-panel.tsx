@@ -38,7 +38,7 @@ import {
   splitDatetimeLocal,
   toDatetimeLocal,
 } from "@/lib/datetime";
-import { formatDate, formatTime } from "@/lib/format";
+import { formatDate, formatTime, formatUtcDate, parseEventDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Announcement, Dashboard, Event, ScheduleItem, Shift, Team } from "@/types/api";
 
@@ -268,7 +268,7 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
 
   const durationLabel = (item: ScheduleItem) => {
     if (!item.start_at || !item.end_at) return null;
-    const ms = new Date(item.end_at).getTime() - new Date(item.start_at).getTime();
+    const ms = parseEventDateTime(item.end_at).getTime() - parseEventDateTime(item.start_at).getTime();
     if (!Number.isFinite(ms) || ms <= 0) return null;
     return `${Math.round(ms / 60000)} phút`;
   };
@@ -694,7 +694,7 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
                       </Badge>
                     )}
                     {a.published_at && (
-                      <span className="text-[11px] text-muted-foreground">{formatDate(a.published_at)}</span>
+                      <span className="text-[11px] text-muted-foreground">{formatUtcDate(a.published_at)}</span>
                     )}
                   </div>
                   <h3 className="font-semibold">{a.title}</h3>

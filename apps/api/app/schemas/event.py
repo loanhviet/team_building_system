@@ -17,6 +17,13 @@ class EventCreate(BaseModel):
     registration_open_at: datetime | None = None
     registration_close_at: datetime | None = None
 
+    @field_validator("name", "code")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Tên và mã sự kiện không được để trống")
+        return value.strip()
+
     @model_validator(mode="after")
     def validate_ranges(self):
         if self.start_date and self.end_date and self.end_date < self.start_date:
@@ -34,6 +41,13 @@ class EventUpdate(BaseModel):
     destination: str | None = None
     registration_open_at: datetime | None = None
     registration_close_at: datetime | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Tên sự kiện không được để trống")
+        return value.strip() if value is not None else None
 
 
 class EventTransition(BaseModel):

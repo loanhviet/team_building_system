@@ -53,7 +53,14 @@ async def run_flight_allocation(
             FlightAssignment.is_locked.is_(True),
         )
     )
-    locked = result.scalars().all()
+    eligible_ids = {employee_id for employee_id, _shift_id, _team_id, _site_id in rows}
+    locked = []
+    for assignment in result.scalars().all():
+        if assignment.employee_id in eligible_ids:
+            locked.append(assignment)
+        else:
+            # Clean up assignments left by older registration flows too.
+            await db.delete(assignment)
     locked_employee_ids = {a.employee_id for a in locked}
 
     result = await db.execute(
@@ -125,11 +132,21 @@ async def run_flight_allocation(
                 )
             )
 
+    flights_by_team: dict[int, set[int]] = defaultdict(set)
+    for employee_id, flight_id in outcome.assignments.items():
+        team_id = team_by_employee.get(employee_id)
+        if team_id is not None:
+            flights_by_team[team_id].add(flight_id)
+    for assignment in locked:
+        team_id = team_by_employee.get(assignment.employee_id)
+        if team_id is not None and assignment.flight_id is not None:
+            flights_by_team[team_id].add(assignment.flight_id)
+
     summary = {
         "total_submitted": len(rows),
         "total_assigned": len(outcome.assignments) + len(locked),
-        "total_flagged": len(outcome.flagged),
-        "split_team_ids": sorted(outcome.split_team_ids),
+        "total_flagged": len(outcome.flagged) + sum(1 for a in locked if a.is_flagged),
+        "split_team_ids": sorted(tid for tid, used in flights_by_team.items() if len(used) > 1),
         "flights": [
             {
                 "flight_id": fid,

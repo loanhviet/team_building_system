@@ -174,7 +174,7 @@ function EventMetaForm({ event }: { event: Event }) {
       apiFetch<Event>(`/api/events/${event.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          name,
+          name: name.trim(),
           destination: destination || null,
           description: description || null,
           start_date: startDate || null,
@@ -240,7 +240,7 @@ function EventMetaForm({ event }: { event: Event }) {
           <Textarea id="ev-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div>
-          <Button disabled={!name || saveEvent.isPending} onClick={() => saveEvent.mutate()}>
+          <Button disabled={!name.trim() || saveEvent.isPending} onClick={() => saveEvent.mutate()}>
             Lưu sự kiện
           </Button>
         </div>

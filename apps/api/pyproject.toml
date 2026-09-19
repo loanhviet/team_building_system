@@ -36,6 +36,10 @@ dev = [
 line-length = 100
 extend-exclude = ["alembic/versions"]
 
+[tool.ruff.lint]
+# Windows bind mounts mark all source files executable; EXE002 is not useful there.
+ignore = ["EXE002"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

@@ -48,4 +48,32 @@ describe("journey presentation", () => {
     expect(stages.some((stage) => stage.title.includes("VN101"))).toBe(true);
     expect(stages.some((stage) => stage.title === "Nhận phòng")).toBe(true);
   });
+
+  it("keeps a naive flight time on the Vietnam event day", () => {
+    const previous = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const journey = journeyFixture();
+      journey.flights[0].depart_at = "2026-12-20T08:00:00";
+      const flight = buildJourneyStages(journey).find((stage) => stage.kind === "flight");
+      expect(flight?.dayKey).toBe("2026-12-20");
+      expect(flight?.title).toContain("08:00");
+    } finally {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
+  });
+
+  it("shows the employee's own Gala seat in the journey", () => {
+    const journey = journeyFixture();
+    journey.gala = {
+      status: "finished", name: "Gala Dinner",
+      tables: [{ table_code: "B1", table_name: "Bàn 1", seats: [
+        { seat_number: 1, label: "B1-1" }, { seat_number: 2, label: "B1-2" },
+      ] }],
+      my_seat: { table_code: "B1", table_name: "Bàn 1", seat_number: 2, label: "B1-2" },
+    };
+    const gala = buildJourneyStages(journey).find((stage) => stage.kind === "gala");
+    expect(gala?.rows).toEqual(["Ghế của bạn: Bàn 1 · ghế 2"]);
+  });
 });

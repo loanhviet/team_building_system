@@ -26,7 +26,7 @@ import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { LiteMarkdown } from "@/components/domain/lite-markdown";
 import { PageSkeleton } from "@/components/domain/page-skeleton";
 import { apiFetch, ApiError } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, parseEventDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
 import { useEmployeeEvent } from "@/lib/use-employee-event";
 import {
@@ -188,9 +188,10 @@ function JourneyCanvas({
   const visible = dayKey === "all" ? stages : stages.filter((s) => s.dayKey === dayKey);
   const upcomingIso = firstUpcomingAt(journey);
   const outbound = journey.flights.find((f) => f.direction === "outbound") ?? journey.flights[0];
-  const galaTable =
-    journey.gala?.tables[0] != null
-      ? galaTableLabel(journey.gala.tables[0].table_name, journey.gala.tables[0].table_code)
+  const galaTable = journey.gala?.my_seat
+    ? `${galaTableLabel(journey.gala.my_seat.table_name, journey.gala.my_seat.table_code)} · Ghế ${journey.gala.my_seat.seat_number}`
+    : journey.gala?.tables[0] != null
+      ? "Chưa gán ghế"
       : isGalaSelectable(journey)
         ? "Chưa chọn ghế"
         : journey.gala
@@ -470,7 +471,7 @@ function HeroCountdown({ targetIso }: { targetIso: string | null }) {
     return () => clearInterval(id);
   }, []);
   if (!targetIso) return null;
-  const ms = new Date(targetIso).getTime() - now;
+  const ms = parseEventDateTime(targetIso).getTime() - now;
   if (Number.isNaN(ms) || ms <= 0) return null;
   const days = Math.floor(ms / 86_400_000);
   const hours = Math.floor((ms % 86_400_000) / 3_600_000);

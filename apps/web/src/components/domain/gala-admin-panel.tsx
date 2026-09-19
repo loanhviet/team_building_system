@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiDownload, apiFetch, ApiError } from "@/lib/api";
 import { applyGalaMessage } from "@/lib/gala-sync";
 import { galaConfigStatusLabel, galaTurnStatusLabel } from "@/lib/labels";
 import { useCountdown } from "@/lib/use-countdown";
@@ -53,6 +53,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const [tableShape, setTableShape] = useState<"round" | "rect">("round");
   const [editingTable, setEditingTable] = useState<GalaTable | null>(null);
   const [blockMode, setBlockMode] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const { data: state } = useQuery({
     queryKey,
@@ -60,6 +61,10 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   });
 
   useGalaWebSocket(eventId, (raw) => {
+    if ((raw as Record<string, unknown>).type === "occupant_update") {
+      queryClient.invalidateQueries({ queryKey });
+      return;
+    }
     queryClient.setQueryData<GalaState | undefined>(queryKey, (prev) =>
       prev ? applyGalaMessage(prev, raw as Record<string, unknown>) : prev,
     );
@@ -217,10 +222,28 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const neededSeatCount = (state?.turns ?? [])
     .filter((t) => !t.is_makeup)
     .reduce((sum, t) => sum + Math.max(t.seat_quota - (confirmedCountByTeam.get(t.team_id) ?? 0), 0), 0);
+  const assignedSeatCount = (state?.seats ?? []).filter(
+    (seat) => seat.status === "confirmed" && seat.employee_id != null,
+  ).length;
+  const confirmedSeatCount = (state?.seats ?? []).filter((seat) => seat.status === "confirmed").length;
+
+  const downloadCheckin = async () => {
+    setExporting(true);
+    try {
+      await apiDownload(`/api/events/${eventId}/gala/occupants/export`, `gala-checkin-${eventId}.xlsx`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Không tải được danh sách điểm danh");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-3">
+        <Button variant="outline" size="sm" disabled={exporting || confirmedSeatCount === 0} onClick={downloadCheckin}>
+          Xuất danh sách thẻ tên / điểm danh ({assignedSeatCount}/{confirmedSeatCount})
+        </Button>
         <Dialog open={configOpen} onOpenChange={(open) => (open ? openConfigDialog() : setConfigOpen(false))}>
           <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
             {state?.config ? "Sửa cấu hình" : "Tạo cấu hình Gala"}

@@ -1,5 +1,9 @@
 import type { EventStatus } from "@/types/api";
 
+export function eventDisplayName(event: { name: string; code: string }): string {
+  return event.name.trim() || event.code;
+}
+
 export const EVENT_STATUS_LABELS: Record<EventStatus, string> = {
   draft: "Nháp",
   registration_open: "Đang mở đăng ký",

@@ -82,6 +82,7 @@ class GalaSeatOut(BaseModel):
     held_by_team_id: int | None
     hold_expires_at: datetime | None
     team_id: int | None
+    employee_id: int | None
     version: int
 
     model_config = {"from_attributes": True}
@@ -89,6 +90,10 @@ class GalaSeatOut(BaseModel):
 
 class GalaSeatBlockIn(BaseModel):
     blocked: bool
+
+
+class GalaSeatOccupantIn(BaseModel):
+    employee_id: int | None
 
 
 class GalaTurnOut(BaseModel):

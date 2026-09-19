@@ -25,11 +25,9 @@ def include_object(object_, name, type_, reflected, compare_to) -> bool:
     FTS5 creates its own shadow tables (``_data``, ``_idx`` …). They are not
     ORM tables and Alembic must neither report nor drop them.
     """
-    if type_ == "table" and name and (
+    return not (type_ == "table" and name and (
         name == "rag_chunks_fts" or name.startswith("rag_chunks_fts_")
-    ):
-        return False
-    return True
+    ))
 
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)

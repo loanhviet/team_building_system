@@ -12,6 +12,29 @@ def _checksum(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def schedule_document_content(item: ScheduleItem) -> str:
+    content = f"Lịch trình: {item.title}."
+    if item.day_date:
+        content += f" Ngày: {item.day_date.isoformat()}."
+    if item.location:
+        content += f" Địa điểm: {item.location}."
+    if item.start_at:
+        content += f" Bắt đầu: {item.start_at.isoformat()}."
+    if item.end_at:
+        content += f" Kết thúc: {item.end_at.isoformat()}."
+    if item.description:
+        content += f" {item.description}"
+    return content
+
+
+def announcement_document_content(item: Announcement) -> str:
+    return f"Thông báo: {item.title}. {item.body_md}"
+
+
+def faq_document_content(item: KnowledgeDocument) -> str:
+    return f"{item.title}\n\n{item.body_md}"
+
+
 async def _upsert_document(
     db: AsyncSession, event_id: int, source_type: str, source_id: str, title: str,
     content: str, scope: str = "public", scope_ref_id: int | None = None,
@@ -53,24 +76,16 @@ async def build_event_documents(db: AsyncSession, event_id: int) -> list[tuple[R
 
     result = await db.execute(
         select(ScheduleItem).where(
-            ScheduleItem.event_id == event_id, ScheduleItem.is_published.is_(True)
+            ScheduleItem.event_id == event_id,
+            ScheduleItem.is_published.is_(True),
+            ScheduleItem.audience == "all",
         )
     )
     for item in result.scalars().all():
-        content = f"Lịch trình: {item.title}."
-        if item.day_date:
-            content += f" Ngày: {item.day_date.isoformat()}."
-        if item.location:
-            content += f" Địa điểm: {item.location}."
-        if item.start_at:
-            content += f" Bắt đầu: {item.start_at.isoformat()}."
-        if item.end_at:
-            content += f" Kết thúc: {item.end_at.isoformat()}."
-        if item.description:
-            content += f" {item.description}"
         changed_docs.append(
             await _upsert_document(
-                db, event_id, "schedule_item", str(item.id), item.title, content,
+                db, event_id, "schedule_item", str(item.id), item.title,
+                schedule_document_content(item),
             )
         )
 
@@ -80,10 +95,10 @@ async def build_event_documents(db: AsyncSession, event_id: int) -> list[tuple[R
         )
     )
     for a in result.scalars().all():
-        content = f"Thông báo: {a.title}. {a.body_md}"
         changed_docs.append(
             await _upsert_document(
-                db, event_id, "announcement", str(a.id), a.title, content,
+                db, event_id, "announcement", str(a.id), a.title,
+                announcement_document_content(a),
             )
         )
 
@@ -102,10 +117,10 @@ async def build_event_documents(db: AsyncSession, event_id: int) -> list[tuple[R
         )
     )
     for faq in result.scalars().all():
-        content = f"{faq.title}\n\n{faq.body_md}"
         changed_docs.append(
             await _upsert_document(
-                db, event_id, "faq", str(faq.id), faq.title, content,
+                db, event_id, "faq", str(faq.id), faq.title,
+                faq_document_content(faq),
             )
         )
 

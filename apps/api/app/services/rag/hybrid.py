@@ -17,11 +17,20 @@ import logging
 import re
 import unicodedata
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.rag import KnowledgeDocument, RagChunk, RagDocument
+from app.models.schedule import Announcement, ScheduleItem
+from app.services.event_service import get_setting
+from app.services.rag.ingest import (
+    _checksum,
+    announcement_document_content,
+    faq_document_content,
+    schedule_document_content,
+)
 from app.services.rag.providers import get_embedding_provider
-from app.services.rag.qdrant_store import search_chunks
+from app.services.rag.qdrant_store import COLLECTION, get_client, search_chunks
 
 logger = logging.getLogger("app")
 
@@ -116,11 +125,15 @@ async def _vector_search(
     query: str, event_id: int, limit: int, source_types: list[str] | None
 ) -> list[dict]:
     try:
+        # Do not initialize/download the local embedding model when Qdrant is
+        # absent. FTS remains useful on a default stack without the rag profile.
+        if not await get_client().collection_exists(COLLECTION):
+            return []
         embedder = get_embedding_provider()
         [vector] = await embedder.embed([query])
         raw = await search_chunks(vector, event_id, limit=limit, source_types=source_types)
-    except Exception:
-        logger.warning("vector search failed, using FTS only", exc_info=True)
+    except Exception:  # noqa: BLE001 - optional vector backend must not break FTS
+        logger.warning("vector search unavailable, using FTS only")
         return []
     hits = []
     for item in raw:
@@ -164,6 +177,78 @@ def _fuse(fts_hits: list[dict], vec_hits: list[dict]) -> list[dict]:
     return fused
 
 
+async def _current_public_hits(db: AsyncSession, hits: list[dict], event_id: int) -> list[dict]:
+    """Never trust a search index as the publish/validity authority.
+
+    An unpublish or edit commits before the worker removes old FTS/Qdrant
+    entries. Qdrant can also retain a deleted point if its delete failed.
+    Verify each candidate against live SQL and return current chunk content.
+    """
+    ids = [hit["id"] for hit in hits]
+    if not ids:
+        return []
+    rows = await db.execute(
+        select(RagChunk, RagDocument)
+        .join(RagDocument, RagDocument.id == RagChunk.document_id)
+        .where(
+            RagChunk.id.in_(ids), RagChunk.event_id == event_id,
+            RagDocument.event_id == event_id, RagDocument.scope == "public",
+        )
+    )
+    current = {chunk.id: (chunk, doc) for chunk, doc in rows.all()}
+
+    source_ids: dict[str, set[int]] = {"faq": set(), "schedule_item": set(), "announcement": set()}
+    for _chunk, doc in current.values():
+        if doc.source_type in source_ids and doc.source_id.isdigit():
+            source_ids[doc.source_type].add(int(doc.source_id))
+
+    sources: dict[str, dict[int, object]] = {}
+    for source_type, model in (
+        ("faq", KnowledgeDocument),
+        ("schedule_item", ScheduleItem),
+        ("announcement", Announcement),
+    ):
+        values = source_ids[source_type]
+        if values:
+            result = await db.execute(
+                select(model).where(model.id.in_(values), model.event_id == event_id)
+            )
+            sources[source_type] = {item.id: item for item in result.scalars().all()}
+        else:
+            sources[source_type] = {}
+
+    terms = await get_setting(db, event_id, "terms_text", "")
+    approved: list[dict] = []
+    for hit in hits:
+        pair = current.get(hit["id"])
+        if pair is None:
+            continue
+        chunk, doc = pair
+        fresh_content = None
+        if doc.source_type == "faq" and doc.source_id.isdigit():
+            faq = sources["faq"].get(int(doc.source_id))
+            if faq is not None and faq.is_published:
+                fresh_content = faq_document_content(faq)
+        elif doc.source_type == "schedule_item" and doc.source_id.isdigit():
+            item = sources["schedule_item"].get(int(doc.source_id))
+            if item is not None and item.is_published and item.audience == "all":
+                fresh_content = schedule_document_content(item)
+        elif doc.source_type == "announcement" and doc.source_id.isdigit():
+            item = sources["announcement"].get(int(doc.source_id))
+            if item is not None and item.published_at is not None:
+                fresh_content = announcement_document_content(item)
+        elif doc.source_type == "terms" and terms:
+            fresh_content = str(terms)
+        if fresh_content is None or _checksum(fresh_content) != doc.checksum:
+            continue
+        approved.append({
+            **hit, "document_id": doc.id, "event_id": event_id,
+            "source_type": doc.source_type, "source_id": doc.source_id,
+            "title": chunk.title, "content": chunk.content,
+        })
+    return approved
+
+
 async def hybrid_search(
     db: AsyncSession,
     query: str,
@@ -176,4 +261,4 @@ async def hybrid_search(
     fts_hits = await _fts_search(db, query, event_id, TOP_CANDIDATES, source_types)
     vec_hits = await _vector_search(query, event_id, TOP_CANDIDATES, source_types)
     fused = _fuse(fts_hits, vec_hits)
-    return fused[:top_n]
+    return (await _current_public_hits(db, fused[:TOP_CANDIDATES], event_id))[:top_n]

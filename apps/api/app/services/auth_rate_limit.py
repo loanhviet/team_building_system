@@ -1,4 +1,5 @@
 import logging
+from hashlib import sha256
 
 from fastapi import status
 
@@ -10,9 +11,12 @@ LOGIN_RATE_LIMIT = 10
 LOGIN_RATE_WINDOW_SECONDS = 60
 
 
-async def check_login_rate(redis, identity: str) -> None:
+async def check_login_rate(redis, identity: str, client_ip: str | None) -> None:
     try:
-        key = f"login_rl:{identity.strip().lower()}"
+        # A stranger must not be able to lock another person's account from a
+        # different address. Hash the pair to avoid storing email in Redis keys.
+        pair = f"{client_ip or 'unknown'}:{identity.strip().lower()}"
+        key = f"login_rl:{sha256(pair.encode()).hexdigest()}"
         attempts = await redis.incr(key)
         if attempts == 1:
             await redis.expire(key, LOGIN_RATE_WINDOW_SECONDS)

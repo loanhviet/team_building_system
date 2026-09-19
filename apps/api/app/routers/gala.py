@@ -1,8 +1,11 @@
+from io import BytesIO
 from typing import Annotated
 
 import jwt
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
 from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, require_admin
@@ -21,6 +24,7 @@ from app.schemas.gala import (
     GalaConfigIn,
     GalaConfigOut,
     GalaSeatBlockIn,
+    GalaSeatOccupantIn,
     GalaSeatOut,
     GalaStateOut,
     GalaTableCreate,
@@ -302,9 +306,48 @@ async def get_state(event_id: int, db: DbSession, user: CurrentUser) -> GalaStat
     return GalaStateOut(
         config=GalaConfigOut.model_validate(config) if config else None,
         tables=[GalaTableOut.model_validate(t) for t in tables],
-        seats=[GalaSeatOut.model_validate(s) for s in seats],
+        seats=[
+            GalaSeatOut.model_validate(s).model_copy(update={
+                "employee_id": s.employee_id if user.role in (UserRole.organizer, UserRole.super_admin)
+                or (user.role == UserRole.team_leader and s.team_id == my_team_id) else None,
+            })
+            for s in seats
+        ],
         turns=turns,
         my_team_id=my_team_id,
+    )
+
+
+@router.get("/occupants/export")
+async def export_occupants(
+    event_id: int, db: DbSession, _user: AdminUser,
+) -> StreamingResponse:
+    await master_data.get_or_404(db, Event, event_id)
+    rows = await db.execute(
+        select(GalaSeat, GalaTable, Employee, Team)
+        .join(GalaTable, GalaTable.id == GalaSeat.table_id)
+        .outerjoin(Employee, Employee.id == GalaSeat.employee_id)
+        .outerjoin(Team, Team.id == GalaSeat.team_id)
+        .where(GalaTable.event_id == event_id, GalaSeat.status == "confirmed")
+        .order_by(GalaTable.code, GalaSeat.seat_number)
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Gala check-in"
+    sheet.append(["Team", "Bàn", "Ghế", "Mã nhân viên", "Họ tên", "Đã điểm danh"])
+    for seat, table, employee, team in rows.all():
+        sheet.append([
+            team.name if team else "", table.code, seat.label or str(seat.seat_number),
+            employee.employee_code if employee else "",
+            employee.full_name if employee else "", "",
+        ])
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="gala-checkin-{event_id}.xlsx"'},
     )
 
 
@@ -343,6 +386,63 @@ async def confirm(
         after={"team_id": team_id, "seat_id": seat_id}, event_id=event_id,
     )
     await db.commit()
+    return seat
+
+
+@router.put("/seats/{seat_id}/occupant", response_model=GalaSeatOut)
+async def assign_seat_occupant(
+    event_id: int,
+    seat_id: int,
+    payload: GalaSeatOccupantIn,
+    db: DbSession,
+    user: CurrentUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> GalaSeat:
+    _require_representative(user)
+    await lock_sqlite_write_transaction(db)
+    seat = await db.get(GalaSeat, seat_id)
+    table = await db.get(GalaTable, seat.table_id) if seat else None
+    if table is None or table.event_id != event_id:
+        raise AppError("not_found", "Ghế không thuộc event này", status.HTTP_404_NOT_FOUND)
+    if seat.status != "confirmed" or seat.team_id is None:
+        raise AppError("seat_not_confirmed", "Ghế chưa được xác nhận", status.HTTP_409_CONFLICT)
+    if user.role == UserRole.team_leader and seat.team_id != await _my_team_id(db, user):
+        raise AppError("forbidden", "Chỉ được gán ghế của Team mình", status.HTTP_403_FORBIDDEN)
+
+    if payload.employee_id is not None:
+        employee = await db.get(Employee, payload.employee_id)
+        if employee is None or employee.team_id != seat.team_id:
+            raise AppError("invalid_occupant", "Nhân viên không thuộc Team giữ ghế", status.HTTP_400_BAD_REQUEST)
+        reg = await db.scalar(select(Registration).where(
+            Registration.event_id == event_id,
+            Registration.employee_id == employee.id,
+            Registration.status == "submitted",
+            Registration.is_participating.is_(True),
+        ))
+        if reg is None:
+            raise AppError("invalid_occupant", "Nhân viên chưa đăng ký tham gia", status.HTTP_400_BAD_REQUEST)
+        other_seat = await db.scalar(
+            select(GalaSeat.id).join(GalaTable, GalaTable.id == GalaSeat.table_id).where(
+                GalaTable.event_id == event_id,
+                GalaSeat.id != seat_id,
+                GalaSeat.status == "confirmed",
+                GalaSeat.employee_id == employee.id,
+            )
+        )
+        if other_seat is not None:
+            raise AppError("occupant_already_seated", "Nhân viên đã được gán ghế khác", status.HTTP_409_CONFLICT)
+
+    before_id = seat.employee_id
+    seat.employee_id = payload.employee_id
+    seat.version += 1
+    await record_audit(
+        db, actor_user_id=user.id, action="assign_occupant", entity_type="gala_seat",
+        entity_id=seat_id, before={"employee_id": before_id},
+        after={"employee_id": payload.employee_id}, event_id=event_id,
+    )
+    await db.commit()
+    await db.refresh(seat)
+    await publish_gala_event(queue, event_id, {"type": "occupant_update", "seat_id": seat.id})
     return seat
 
 

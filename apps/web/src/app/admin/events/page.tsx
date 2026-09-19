@@ -20,7 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch, ApiError } from "@/lib/api";
-import { EVENT_STATUS_LABELS } from "@/lib/event-status";
+import { EVENT_STATUS_LABELS, eventDisplayName } from "@/lib/event-status";
 import type { Event } from "@/types/api";
 
 export default function EventsPage() {
@@ -40,7 +40,7 @@ export default function EventsPage() {
     mutationFn: () =>
       apiFetch<Event>("/api/events", {
         method: "POST",
-        body: JSON.stringify({ code, name, destination: destination || null }),
+        body: JSON.stringify({ code: code.trim(), name: name.trim(), destination: destination || null }),
       }),
     onSuccess: (event) => {
       toast.success("Đã tạo sự kiện");
@@ -70,10 +70,10 @@ export default function EventsPage() {
       header: "Tên",
       cell: (e) => (
         <Link href={`/admin/events/${e.id}`} className="hover:underline">
-          {e.name}
+          {eventDisplayName(e)}
         </Link>
       ),
-      sortValue: (e) => e.name,
+      sortValue: (e) => eventDisplayName(e),
     },
     { key: "destination", header: "Điểm đến", cell: (e) => e.destination ?? "—", sortValue: (e) => e.destination },
     {
@@ -115,7 +115,7 @@ export default function EventsPage() {
             <DialogFooter>
               <Button
                 onClick={() => createMutation.mutate()}
-                disabled={!code || !name || createMutation.isPending}
+                disabled={!code.trim() || !name.trim() || createMutation.isPending}
               >
                 Tạo
               </Button>

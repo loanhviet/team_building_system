@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { eventDisplayName } from "@/lib/event-status";
 import type { EmployeeEvent, GalaConfig } from "@/types/api";
 
 const STORAGE_KEY = "employee:currentEventId";
@@ -47,10 +48,8 @@ export function EmployeeEventProvider({ children }: { children: ReactNode }) {
     }
     try {
       const stored = localStorage.getItem(`${STORAGE_KEY}:${user.id}`);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedId(stored ? Number(stored) : null);
     } catch {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedId(null);
     }
   }, [user]);
@@ -94,7 +93,7 @@ export function EmployeeEventProvider({ children }: { children: ReactNode }) {
     events: mine,
     event,
     eventId: event?.id ?? null,
-    eventName: event?.name ?? null,
+    eventName: event ? eventDisplayName(event) : null,
     eventStatus: event?.status ?? null,
     canRegister: !!event?.can_register,
     hasJourney: !!event?.has_journey,

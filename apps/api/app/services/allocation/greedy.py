@@ -85,9 +85,6 @@ class GreedyFlightStrategy:
                         flagged[c.employee_id] = "shift_mismatch"
                 continue
 
-            if team.team_id is not None:
-                split_team_ids.add(team.team_id)
-
             by_shift: dict[int | None, list[Candidate]] = {}
             for c in group:
                 by_shift.setdefault(c.shift_id, []).append(c)
@@ -102,6 +99,15 @@ class GreedyFlightStrategy:
                         for c in leftover:
                             flagged[c.employee_id] = "no_slot"
                         break
+                    # Once the team is split for shift compatibility, prefer
+                    # a matching flight for each shift subgroup while capacity
+                    # remains. A fill bonus must not undo that decision.
+                    matching = [
+                        f for f in candidates
+                        if all(not _is_shift_mismatch(c, f) for c in leftover)
+                    ]
+                    if matching:
+                        candidates = matching
                     best = max(
                         candidates, key=lambda f: (_score(f, leftover, weights), -f.flight_id)
                     )
@@ -110,6 +116,13 @@ class GreedyFlightStrategy:
                         _place(best, c, assignments)
                         if _is_shift_mismatch(c, best):
                             flagged[c.employee_id] = "shift_mismatch"
+
+            # A fallback path may still put everyone on the same flight. Only
+            # count an actual split, not the decision to try subgroups.
+            if team.team_id is not None and len({
+                assignments[c.employee_id] for c in group if c.employee_id in assignments
+            }) > 1:
+                split_team_ids.add(team.team_id)
 
         return AllocationResult(
             assignments=assignments, flagged=flagged, split_team_ids=split_team_ids

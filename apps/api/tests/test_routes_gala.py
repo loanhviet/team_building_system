@@ -7,13 +7,16 @@ makeup turns when a team's turn ends short of quota (G1), draw preconditions
 (G4), and the has_representative flag on turns (G5)."""
 
 from datetime import timedelta
+from io import BytesIO
 
+from openpyxl import load_workbook
 from sqlalchemy import select
 
 from app.core.time import utcnow
 from app.models.enums import EventStatus, UserRole
 from app.models.gala import GalaConfig, GalaSeat, GalaTable, GalaTurn
 from app.models.organization import Team
+from app.models.registration import Registration
 from app.services.gala.gala_service import expire_stale
 from tests.conftest import make_employee
 
@@ -60,6 +63,89 @@ async def _table_with_seats(db_session, event_id: int, code: str, n: int) -> Gal
         db_session.add(GalaSeat(table_id=table.id, seat_number=i, label=f"{code}-{i}"))
     await db_session.flush()
     return table
+
+
+async def test_assign_occupant_validates_team_registration_and_journey(
+    client, world, auth_headers, db_session,
+):
+    leader = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV900", role=UserRole.team_leader,
+    )
+    other = await make_employee(db_session, team=world.team, site=world.site, code="NV901")
+    db_session.add(Registration(
+        event_id=world.event.id, employee_id=other.employee.id,
+        status="submitted", is_participating=True,
+    ))
+    db_session.add(GalaConfig(event_id=world.event.id, name="Gala"))
+    table = await _table_with_seats(db_session, world.event.id, "B1", 2)
+    seats = (await db_session.execute(
+        select(GalaSeat).where(GalaSeat.table_id == table.id).order_by(GalaSeat.seat_number)
+    )).scalars().all()
+    for seat in seats:
+        seat.status = "confirmed"
+        seat.team_id = world.team.id
+    world.event.status = EventStatus.information_published
+    await db_session.commit()
+
+    endpoint = f"/api/events/{world.event.id}/gala/seats/{seats[0].id}/occupant"
+    denied = await client.put(endpoint, headers=auth_headers(world.employee_user),
+                              json={"employee_id": world.employee.id})
+    assert denied.status_code == 403
+    invalid = await client.put(endpoint, headers=auth_headers(leader.user),
+                               json={"employee_id": leader.employee.id})
+    assert invalid.status_code == 400
+    assigned = await client.put(endpoint, headers=auth_headers(leader.user),
+                                json={"employee_id": world.employee.id})
+    assert assigned.status_code == 200
+    assert assigned.json()["employee_id"] == world.employee.id
+
+    duplicate = await client.put(
+        f"/api/events/{world.event.id}/gala/seats/{seats[1].id}/occupant",
+        headers=auth_headers(leader.user), json={"employee_id": world.employee.id},
+    )
+    assert duplicate.status_code == 409
+
+    other_team = Team(code="OTHER", name="Other Team")
+    db_session.add(other_team)
+    await db_session.flush()
+    seats[1].team_id = other_team.id
+    await db_session.commit()
+    cross_team = await client.put(
+        f"/api/events/{world.event.id}/gala/seats/{seats[1].id}/occupant",
+        headers=auth_headers(leader.user), json={"employee_id": world.employee.id},
+    )
+    assert cross_team.status_code == 403
+
+    journey = await client.get("/api/journey/me", headers=auth_headers(world.employee_user))
+    assert journey.status_code == 200
+    assert journey.json()["gala"]["my_seat"] == {
+        "table_code": "B1", "table_name": None, "seat_number": 1, "label": "B1-1",
+    }
+    state = await client.get(
+        f"/api/events/{world.event.id}/gala/state", headers=auth_headers(world.employee_user),
+    )
+    assert state.status_code == 200
+    assert all(seat["employee_id"] is None for seat in state.json()["seats"])
+
+    export = await client.get(
+        f"/api/events/{world.event.id}/gala/occupants/export",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert export.status_code == 200
+    sheet = load_workbook(BytesIO(export.content), read_only=True).active
+    rows = list(sheet.values)
+    assert rows[0] == ("Team", "Bàn", "Ghế", "Mã nhân viên", "Họ tên", "Đã điểm danh")
+    assert rows[1][1:5] == ("B1", "B1-1", world.employee.employee_code, world.employee.full_name)
+    private = await client.get(
+        f"/api/events/{world.event.id}/gala/occupants/export",
+        headers=auth_headers(world.employee_user),
+    )
+    assert private.status_code == 403
+
+    cleared = await client.put(endpoint, headers=auth_headers(leader.user),
+                               json={"employee_id": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["employee_id"] is None
 
 
 async def test_hold_exceeds_quota_is_rejected(client, world, auth_headers, db_session):

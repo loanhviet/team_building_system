@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.time import utcnow
 from app.models.rag import RagChunk, RagDocument
 from app.services.rag.chunking import chunk_text
-from app.services.rag.fts import delete_chunk_fts, ensure_fts, upsert_chunk_fts
+from app.services.rag.fts import delete_chunk_fts, delete_orphan_fts, ensure_fts, upsert_chunk_fts
 from app.services.rag.ingest import build_event_documents
 from app.services.rag.providers import get_embedding_provider
 from app.services.rag.qdrant_store import delete_documents, ensure_collection, upsert_points
@@ -65,6 +65,7 @@ async def reindex_event(db: AsyncSession, event_id: int) -> dict:
        reindex retries it — no manual "force re-embed" needed.
     """
     await ensure_fts(db)
+    await delete_orphan_fts(db)
 
     docs = await build_event_documents(db, event_id)
     keep_ids = {doc.id for doc, _ in docs}
@@ -98,15 +99,15 @@ async def reindex_event(db: AsyncSession, event_id: int) -> dict:
     try:
         if stale_qdrant_ids:
             await delete_documents(stale_qdrant_ids)
-    except Exception:
-        logger.warning("qdrant delete failed for chunks %s", stale_qdrant_ids, exc_info=True)
+    except Exception:  # noqa: BLE001 - optional vector backend must not break FTS
+        logger.warning("qdrant delete unavailable for chunks %s", stale_qdrant_ids)
 
     embedder = get_embedding_provider()
     try:
         await ensure_collection(embedder.dimension)
         qdrant_ok = True
-    except Exception:
-        logger.warning("qdrant unavailable, indexing FTS only", exc_info=True)
+    except Exception:  # noqa: BLE001 - optional vector backend must not break FTS
+        logger.warning("qdrant unavailable, indexing FTS only")
         qdrant_ok = False
 
     embedded = 0

@@ -26,7 +26,7 @@ async def supervise() -> int:
     started_at = time.monotonic()
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     try:
-        while child.poll() is None:
+        while child.returncode is None:
             await asyncio.sleep(5)
             try:
                 raw = await redis.get(HEARTBEAT_KEY)
@@ -46,6 +46,13 @@ async def supervise() -> int:
         return child.returncode or 0
     finally:
         await redis.aclose()
+        if child.returncode is None:
+            child.terminate()
+            try:
+                await asyncio.wait_for(child.wait(), timeout=10)
+            except TimeoutError:
+                child.kill()
+                await child.wait()
 
 
 def _forward_signal(signum: int, _frame: object) -> None:

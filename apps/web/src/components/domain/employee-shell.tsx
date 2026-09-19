@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth-context";
+import { eventDisplayName } from "@/lib/event-status";
 import { EmployeeEventProvider, useEmployeeEvent } from "@/lib/use-employee-event";
 import { cn } from "@/lib/utils";
 
@@ -61,18 +62,18 @@ function EmployeeEventPicker({ compact = false }: { compact?: boolean }) {
           queryClient.removeQueries({ queryKey: ["journey"] });
           queryClient.removeQueries({ queryKey: ["chat"] });
           if (pathname.startsWith("/gala")) router.push(`/gala/${id}`);
-          toast.message(next ? `Đang xem ${next.name}` : "Đã đổi kỳ");
+          toast.message(next ? `Đang xem ${eventDisplayName(next)}` : "Đã đổi kỳ");
         }}
       >
         <SelectTrigger className={cn("text-left", compact ? "h-9 min-h-9 w-[min(16rem,40vw)]" : "h-auto min-h-11 w-full py-2")}>
           <SelectValue placeholder="Chọn kỳ">
-            {event ? <span className="truncate font-medium">{event.name}</span> : null}
+            {event ? <span className="truncate font-medium">{eventDisplayName(event)}</span> : null}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {events.map((e) => (
             <SelectItem key={e.id} value={String(e.id)}>
-              {e.name}
+              {eventDisplayName(e)}
               {e.has_journey ? " · Hành trình" : e.can_register ? " · Đang mở ĐK" : ""}
             </SelectItem>
           ))}

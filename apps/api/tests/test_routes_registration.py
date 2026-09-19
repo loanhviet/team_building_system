@@ -12,6 +12,7 @@ from app.core.time import utcnow
 from app.models.bus import Bus, BusAssignment
 from app.models.enums import EventStatus
 from app.models.flight import Flight, FlightAssignment
+from app.models.gala import GalaSeat, GalaTable
 from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.notification import EmailOutbox
 from app.models.registration import Registration
@@ -145,6 +146,35 @@ async def test_cancel_removes_locked_operational_assignments(
     assert (await db_session.execute(select(FlightAssignment))).scalars().all() == []
     assert (await db_session.execute(select(RoomAssignment))).scalars().all() == []
     assert (await db_session.execute(select(BusAssignment))).scalars().all() == []
+
+
+async def test_opt_out_clears_assignments_and_personal_gala_seat(
+    client, world, auth_headers, db_session,
+):
+    flight = Flight(event_id=world.event.id, flight_code="VN1", direction="outbound", capacity=10)
+    table = GalaTable(event_id=world.event.id, code="B1", seat_count=1)
+    db_session.add_all([flight, table])
+    await db_session.flush()
+    seat = GalaSeat(
+        table_id=table.id, seat_number=1, status="confirmed",
+        team_id=world.team.id, employee_id=world.employee.id,
+    )
+    db_session.add_all([seat, FlightAssignment(
+        event_id=world.event.id, flight_id=flight.id, employee_id=world.employee.id,
+        direction="outbound", is_locked=True,
+    )])
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user), json={"is_participating": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_participating"] is False
+    assert (await db_session.execute(select(FlightAssignment))).scalars().all() == []
+    await db_session.refresh(seat)
+    assert seat.employee_id is None
+    assert seat.status == "confirmed"
 
 
 async def test_latest_registration_survives_registration_closed(client, world, auth_headers, db_session):

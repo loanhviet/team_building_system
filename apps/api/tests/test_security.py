@@ -3,12 +3,15 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.core.security import (
     create_access_token,
     decode_access_token,
     hash_password,
     verify_password,
 )
+from app.services.auth_rate_limit import check_login_rate
+from tests.conftest import FakeQueue
 
 
 def test_password_hash_roundtrip():
@@ -45,6 +48,28 @@ def test_production_accepts_https_and_strong_secret():
         jwt_secret="a-strong-production-secret-that-is-over-32-characters",
     )
     assert settings.app_env == "production"
+
+
+async def test_login_limit_is_scoped_to_client_and_identity():
+    redis = FakeQueue()
+    for _ in range(10):
+        await check_login_rate(redis, "USER@EXAMPLE.COM", "192.0.2.1")
+    with pytest.raises(AppError) as exc:
+        await check_login_rate(redis, "user@example.com", "192.0.2.1")
+    assert exc.value.code == "login_rate_limited"
+    await check_login_rate(redis, "user@example.com", "192.0.2.2")
+
+
+async def test_event_name_cannot_be_only_whitespace(client, world, auth_headers):
+    headers = auth_headers(world.organizer_user)
+    created = await client.post(
+        "/api/events", headers=headers, json={"code": "NEW", "name": "   "},
+    )
+    assert created.status_code == 422
+    edited = await client.patch(
+        f"/api/events/{world.event.id}", headers=headers, json={"name": "   "},
+    )
+    assert edited.status_code == 422
 
 
 async def test_custom_validator_error_returns_422_not_500(client, world, auth_headers):

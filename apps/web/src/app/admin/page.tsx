@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { EventDashboard } from "@/components/domain/event-dashboard";
 import { apiFetch } from "@/lib/api";
+import { eventDisplayName } from "@/lib/event-status";
 import { useCurrentEventId } from "@/lib/use-current-event-id";
 import type { Event, EventStatus } from "@/types/api";
 
@@ -36,7 +37,7 @@ export default function AdminHomePage() {
         <h1 className="font-display text-2xl font-semibold">Tổng quan sự kiện</h1>
         {event ? (
           <p className="mt-1 text-sm text-muted-foreground">
-            {event.name}
+            {eventDisplayName(event)}
             {" · "}
             <Link href={`/admin/events/${event.id}`} className="text-primary underline">
               Mở kỳ này
