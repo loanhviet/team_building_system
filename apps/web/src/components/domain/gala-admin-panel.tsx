@@ -70,7 +70,10 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
     );
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey });
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "dashboard"] });
+  };
 
   const openConfigDialog = () => {
     if (state?.config) {

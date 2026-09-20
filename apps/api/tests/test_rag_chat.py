@@ -2,6 +2,7 @@ import json
 
 from app.core.time import utcnow
 from app.models.enums import EventStatus
+from app.models.flight import Flight, FlightAssignment
 from app.models.hotel import Hotel, Room, RoomAssignment
 from app.models.registration import Registration
 from app.services.rag.providers.base import LLMResponse, ToolCall
@@ -136,6 +137,52 @@ async def test_unpublished_journey_does_not_invent_a_room(
     events = _parse_sse(resp)
     text = "".join(e.get("delta", "") for e in events)
     assert "published=False" in text
+
+
+async def test_personal_flight_question_reads_published_journey_without_llm(
+    client, world, auth_headers, db_session, monkeypatch
+):
+    """A factual personal-flight question must not fall back to public FAQ."""
+    flight = Flight(
+        event_id=world.event.id,
+        flight_code="VN001",
+        direction="outbound",
+        capacity=10,
+        origin="Hà Nội",
+        destination="Đà Nẵng",
+    )
+    db_session.add(flight)
+    await db_session.flush()
+    db_session.add(
+        FlightAssignment(
+            event_id=world.event.id,
+            employee_id=world.employee.id,
+            flight_id=flight.id,
+            direction="outbound",
+        )
+    )
+    world.event.status = EventStatus.information_published
+    await db_session.commit()
+
+    class MustNotCallLLM:
+        async def complete(self, *_a, **_k):
+            raise AssertionError("personal journey is served directly")
+
+    monkeypatch.setattr("app.services.rag.chat_service.get_llm_provider", lambda: MustNotCallLLM())
+    session = await client.post(
+        "/api/chat/sessions", headers=auth_headers(world.employee_user), json={"event_id": world.event.id}
+    )
+    response = await client.post(
+        f"/api/chat/sessions/{session.json()['id']}/messages",
+        headers=auth_headers(world.employee_user),
+        json={"content": "Tôi bay ở chuyến bay nào chiều đi?"},
+    )
+
+    events = _parse_sse(response)
+    text = "".join(event.get("delta", "") for event in events)
+    assert "VN001" in text
+    assert "VN101" not in text
+    assert any(event.get("tool") == "get_my_journey" for event in events)
 
 
 async def test_standalone_question_searches_when_llm_skips_tools(

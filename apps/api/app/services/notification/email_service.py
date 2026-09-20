@@ -365,8 +365,8 @@ def preview_template(subject: str, body_html: str) -> tuple[str, str]:
     return Template(subject).render(**PREVIEW_CONTEXT), Template(body_html).render(**PREVIEW_CONTEXT)
 
 
-async def enqueue_schedule_changed(queue, event, item_id: int) -> None:
-    if event.status.value not in PUBLISHED_STATUSES:
+async def enqueue_schedule_changed(queue, event, item_id: int, is_visible_to_employees: bool) -> None:
+    if event.status.value not in PUBLISHED_STATUSES or not is_visible_to_employees:
         return
     suffix = f"item{item_id}:{utcnow().strftime('%Y%m%d%H')}"
     await queue.enqueue_job("send_bulk_emails_task", event.id, "schedule_changed", suffix)

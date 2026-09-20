@@ -77,6 +77,8 @@ const EMPTY_FLIGHT = {
 
 export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
+  const invalidateDashboard = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "dashboard"] });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
   const [preset, setPreset] = useState<AllocationPreset>("event_settings");
@@ -153,6 +155,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       toast.success(`Import xong: ${result.ok_rows} OK, ${result.error_rows} lỗi`);
       setImportErrors(result.errors ?? []);
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "flights"] });
+      invalidateDashboard();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Import thất bại"),
   });
@@ -201,6 +204,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       setFlightOpen(false);
       setEditingFlight(null);
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "flights"] });
+      invalidateDashboard();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không lưu được"),
   });
@@ -226,6 +230,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       setOverCapacityMsg(null);
       setSoftWarning(false);
       refetchAssignments();
+      invalidateDashboard();
     },
     onError: (err) => {
       if (err instanceof ApiError && err.code === "soft_warning_required") {
@@ -252,6 +257,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
       toast.success(`Đã bỏ ghim ${data.unlocked} người — lần chạy phân bổ tự động tiếp theo sẽ xét lại họ`);
       setSelected(new Set());
       refetchAssignments();
+      invalidateDashboard();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -259,6 +265,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
   useEffect(() => {
     if (job && (job.status === "succeeded" || job.status === "failed")) {
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "flight-assignments"] });
+      invalidateDashboard();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.status, job?.id]);

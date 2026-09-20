@@ -12,7 +12,13 @@ from app.models.auth import User
 from app.models.event import Event
 from app.models.organization import Employee
 from app.services.rag.providers import get_llm_provider
-from app.services.rag.tools import OPENAI_TOOLS, ToolContext, execute_tool, search_event_knowledge
+from app.services.rag.tools import (
+    OPENAI_TOOLS,
+    ToolContext,
+    execute_tool,
+    get_my_journey,
+    search_event_knowledge,
+)
 
 logger = logging.getLogger("app")
 
@@ -59,6 +65,57 @@ def _fold(text: str) -> str:
 def _is_chitchat(query: str) -> bool:
     s = _fold(query).strip().rstrip("!?.…")
     return s in {_fold(g) for g in GREETINGS}
+
+
+def _is_personal_flight_question(query: str) -> bool:
+    """Recognise a direct request for the caller's published flight.
+
+    These answers are factual and already live in the journey data. Asking an
+    LLM to decide whether to call its journey tool made it occasionally search
+    the public FAQ instead, even after the flight had been published.
+    """
+    text = _fold(query)
+    asks_about_self = bool(re.search(r"\b(toi|minh|tui|em|cua toi|cua minh)\b", text))
+    asks_about_flight = "chuyen bay" in text or bool(re.search(r"\bbay\b", text))
+    return asks_about_self and asks_about_flight
+
+
+def _flight_direction(query: str) -> str | None:
+    # Unicode NFKD does not turn Vietnamese "đ" into "d".
+    text = _fold(query).replace("đ", "d")
+    if "chieu di" in text or "luot di" in text:
+        return "outbound"
+    if "chieu ve" in text or "luot ve" in text:
+        return "inbound"
+    return None
+
+
+async def _personal_flight_response(ctx: ToolContext, query: str) -> tuple[str, list[dict], dict]:
+    data, citations = await get_my_journey(ctx, section="flights")
+    if not data.get("published"):
+        return data["message"], citations, data
+
+    direction = _flight_direction(query)
+    flights = data.get("flights", [])
+    if direction is not None:
+        flights = [flight for flight in flights if flight.get("direction") == direction]
+
+    direction_label = "chiều đi" if direction == "outbound" else "chiều về" if direction == "inbound" else ""
+    if not flights:
+        qualifier = f" {direction_label}" if direction_label else ""
+        return f"Hành trình đã công bố chưa có chuyến bay{qualifier} của bạn.", citations, data
+
+    details = []
+    for flight in flights:
+        route = " → ".join(part for part in (flight.get("origin"), flight.get("destination")) if part)
+        detail = flight["flight_code"]
+        if flight.get("airline"):
+            detail = f"{flight['airline']} {detail}"
+        if route:
+            detail = f"{detail} ({route})"
+        details.append(detail)
+    prefix = f"Chuyến bay {direction_label} của bạn" if direction_label else "Chuyến bay của bạn"
+    return f"{prefix}: **{' ; '.join(details)}**.", citations, data
 
 
 def _user_turns(history: list[dict]) -> int:
@@ -159,6 +216,18 @@ async def answer_stream(
     citations: list[dict] = []
     tool_trace: list[dict] = []
     tools_ran: set[str] = set()
+
+    if _is_personal_flight_question(query):
+        yield {"tool": "get_my_journey"}
+        text, citations, result = await _personal_flight_response(ctx, query)
+        tool_trace.append({
+            "name": "get_my_journey",
+            "arguments": {"section": "flights"},
+            "ok": "error" not in result,
+        })
+        yield {"delta": text}
+        yield {"done": True, "citations": citations, "tool_trace": tool_trace, "text": text}
+        return
 
     for _round in range(MAX_TOOL_ROUNDS):
         try:

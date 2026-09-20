@@ -51,6 +51,38 @@ async def delete_documents(doc_ids: list[int]) -> None:
     )
 
 
+def _event_filter(event_id: int) -> models.Filter:
+    return models.Filter(
+        must=[models.FieldCondition(key="event_id", match=models.MatchValue(value=event_id))]
+    )
+
+
+async def event_point_count(event_id: int) -> int:
+    """Return the exact number of vectors stored for one event.
+
+    SQLite owns the authoritative chunk list. This count lets reindex detect
+    a collection that was cleared or carries vectors from an old seed/schema.
+    """
+    client = get_client()
+    if not await client.collection_exists(COLLECTION):
+        return 0
+    result = await client.count(
+        collection_name=COLLECTION, count_filter=_event_filter(event_id), exact=True
+    )
+    return result.count
+
+
+async def delete_event_points(event_id: int) -> None:
+    """Remove every vector belonging to an event before a full reconciliation."""
+    client = get_client()
+    if not await client.collection_exists(COLLECTION):
+        return
+    await client.delete(
+        collection_name=COLLECTION,
+        points_selector=models.FilterSelector(filter=_event_filter(event_id)),
+    )
+
+
 async def search_chunks(
     vector: list[float],
     event_id: int,

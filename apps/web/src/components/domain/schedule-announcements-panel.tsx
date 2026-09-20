@@ -165,6 +165,7 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
         audience_ref_id: scheduleForm.audience !== "all" && scheduleForm.audience_ref_id
           ? Number(scheduleForm.audience_ref_id)
           : null,
+        ...(!editingSchedule && { is_published: isPublished }),
       };
       return editingSchedule
         ? apiFetch<ScheduleItem>(`/api/events/${eventId}/schedule-items/${editingSchedule.id}`, {

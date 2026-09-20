@@ -127,11 +127,16 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels"] });
     queryClient.invalidateQueries({ queryKey: ["events", eventId, "room-assignments"] });
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "dashboard"] });
   };
-  const invalidateRooms = () =>
+  const invalidateRooms = () => {
     queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "rooms"] });
-  const invalidateTypes = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "dashboard"] });
+  };
+  const invalidateTypes = () => {
     queryClient.invalidateQueries({ queryKey: ["events", eventId, "hotels", hotelId, "room-types"] });
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "dashboard"] });
+  };
 
   const openCreateHotel = () => {
     setEditingHotel(null);

@@ -32,3 +32,18 @@ for (const viewport of viewports) {
     }
   });
 }
+
+test("bus row transfer opens its adjustment dialog without scrolling to the table end", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await login(page);
+  await page.goto("/admin/events/1/buses");
+
+  const transfer = page.getByRole("button", { name: /chuyển .+ sang xe khác ngay/i }).first();
+  await expect(transfer).toBeVisible();
+  await transfer.click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Điều chỉnh xe" })).toBeVisible();
+  await expect(dialog.getByText("Chuyển tới xe", { exact: true })).toBeVisible();
+});

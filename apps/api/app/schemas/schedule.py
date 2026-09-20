@@ -13,6 +13,7 @@ class ScheduleItemCreate(BaseModel):
     audience: str = "all"
     audience_ref_id: int | None = None
     sort_order: int = 0
+    is_published: bool = False
 
 
 class ScheduleItemUpdate(BaseModel):

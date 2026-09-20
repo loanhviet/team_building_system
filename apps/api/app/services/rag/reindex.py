@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utcnow
@@ -9,7 +9,13 @@ from app.services.rag.chunking import chunk_text
 from app.services.rag.fts import delete_chunk_fts, delete_orphan_fts, ensure_fts, upsert_chunk_fts
 from app.services.rag.ingest import build_event_documents
 from app.services.rag.providers import get_embedding_provider
-from app.services.rag.qdrant_store import delete_documents, ensure_collection, upsert_points
+from app.services.rag.qdrant_store import (
+    delete_documents,
+    delete_event_points,
+    ensure_collection,
+    event_point_count,
+    upsert_points,
+)
 
 logger = logging.getLogger("app")
 
@@ -111,15 +117,32 @@ async def reindex_event(db: AsyncSession, event_id: int) -> dict:
         qdrant_ok = False
 
     embedded = 0
+    reconciled = False
     if qdrant_ok:
-        pending = await db.execute(
-            select(RagChunk)
-            .join(RagDocument, RagDocument.id == RagChunk.document_id)
-            .where(RagDocument.event_id == event_id, RagDocument.indexed_at.is_(None))
-        )
-        pending_chunks = list(pending.scalars().all())
-        if pending_chunks:
-            try:
+        try:
+            expected_count = await db.scalar(
+                select(func.count(RagChunk.id)).where(RagChunk.event_id == event_id)
+            )
+            # A source edit changes chunk IDs; a count mismatch catches manual
+            # collection deletion and stale vectors left by a prior data shape.
+            # Rebuild the event's vector slice rather than trusting indexed_at.
+            reconciled = (
+                await event_point_count(event_id) != (expected_count or 0)
+                or bool(stale_qdrant_ids)
+            )
+            if reconciled:
+                await delete_event_points(event_id)
+                pending = await db.execute(
+                    select(RagChunk).where(RagChunk.event_id == event_id)
+                )
+            else:
+                pending = await db.execute(
+                    select(RagChunk)
+                    .join(RagDocument, RagDocument.id == RagChunk.document_id)
+                    .where(RagDocument.event_id == event_id, RagDocument.indexed_at.is_(None))
+                )
+            pending_chunks = list(pending.scalars().all())
+            if pending_chunks:
                 vectors = await embedder.embed([c.content for c in pending_chunks])
                 points = [
                     (
@@ -147,8 +170,8 @@ async def reindex_event(db: AsyncSession, event_id: int) -> dict:
                 for pending_doc in docs_result.scalars().all():
                     pending_doc.indexed_at = utcnow()
                 await db.commit()
-            except Exception:
-                logger.warning("embedding/qdrant upsert failed, will retry next reindex", exc_info=True)
+        except Exception:
+            logger.warning("embedding/qdrant reconciliation failed, will retry next reindex", exc_info=True)
 
     return {
         "total_documents": len(docs),
@@ -156,4 +179,5 @@ async def reindex_event(db: AsyncSession, event_id: int) -> dict:
         "changed_documents": len(changed),
         "removed_documents": removed,
         "qdrant": qdrant_ok,
+        "reconciled": reconciled,
     }

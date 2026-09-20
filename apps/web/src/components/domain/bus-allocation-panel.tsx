@@ -77,6 +77,8 @@ const EMPTY_BUS = {
 
 export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const queryClient = useQueryClient();
+  const invalidateDashboard = () =>
+    queryClient.invalidateQueries({ queryKey: ["events", eventId, "dashboard"] });
   const [legId, setLegId] = useState<number | null>(null);
   const [preset, setPreset] = useState<AllocationPreset>("event_settings");
   const [focusBusId, setFocusBusId] = useState<number | "all">("all");
@@ -154,6 +156,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   useEffect(() => {
     if (job && (job.status === "succeeded" || job.status === "failed")) {
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "bus-assignments"] });
+      invalidateDashboard();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.status, job?.id]);
@@ -222,6 +225,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       setBusDialogOpen(false);
       setEditingBus(null);
       queryClient.invalidateQueries({ queryKey: ["events", eventId, "buses", currentLegId] });
+      invalidateDashboard();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -259,6 +263,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       setAdjustOpen(false);
       setOverCapacityMsg(null);
       refetchAssignments();
+      invalidateDashboard();
     },
     onError: (err) => {
       if (err instanceof ApiError && (err.code === "over_capacity" || err.code === "bus_incompatible")) {
@@ -279,6 +284,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
       toast.success(`Đã bỏ ghim ${data.unlocked} người — lần chạy phân xe tự động tiếp theo sẽ xét lại họ`);
       setSelected(new Set());
       refetchAssignments();
+      invalidateDashboard();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
   });
@@ -330,6 +336,14 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   });
   const allVisibleSelected =
     visibleAssignments.length > 0 && visibleAssignments.every((a) => selected.has(a.employee_id));
+
+  const openAdjustmentFor = (employeeId: number) => {
+    setSelected(new Set([employeeId]));
+    setMoveTeamId("");
+    setMoveTarget("");
+    setOverCapacityMsg(null);
+    setAdjustOpen(true);
+  };
 
   const assignmentColumns: DataTableColumn<BusAssignment>[] = [
     {
@@ -411,15 +425,16 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
     {
       key: "actions",
       header: "",
-      className: "w-10 text-right",
+      className: "w-28 text-right",
       cell: (a) => (
         <Button
           size="sm"
-          variant="ghost"
-          onClick={() => setSelected(new Set([a.employee_id]))}
-          aria-label={`Chuyển ${a.full_name} sang xe khác`}
+          variant={a.is_flagged ? "outline" : "ghost"}
+          onClick={() => openAdjustmentFor(a.employee_id)}
+          aria-label={`Chuyển ${a.full_name} sang xe khác ngay`}
         >
           <ArrowLeftRight className="size-4" aria-hidden="true" />
+          <span className="ml-1.5">Chuyển</span>
         </Button>
       ),
     },
@@ -769,6 +784,46 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           </Button>
         </div>
 
+        {selected.size > 0 && (
+          <div className="sticky top-3 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
+            <span className="text-sm font-medium">{selected.size} đã chọn</span>
+            <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Chuyển tới xe" />
+              </SelectTrigger>
+              <SelectContent>
+                {buses?.map((bus) => (
+                  <SelectItem key={bus.id} value={String(bus.id)} disabled={!canReceiveSelection(bus)}>
+                    {bus.code} · còn {bus.capacity - (assignments ?? []).filter((a) => a.bus_id === bus.id).length}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              disabled={!moveTarget}
+              onClick={() => {
+                setMoveTeamId("");
+                setOverCapacityMsg(null);
+                setAdjustOpen(true);
+              }}
+            >
+              Điều chỉnh
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={unlockMutation.isPending}
+              onClick={() => unlockMutation.mutate()}
+            >
+              Bỏ ghim
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              Bỏ chọn
+            </Button>
+          </div>
+        )}
+
         <DataTable
           columns={assignmentColumns}
           rows={visibleAssignments}
@@ -777,46 +832,6 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           pageSize={50}
         />
       </div>
-
-      {selected.size > 0 && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-[var(--shadow-card)]">
-          <span className="text-sm font-medium">{selected.size} đã chọn</span>
-          <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Chuyển tới xe" />
-            </SelectTrigger>
-            <SelectContent>
-              {buses?.map((b) => (
-                <SelectItem key={b.id} value={String(b.id)} disabled={!canReceiveSelection(b)}>
-                  {b.code} · còn {b.capacity - (assignments ?? []).filter((a) => a.bus_id === b.id).length}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            disabled={!moveTarget}
-            onClick={() => {
-              setMoveTeamId("");
-              setOverCapacityMsg(null);
-              setAdjustOpen(true);
-            }}
-          >
-            Chuyển
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={unlockMutation.isPending}
-            onClick={() => unlockMutation.mutate()}
-          >
-            Bỏ ghim
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-            Bỏ chọn
-          </Button>
-        </div>
-      )}
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent>
@@ -831,6 +846,21 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
               Cần ghi lý do (audit log).
             </p>
             <div className="flex flex-col gap-1.5">
+              <Label>Chuyển tới xe</Label>
+              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v ?? "")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Chọn xe thay thế" />
+                </SelectTrigger>
+                <SelectContent>
+                  {buses?.map((bus) => (
+                    <SelectItem key={bus.id} value={String(bus.id)} disabled={!canReceiveSelection(bus)}>
+                      {bus.code} · còn {bus.capacity - (assignments ?? []).filter((a) => a.bus_id === bus.id).length} chỗ
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
               <Label>Lý do</Label>
               <Input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
             </div>
@@ -839,7 +869,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
           <DialogFooter>
             {!overCapacityMsg ? (
               <Button
-                disabled={!adjustReason.trim() || adjustMutation.isPending}
+                disabled={!moveTarget || !adjustReason.trim() || adjustMutation.isPending}
                 onClick={() => moveTarget && adjustMutation.mutate({ busId: Number(moveTarget) })}
               >
                 Xác nhận

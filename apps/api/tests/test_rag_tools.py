@@ -91,6 +91,8 @@ async def test_ingest_does_not_index_personal_journeys(db_session, world, monkey
     monkeypatch.setattr("app.services.rag.reindex.ensure_collection", noop)
     monkeypatch.setattr("app.services.rag.reindex.upsert_points", noop)
     monkeypatch.setattr("app.services.rag.reindex.delete_documents", noop)
+    monkeypatch.setattr("app.services.rag.reindex.event_point_count", lambda _event_id: noop())
+    monkeypatch.setattr("app.services.rag.reindex.delete_event_points", noop)
 
     db_session.add(
         KnowledgeDocument(
@@ -164,6 +166,8 @@ async def test_reindex_retries_embedding_after_a_failed_run(db_session, world, m
     monkeypatch.setattr("app.services.rag.reindex.ensure_collection", noop)
     monkeypatch.setattr("app.services.rag.reindex.upsert_points", record_upsert)
     monkeypatch.setattr("app.services.rag.reindex.delete_documents", noop)
+    monkeypatch.setattr("app.services.rag.reindex.event_point_count", lambda _event_id: noop())
+    monkeypatch.setattr("app.services.rag.reindex.delete_event_points", noop)
 
     summary = await reindex_event(db_session, world.event.id)
     assert summary["qdrant"] is True
@@ -172,3 +176,51 @@ async def test_reindex_retries_embedding_after_a_failed_run(db_session, world, m
 
     await db_session.refresh(doc)
     assert doc.indexed_at is not None
+
+
+async def test_reindex_restores_an_event_after_its_qdrant_points_are_cleared(
+    db_session, world, monkeypatch
+):
+    """The SQLite checkpoint alone cannot prove Qdrant still has its vectors."""
+    db_session.add(
+        KnowledgeDocument(
+            event_id=world.event.id, title="Dress code", body_md="Smart casual.",
+            is_published=True,
+        )
+    )
+    await db_session.commit()
+
+    async def noop(*_a, **_k):
+        return None
+
+    upserted: list = []
+    point_counts = [1, 0]
+
+    async def count_points(_event_id):
+        return point_counts.pop(0)
+
+    async def record_upsert(points):
+        upserted.extend(points)
+
+    monkeypatch.setattr("app.services.rag.reindex.get_embedding_provider", lambda: FakeEmbed())
+    monkeypatch.setattr("app.services.rag.reindex.ensure_collection", noop)
+    monkeypatch.setattr("app.services.rag.reindex.upsert_points", record_upsert)
+    monkeypatch.setattr("app.services.rag.reindex.delete_documents", noop)
+    monkeypatch.setattr("app.services.rag.reindex.event_point_count", count_points)
+    deleted_events: list[int] = []
+
+    async def delete_event(event_id):
+        deleted_events.append(event_id)
+
+    monkeypatch.setattr("app.services.rag.reindex.delete_event_points", delete_event)
+
+    first = await reindex_event(db_session, world.event.id)
+    assert first["reembedded"] == 1
+    assert first["reconciled"] is False
+    upserted.clear()
+
+    restored = await reindex_event(db_session, world.event.id)
+    assert restored["reembedded"] == 1
+    assert restored["reconciled"] is True
+    assert deleted_events == [world.event.id]
+    assert len(upserted) == 1
