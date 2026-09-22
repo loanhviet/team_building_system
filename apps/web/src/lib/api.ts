@@ -14,11 +14,13 @@ export function getAccessToken() {
 export class ApiError extends Error {
   status: number;
   code: string;
+  details?: unknown;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -84,6 +86,7 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
     res.status,
     body?.error?.code ?? "unknown_error",
     body?.error?.message ?? `Yêu cầu thất bại (mã lỗi ${res.status})`,
+    body?.error?.details,
   );
 }
 

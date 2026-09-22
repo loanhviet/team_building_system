@@ -47,6 +47,10 @@ export type Employee = {
   is_active: boolean;
   team_name: string | null;
   site_name: string | null;
+  account_id: number | null;
+  account_role: string | null;
+  account_is_active: boolean | null;
+  must_change_password: boolean | null;
 };
 
 export type EmployeeList = {

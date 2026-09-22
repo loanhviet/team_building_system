@@ -17,7 +17,7 @@ from app.core.queue import get_queue
 from app.core.security import generate_temporary_password, hash_password
 from app.models.auth import User
 from app.models.enums import ImportBatchStatus, JobStatus, UserRole
-from app.models.organization import Employee, Site
+from app.models.organization import Employee, Site, Team
 from app.models.system import ImportBatch, Job
 from app.schemas.organization import (
     EmployeeCreate,
@@ -43,7 +43,7 @@ AdminUser = Annotated[User, Depends(require_admin)]
 UPLOAD_DIR = Path("/data/uploads")
 
 
-def _employee_out(employee: Employee) -> EmployeeOut:
+def _employee_out(employee: Employee, account: User | None = None) -> EmployeeOut:
     return EmployeeOut(
         id=employee.id,
         employee_code=employee.employee_code,
@@ -57,6 +57,10 @@ def _employee_out(employee: Employee) -> EmployeeOut:
         is_active=employee.is_active,
         team_name=employee.team.name if employee.team else None,
         site_name=employee.site.name if employee.site else None,
+        account_id=account.id if account else None,
+        account_role=account.role.value if account else None,
+        account_is_active=account.is_active if account else None,
+        must_change_password=account.must_change_password if account else None,
     )
 
 
@@ -106,6 +110,45 @@ async def _next_employee_code(db: DbSession) -> str:
     return f"NV{max_n + 1:03d}"
 
 
+async def _ensure_employee_references(
+    db: DbSession, *, team_id: int | None, site_id: int | None
+) -> None:
+    if team_id is not None:
+        team = await db.get(Team, team_id)
+        if team is None or not team.is_active:
+            raise AppError("invalid_team", "Team được chọn không tồn tại hoặc đã ngừng hoạt động", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    if site_id is not None:
+        site = await db.get(Site, site_id)
+        if site is None or not site.is_active:
+            raise AppError("invalid_site", "Địa điểm được chọn không tồn tại hoặc đã ngừng hoạt động", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+async def _ensure_employee_unique(
+    db: DbSession, *, employee_code: str | None, email: str | None, excluding_id: int | None = None
+) -> None:
+    if employee_code:
+        stmt = select(Employee.id).where(func.lower(func.trim(Employee.employee_code)) == employee_code.lower())
+        if excluding_id is not None:
+            stmt = stmt.where(Employee.id != excluding_id)
+        if (await db.execute(stmt.limit(1))).scalar_one_or_none() is not None:
+            raise AppError("employee_code_exists", "Mã nhân viên đã tồn tại (không phân biệt chữ hoa/thường)", status.HTTP_409_CONFLICT)
+    if email:
+        normalized_email = email.strip().lower()
+        employee_stmt = select(Employee.id).where(func.lower(func.trim(Employee.email)) == normalized_email)
+        if excluding_id is not None:
+            employee_stmt = employee_stmt.where(Employee.id != excluding_id)
+        user_stmt = select(User.id).where(func.lower(func.trim(User.email)) == normalized_email)
+        if excluding_id is not None:
+            # Each employee normally owns an account with the same email.  That
+            # account is not a duplicate of the employee being edited.
+            user_stmt = user_stmt.where(or_(User.employee_id.is_(None), User.employee_id != excluding_id))
+        if (
+            (await db.execute(employee_stmt.limit(1))).scalar_one_or_none() is not None
+            or (await db.execute(user_stmt.limit(1))).scalar_one_or_none() is not None
+        ):
+            raise AppError("email_exists", "Email đã được sử dụng cho một hồ sơ hoặc tài khoản khác", status.HTTP_409_CONFLICT)
+
+
 @router.get("", response_model=EmployeeListOut)
 async def list_employees(
     db: DbSession,
@@ -114,21 +157,30 @@ async def list_employees(
     team_id: int | None = None,
     site_id: int | None = None,
     is_active: bool | None = None,
+    role: UserRole | None = None,
+    has_account: bool | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> EmployeeListOut:
     limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
     clauses = _employee_filters(search, team_id, site_id, is_active)
-    count_stmt = select(func.count(Employee.id))
-    stmt = select(Employee).order_by(Employee.full_name, Employee.id)
+    count_stmt = select(func.count(Employee.id)).outerjoin(User, User.employee_id == Employee.id)
+    stmt = select(Employee, User).outerjoin(User, User.employee_id == Employee.id).order_by(Employee.full_name, Employee.id)
     for clause in clauses:
         count_stmt = count_stmt.where(clause)
         stmt = stmt.where(clause)
+    if role is not None:
+        count_stmt = count_stmt.where(User.role == role)
+        stmt = stmt.where(User.role == role)
+    if has_account is not None:
+        account_clause = User.id.is_not(None) if has_account else User.id.is_(None)
+        count_stmt = count_stmt.where(account_clause)
+        stmt = stmt.where(account_clause)
     total = (await db.execute(count_stmt)).scalar_one()
     result = await db.execute(stmt.offset(offset).limit(limit))
     return EmployeeListOut(
-        items=[_employee_out(e) for e in result.scalars().all()],
+        items=[_employee_out(employee, account) for employee, account in result.all()],
         total=total,
         limit=limit,
         offset=offset,
@@ -233,7 +285,7 @@ async def get_my_profile(db: DbSession, user: CurrentUser) -> EmployeeOut:
             status.HTTP_400_BAD_REQUEST,
         )
     employee = await master_data.get_or_404(db, Employee, user.employee_id)
-    return _employee_out(employee)
+    return _employee_out(employee, user)
 
 
 @router.patch("/me", response_model=EmployeeOut)
@@ -275,6 +327,8 @@ async def create_employee(
     data["email"] = data["email"].lower()
     if not data.get("employee_code"):
         data["employee_code"] = await _next_employee_code(db)
+    await _ensure_employee_references(db, team_id=data.get("team_id"), site_id=data.get("site_id"))
+    await _ensure_employee_unique(db, employee_code=data["employee_code"], email=data["email"])
     employee = await master_data.create(db, Employee, data)
     initial = generate_temporary_password()
     db.add(
@@ -309,7 +363,7 @@ async def create_employee(
     await db.commit()
     await db.refresh(employee)
     await dispatch_email(queue, outbox_id)
-    return _employee_out(employee)
+    return _employee_out(employee, account=(await db.execute(select(User).where(User.employee_id == employee.id))).scalar_one_or_none())
 
 
 @router.patch("/{employee_id}", response_model=EmployeeOut)
@@ -321,6 +375,13 @@ async def update_employee(
     data = payload.model_dump(exclude_unset=True)
     if data.get("email"):
         data["email"] = data["email"].lower()
+    await _ensure_employee_references(db, team_id=data.get("team_id", employee.team_id), site_id=data.get("site_id", employee.site_id))
+    await _ensure_employee_unique(
+        db,
+        employee_code=data.get("employee_code", employee.employee_code),
+        email=data.get("email", employee.email),
+        excluding_id=employee_id,
+    )
     account = (
         await db.execute(select(User).where(User.employee_id == employee_id))
     ).scalar_one_or_none()
@@ -338,7 +399,7 @@ async def update_employee(
     )
     await db.commit()
     await db.refresh(employee)
-    return _employee_out(employee)
+    return _employee_out(employee, account)
 
 
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)

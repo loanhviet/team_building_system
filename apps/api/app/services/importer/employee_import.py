@@ -1,5 +1,6 @@
 import openpyxl
-from sqlalchemy import select
+from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -7,6 +8,7 @@ from app.core.security import generate_temporary_password, hash_password
 from app.models.auth import User
 from app.models.enums import Gender, UserRole
 from app.models.organization import Employee, Site, Team
+from app.schemas.organization import EmployeeCreate
 from app.services.notification.email_service import enqueue_email
 
 REQUIRED_HEADERS = {"full_name", "email"}
@@ -58,7 +60,9 @@ def parse_rows(file_path: str) -> list[dict]:
 async def _resolve_team_id(db: AsyncSession, team_code: str | None) -> int | None:
     if not team_code:
         return None
-    result = await db.execute(select(Team.id).where(Team.code == str(team_code).strip()))
+    result = await db.execute(
+        select(Team.id).where(func.lower(func.trim(Team.code)) == str(team_code).strip().lower(), Team.is_active.is_(True))
+    )
     team_id = result.scalar_one_or_none()
     if team_id is None:
         raise RowError(f"Team code '{team_code}' không tồn tại")
@@ -68,7 +72,9 @@ async def _resolve_team_id(db: AsyncSession, team_code: str | None) -> int | Non
 async def _resolve_site_id(db: AsyncSession, site_code: str | None) -> int | None:
     if not site_code:
         return None
-    result = await db.execute(select(Site.id).where(Site.code == str(site_code).strip()))
+    result = await db.execute(
+        select(Site.id).where(func.lower(func.trim(Site.code)) == str(site_code).strip().lower(), Site.is_active.is_(True))
+    )
     site_id = result.scalar_one_or_none()
     if site_id is None:
         raise RowError(f"Site code '{site_code}' không tồn tại")
@@ -76,16 +82,8 @@ async def _resolve_site_id(db: AsyncSession, site_code: str | None) -> int | Non
 
 
 async def _upsert_employee_and_user(db: AsyncSession, row: dict) -> int | None:
-    email = str(row.get("email") or "").strip().lower()
-    full_name = str(row.get("full_name") or "").strip()
-    if not email or not full_name:
-        raise RowError("Thiếu email hoặc họ tên")
-
-    employee_code = str(row["employee_code"]).strip() if row.get("employee_code") else None
     team_id = await _resolve_team_id(db, row.get("team_code"))
     site_id = await _resolve_site_id(db, row.get("site_code"))
-    phone = str(row["phone"]).strip() if row.get("phone") else None
-    position = str(row["position"]).strip() if row.get("position") else None
     gender = None
     if row.get("gender") not in (None, ""):
         try:
@@ -100,8 +98,41 @@ async def _upsert_employee_and_user(db: AsyncSession, row: dict) -> int | None:
             raise RowError("is_active phải là 1/0 hoặc true/false")
         is_active = active_raw in {"1", "true", "yes", "có"}
 
-    result = await db.execute(select(Employee).where(Employee.email == email))
+    try:
+        normalized = EmployeeCreate.model_validate(
+            {
+                "employee_code": row.get("employee_code"),
+                "full_name": row.get("full_name"),
+                "email": row.get("email"),
+                "team_id": team_id,
+                "site_id": site_id,
+                "phone": row.get("phone"),
+                "position": row.get("position"),
+                "gender": gender,
+            }
+        )
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        message = str(first.get("msg", "Dữ liệu không hợp lệ")).removeprefix("Value error, ")
+        raise RowError(message) from exc
+
+    data = normalized.model_dump()
+    email = str(data["email"])
+    full_name = data["full_name"]
+    employee_code = data["employee_code"]
+    phone = data["phone"]
+    position = data["position"]
+
+    result = await db.execute(select(Employee).where(func.lower(func.trim(Employee.email)) == email))
     employee = result.scalar_one_or_none()
+    if employee_code:
+        code_owner = (
+            await db.execute(
+                select(Employee).where(func.lower(func.trim(Employee.employee_code)) == employee_code.lower())
+            )
+        ).scalar_one_or_none()
+        if code_owner is not None and code_owner.id != (employee.id if employee else None):
+            raise RowError("Mã nhân viên đã tồn tại (không phân biệt chữ hoa/thường)")
     if employee is None:
         employee = Employee(
             employee_code=employee_code,
@@ -128,7 +159,7 @@ async def _upsert_employee_and_user(db: AsyncSession, row: dict) -> int | None:
             employee.is_active = is_active
     await db.flush()
 
-    user_result = await db.execute(select(User).where(User.email == email))
+    user_result = await db.execute(select(User).where(func.lower(func.trim(User.email)) == email))
     user = user_result.scalar_one_or_none()
     if user is None:
         initial_password = generate_temporary_password()

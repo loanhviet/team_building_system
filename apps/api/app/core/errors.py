@@ -42,10 +42,21 @@ async def validation_exception_handler(
     # `ctx["error"]`, which json.dumps can't serialize — so the response itself
     # raised TypeError and the client got a 500 with no body instead of a 422.
     # That silently made `model_validator` unusable anywhere in the app.
+    details = jsonable_encoder(exc.errors())
+    first_message = next(
+        (detail.get("msg") for detail in details if isinstance(detail, dict) and detail.get("msg")),
+        None,
+    )
+    # Validators in this application deliberately return Vietnamese messages.
+    # Preserve them at the top level so every existing form gets an actionable
+    # toast even before it has field-by-field rendering.
+    message = first_message or "Dữ liệu gửi lên không hợp lệ"
+    if message.startswith("Value error, "):
+        message = message.removeprefix("Value error, ")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=_error_body(
-            "validation_error", "Invalid request", jsonable_encoder(exc.errors())
+            "validation_error", message, details
         ),
     )
 

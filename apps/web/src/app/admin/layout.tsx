@@ -130,9 +130,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     {
       label: "Dữ liệu",
       items: [
-        { href: "/admin/employees", label: "CBNV", icon: Users },
+        { href: "/admin/employees", label: "Nhân sự & tài khoản", icon: Users },
         { href: "/admin/master-data", label: "Team & địa điểm", icon: Database },
-        { href: "/admin/users", label: "Tài khoản", icon: Shield, show: showUsers },
+        { href: "/admin/users", label: "Tài khoản riêng", icon: Shield, show: showUsers },
       ],
     },
   ];

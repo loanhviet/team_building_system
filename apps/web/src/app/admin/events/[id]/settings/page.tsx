@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { use, useState } from "react";
 import { toast } from "sonner";
-import { EntityCrudTable } from "@/components/domain/entity-crud-table";
 import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +18,7 @@ import {
   nowDatetimeLocal,
   toDatetimeLocal,
 } from "@/lib/datetime";
-import type { Event, EventSettings, Site } from "@/types/api";
+import type { Event, EventSettings } from "@/types/api";
 
 export default function EventSettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -33,11 +32,6 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
     queryKey: ["events", eventId, "settings"],
     queryFn: () => apiFetch<EventSettings>(`/api/events/${eventId}/settings`),
   });
-  const { data: sites } = useQuery({
-    queryKey: ["sites"],
-    queryFn: () => apiFetch<Site[]>("/api/sites"),
-  });
-
   if (!event || !settings) {
     return <p className="text-sm text-muted-foreground">Đang tải cấu hình...</p>;
   }
@@ -50,9 +44,6 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
           {[
             ["#su-kien", "Thông tin sự kiện"],
             ["#quy-dinh", "Quy định"],
-            ["#ca-bay", "Ca đăng ký (nguyện vọng)"],
-            ["#chang-xe", "Chặng xe"],
-            ["#diem-don", "Điểm đón/trả"],
           ].map(([href, label]) => (
             <li key={href}>
               <a href={href} className="nav-link">
@@ -62,7 +53,7 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
           ))}
         </ul>
         <p className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-3 text-[11px] leading-relaxed text-orange-900">
-          Chiến lược Cân bằng / Đúng ca / Cùng đội được chọn ngay trước khi chạy phân bổ. Ca + chặng + điểm đón là dữ liệu CBNV chọn khi đăng ký.
+          Ca đăng ký được quản lý trong <strong>Chuyến bay</strong>; chặng xe và điểm đón/trả được quản lý trong <strong>Xe đưa đón</strong>. Các trọng số ở đây vẫn là mặc định cho phân bổ tự động.
         </p>
       </nav>
       <div className="flex min-w-0 flex-1 flex-col gap-8">
@@ -71,74 +62,6 @@ export default function EventSettingsPage({ params }: { params: Promise<{ id: st
       </section>
       <section id="quy-dinh" className="scroll-mt-6">
       <TermsWeightsForm key={`${settings.terms_version}-${JSON.stringify(settings.flight_allocation_weights)}`} eventId={eventId} settings={settings} />
-      </section>
-      <section id="ca-bay" className="scroll-mt-6 space-y-2">
-        <div>
-          <h2 className="font-display text-lg font-semibold">Ca đăng ký (nguyện vọng bay)</h2>
-          <p className="text-xs text-muted-foreground">
-            CBNV chọn ca khi đăng ký. Chuyến bay gắn vào ca trên màn <strong>Chuyến bay</strong> — thuật toán ưu tiên đúng ca theo trọng số.
-          </p>
-        </div>
-        <EntityCrudTable
-          queryKey={["events", String(eventId), "shifts"]}
-          label="ca bay"
-          basePath={`/api/events/${eventId}/shifts`}
-          fields={[
-            { name: "code", label: "Mã" },
-            { name: "name", label: "Tên" },
-            { name: "depart_after_time", label: "Sau giờ (HH:MM)", required: false },
-          ]}
-        />
-      </section>
-      <section id="chang-xe" className="scroll-mt-6 space-y-2">
-        <div>
-          <h2 className="font-display text-lg font-semibold">Chặng xe</h2>
-          <p className="text-xs text-muted-foreground">
-            CBNV tick nhu cầu theo từng chặng. Phân xe tự động chạy <em>từng chặng</em> với trọng số xe ở trên.
-          </p>
-        </div>
-        <EntityCrudTable
-          queryKey={["events", String(eventId), "transport-legs"]}
-          label="chặng xe"
-          basePath={`/api/events/${eventId}/transport-legs`}
-          fields={[
-            { name: "code", label: "Mã" },
-            { name: "name", label: "Tên" },
-            { name: "direction", label: "Chiều", options: [
-              { value: "outbound", label: "Chiều đi" },
-              { value: "inbound", label: "Chiều về" },
-              { value: "local", label: "Di chuyển nội bộ" },
-            ] },
-            {
-              name: "flight_timing",
-              label: "Ràng buộc giờ bay",
-              required: false,
-              options: [
-                { value: "before_flight", label: "Khởi hành trước chuyến bay" },
-                { value: "after_flight", label: "Khởi hành sau khi hạ cánh" },
-                { value: "none", label: "Không liên quan chuyến bay" },
-              ],
-            },
-          ]}
-        />
-      </section>
-      <section id="diem-don" className="scroll-mt-6 space-y-2">
-        <div>
-          <h2 className="font-display text-lg font-semibold">Điểm đón / trả</h2>
-          <p className="text-xs text-muted-foreground">
-            Form đăng ký bắt chọn điểm khi tick cần xe. Xe gắn điểm đón trên màn Xe.
-          </p>
-        </div>
-        <EntityCrudTable
-          queryKey={["events", String(eventId), "pickup-points"]}
-          label="điểm đón"
-          basePath={`/api/events/${eventId}/pickup-points`}
-          fields={[
-            { name: "name", label: "Tên điểm" },
-            { name: "site_id", label: "Địa điểm làm việc", options: (sites ?? []).map((site) => ({ value: String(site.id), label: `${site.code} · ${site.name}` })) },
-            { name: "address", label: "Địa chỉ", required: false },
-          ]}
-        />
       </section>
       </div>
     </div>

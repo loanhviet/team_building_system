@@ -9,7 +9,9 @@ import {
   AllocationPresetSelect,
   AllocationReadiness,
 } from "@/components/domain/allocation-workbench";
+import { EntityCrudTable } from "@/components/domain/entity-crud-table";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
 import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
@@ -56,6 +58,7 @@ import type {
   Event,
   Job,
   PickupPoint,
+  Site,
   Team,
   TransportLeg,
 } from "@/types/api";
@@ -121,6 +124,10 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
   const { data: teams } = useQuery({
     queryKey: ["teams"],
     queryFn: () => apiFetch<Team[]>("/api/teams"),
+  });
+  const { data: sites } = useQuery({
+    queryKey: ["sites"],
+    queryFn: () => apiFetch<Site[]>("/api/sites"),
   });
 
   const { data: history } = useQuery({
@@ -442,6 +449,36 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <details className="rounded-2xl border border-border bg-card p-4">
+        <summary className="cursor-pointer font-display text-base font-semibold">
+          Chặng xe và điểm đón/trả
+          <span className="ml-2 text-xs font-normal text-muted-foreground">({legs?.length ?? 0} chặng)</span>
+        </summary>
+        <p className="mt-2 text-sm text-muted-foreground">Đây là dữ liệu CBNV dùng khi đăng ký và là cơ sở để tạo, phân bổ xe.</p>
+        <div className="mt-3 grid gap-6 xl:grid-cols-2">
+          <EntityCrudTable
+            queryKey={["events", String(eventId), "transport-legs"]}
+            label="chặng xe"
+            basePath={`/api/events/${eventId}/transport-legs`}
+            fields={[
+              { name: "code", label: "Mã" },
+              { name: "name", label: "Tên" },
+              { name: "direction", label: "Chiều", options: [{ value: "outbound", label: "Chiều đi" }, { value: "inbound", label: "Chiều về" }, { value: "local", label: "Di chuyển nội bộ" }] },
+              { name: "flight_timing", label: "Ràng buộc giờ bay", required: false, options: [{ value: "before_flight", label: "Trước chuyến bay" }, { value: "after_flight", label: "Sau chuyến bay" }, { value: "none", label: "Không liên quan" }] },
+            ]}
+          />
+          <EntityCrudTable
+            queryKey={["events", String(eventId), "pickup-points"]}
+            label="điểm đón/trả"
+            basePath={`/api/events/${eventId}/pickup-points`}
+            fields={[
+              { name: "name", label: "Tên điểm" },
+              { name: "site_id", label: "Địa điểm làm việc", required: false, options: (sites ?? []).map((site) => ({ value: String(site.id), label: `${site.code} · ${site.name}` })) },
+              { name: "address", label: "Địa chỉ", required: false },
+            ]}
+          />
+        </div>
+      </details>
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -632,6 +669,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             </DialogContent>
           </Dialog>
         </div>
+        <div className="w-full"><AllocationWeightsHint eventId={eventId} kind="bus" /></div>
       </div>
       </div>
 

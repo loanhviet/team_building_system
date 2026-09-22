@@ -9,7 +9,9 @@ import {
   AllocationPresetSelect,
   AllocationReadiness,
 } from "@/components/domain/allocation-workbench";
+import { EntityCrudTable } from "@/components/domain/entity-crud-table";
 import { DataTable, type DataTableColumn } from "@/components/domain/data-table";
+import { AllocationWeightsHint } from "@/components/domain/allocation-weights-hint";
 import { EventDateTimeField } from "@/components/domain/event-date-time-field";
 import { FormField, MoreFields } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
@@ -486,6 +488,25 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <details className="rounded-2xl border border-border bg-card p-4">
+        <summary className="cursor-pointer font-display text-base font-semibold">
+          Ca đăng ký chuyến bay
+          <span className="ml-2 text-xs font-normal text-muted-foreground">({shifts?.length ?? 0} ca · CBNV chọn khi đăng ký)</span>
+        </summary>
+        <p className="mt-2 text-sm text-muted-foreground">Tạo hoặc sửa ca ngay tại đây, sau đó gắn từng chuyến bay vào đúng ca.</p>
+        <div className="mt-3">
+          <EntityCrudTable
+            queryKey={["events", String(eventId), "shifts"]}
+            label="ca bay"
+            basePath={`/api/events/${eventId}/shifts`}
+            fields={[
+              { name: "code", label: "Mã" },
+              { name: "name", label: "Tên" },
+              { name: "depart_after_time", label: "Sau giờ (HH:MM)", required: false },
+            ]}
+          />
+        </div>
+      </details>
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -514,6 +535,7 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
           <AllocationPresetSelect value={preset} onChange={setPreset} />
           <div className="ml-auto"><AllocationReadiness data={preflight} /></div>
         </div>
+        <AllocationWeightsHint eventId={eventId} kind="flight" />
         <div className="flex flex-wrap gap-2">
           <input
             ref={fileInputRef}

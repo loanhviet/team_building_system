@@ -6,6 +6,7 @@ import {
   Bus,
   CalendarDays,
   ClipboardList,
+  Database,
   Hotel,
   LayoutDashboard,
   LogOut,
@@ -14,6 +15,7 @@ import {
   Plane,
   ScrollText,
   Settings,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -187,6 +189,17 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
       icon: item.icon,
     })),
   }));
+  // The event workspace used to hide all company data behind the logo. Keep
+  // the operational context, but make the common cross-event tasks one click
+  // away for organizers as well.
+  groups.push({
+    label: "Dữ liệu công ty",
+    items: [
+      { href: "/admin/employees", label: "Nhân sự & tài khoản", icon: Users },
+      { href: "/admin/master-data", label: "Team & địa điểm", icon: Database },
+      { href: "/admin/events", label: "Tất cả sự kiện", icon: CalendarDays },
+    ],
+  });
 
   return (
     <div className="flex h-svh flex-1 overflow-hidden bg-background">
@@ -313,8 +326,8 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
           )}
         </header>
         <div className="flex gap-1.5 overflow-x-auto border-b border-border bg-card px-4 py-2 md:hidden">
-          {NAV_GROUPS.flatMap((g) => g.items).map((item) => {
-            const href = `${base}${item.href}`;
+          {[...NAV_GROUPS.flatMap((g) => g.items), { href: "/admin/employees", label: "Nhân sự", icon: Users }].map((item) => {
+            const href = item.href.startsWith("/admin/") ? item.href : `${base}${item.href}`;
             const active = item.href === "" ? pathname === base : pathname.startsWith(href);
             return (
               <Link

@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import type {
   Employee,
   EmployeeList,
@@ -38,6 +39,13 @@ import type {
   Site,
   Team,
 } from "@/types/api";
+
+const ROLE_LABEL: Record<string, string> = {
+  employee: "Nhân viên",
+  team_leader: "Trưởng nhóm",
+  organizer: "BTC",
+  super_admin: "Super Admin",
+};
 
 const EMPTY_FORM = {
   employee_code: "",
@@ -52,6 +60,7 @@ const EMPTY_FORM = {
 
 export default function EmployeesPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [teamId, setTeamId] = useState<string>("");
@@ -66,6 +75,7 @@ export default function EmployeesPage() {
   const [isActive, setIsActive] = useState("");
   const [sendWelcome, setSendWelcome] = useState(true);
   const [showImportLog, setShowImportLog] = useState(false);
+  const isSuperAdmin = user?.role === "super_admin";
 
   const { data: teams } = useQuery({
     queryKey: ["teams"],
@@ -149,6 +159,31 @@ export default function EmployeesPage() {
       queryClient.invalidateQueries({ queryKey: ["employees"] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không lưu được"),
+  });
+
+  const accountMutation = useMutation({
+    mutationFn: (role: string) => {
+      if (!editing?.account_id) throw new Error("Hồ sơ chưa có tài khoản");
+      return apiFetch(`/api/users/${editing.account_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+    },
+    onSuccess: (_, role) => {
+      setEditing((current) => current ? { ...current, account_role: role } : current);
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Đã cập nhật vai trò tài khoản");
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không cập nhật được vai trò"),
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: () => {
+      if (!editing?.account_id) throw new Error("Hồ sơ chưa có tài khoản");
+      return apiFetch<{ temporary_password: string }>(`/api/users/${editing.account_id}/reset-password`, { method: "POST" });
+    },
+    onSuccess: (result) => toast.success(`Mật khẩu tạm mới: ${result.temporary_password}`, { duration: 12000 }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không đặt lại được mật khẩu"),
   });
 
   useEffect(() => {
@@ -235,6 +270,17 @@ export default function EmployeesPage() {
       sortValue: (emp) => emp.email,
     },
     {
+      key: "account_role",
+      header: "Tài khoản",
+      cell: (emp) => emp.account_role ? (
+        <span className="text-xs">
+          {ROLE_LABEL[emp.account_role] ?? emp.account_role}
+          {emp.account_is_active === false ? " · đã khoá" : ""}
+        </span>
+      ) : <span className="text-xs text-muted-foreground">Chưa có</span>,
+      sortValue: (emp) => emp.account_role ?? "",
+    },
+    {
       key: "site_name",
       header: "Địa điểm",
       cell: (emp) => emp.site_name ?? "—",
@@ -258,8 +304,8 @@ export default function EmployeesPage() {
   return (
     <div className="flex flex-col gap-6">
       <WorkspaceHeader
-        title="Danh bạ nhân sự toàn công ty"
-        description="Hồ sơ công ty — bấm một dòng để sửa. Import Excel khi danh sách lớn."
+        title="Nhân sự & tài khoản"
+        description="Hồ sơ, vai trò và trạng thái đăng nhập trên cùng một màn hình — bấm một dòng để xem hoặc sửa."
         actions={
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => apiDownload("/api/employees/import-template", "employees_template.xlsx")}>
@@ -304,6 +350,30 @@ export default function EmployeesPage() {
               <DialogHeader>
                 <DialogTitle>{editing ? "Sửa hồ sơ nhân viên" : "Thêm nhân viên mới vào Danh bạ công ty"}</DialogTitle>
               </DialogHeader>
+              {editing?.account_id && (
+                <div className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
+                  <p className="font-medium">Tài khoản đăng nhập</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{editing.email} · {editing.account_is_active ? "Đang hoạt động" : "Đã khoá"}</p>
+                  {isSuperAdmin ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Select value={editing.account_role ?? "employee"} onValueChange={(role) => role && accountMutation.mutate(role)}>
+                        <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="employee">Nhân viên</SelectItem>
+                          <SelectItem value="team_leader">Trưởng nhóm</SelectItem>
+                          <SelectItem value="organizer">BTC</SelectItem>
+                          <SelectItem value="super_admin">Super Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button type="button" size="sm" variant="outline" disabled={resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()}>
+                        Đặt lại mật khẩu
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">Chỉ Super Admin có thể thay vai trò hoặc đặt lại mật khẩu.</p>
+                  )}
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormField label="Mã nhân viên">
                   <div className="flex gap-2">
@@ -331,7 +401,7 @@ export default function EmployeesPage() {
                   <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
                 </FormField>
                 <FormField label="Số điện thoại">
-                  <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                  <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="0901234567 hoặc +84 901 234 567" />
                 </FormField>
                 <FormField label="Chức vụ">
                   <Input
