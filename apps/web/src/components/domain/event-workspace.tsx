@@ -195,9 +195,8 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
   groups.push({
     label: "Dữ liệu công ty",
     items: [
-      { href: "/admin/employees", label: "Nhân sự & tài khoản", icon: Users },
-      { href: "/admin/master-data", label: "Team & địa điểm", icon: Database },
-      { href: "/admin/events", label: "Tất cả sự kiện", icon: CalendarDays },
+      { href: `${base}/employees`, label: "Nhân sự & tài khoản", icon: Users },
+      { href: `${base}/master-data`, label: "Team & địa điểm", icon: Database },
     ],
   });
 
@@ -326,7 +325,7 @@ export function EventWorkspace({ eventId, children }: { eventId: number; childre
           )}
         </header>
         <div className="flex gap-1.5 overflow-x-auto border-b border-border bg-card px-4 py-2 md:hidden">
-          {[...NAV_GROUPS.flatMap((g) => g.items), { href: "/admin/employees", label: "Nhân sự", icon: Users }].map((item) => {
+          {[...NAV_GROUPS.flatMap((g) => g.items), { href: "/employees", label: "Nhân sự", icon: Users }].map((item) => {
             const href = item.href.startsWith("/admin/") ? item.href : `${base}${item.href}`;
             const active = item.href === "" ? pathname === base : pathname.startsWith(href);
             return (
