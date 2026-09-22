@@ -44,6 +44,7 @@ services:
       retries: 10
 
   api:
+    image: team-building-system-api:latest
     build:
       context: ./apps/api
     env_file:
@@ -67,8 +68,9 @@ services:
       start_period: 120s
 
   worker:
-    build:
-      context: ./apps/api
+    # Worker runs the same code and dependencies as the API. Reuse the API
+    # image instead of building the 600MB Python/RAG image a second time.
+    image: team-building-system-api:latest
     env_file:
       - path: .env
         required: false
