@@ -10,6 +10,7 @@ from app.core.time import utcnow
 from app.models.event import Event
 from app.models.notification import EmailOutbox, EmailTemplate
 from app.models.organization import Employee
+from app.models.registration import Registration
 
 _settings = get_settings()
 
@@ -55,6 +56,7 @@ DEFAULT_TEMPLATES = {
         "body_html": (
             "<p>Chào {{ full_name }},</p>"
             "<p>Thông tin chuyến bay của bạn cho <b>{{ event_name }}</b> vừa được BTC cập nhật.</p>"
+            "{% if change_summary %}<p>{{ change_summary }}</p>{% endif %}"
             "{% if journey.flights %}<ul>"
             "{% for f in journey.flights %}<li>Chuyến bay ({{ f.direction }}): {{ f.flight_code }} — "
             "{{ f.origin }} → {{ f.destination }}{% if f.depart_at %}, khởi hành {{ f.depart_at }}{% endif %}"
@@ -79,6 +81,7 @@ DEFAULT_TEMPLATES = {
         "body_html": (
             "<p>Chào {{ full_name }},</p>"
             "<p>Lịch trình <b>{{ event_name }}</b> vừa được BTC cập nhật.</p>"
+            "{% if change_summary %}<p>{{ change_summary }}</p>{% endif %}"
             "<p><a href='{{ app_url }}'>Xem lịch trình mới nhất</a></p>"
         ),
     },
@@ -222,16 +225,19 @@ async def notify_employees(
     employee_ids: list[int],
     template_code: str,
     dedupe_suffix: str,
+    extra_context: dict | None = None,
 ) -> None:
     """Fan-out to a specific set of employees (not "everyone participating" —
     that's send_bulk_emails_task) with journey-derived context. Replaces the
     enqueue-then-commit-then-dispatch block that used to be copy-pasted
     between flights.py's and buses.py's adjust/PATCH endpoints."""
-    result = await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))
+    result = await db.execute(select(Employee).where(Employee.id.in_(set(employee_ids))))
     employees = result.scalars().all()
     outbox_ids: list[int | None] = []
     for employee in employees:
         context = await build_email_context(db, event, employee)
+        if extra_context:
+            context.update(extra_context)
         outbox_id = await enqueue_email(
             db, event_id=event.id, to_email=employee.email, template_code=template_code,
             payload=context, dedupe_key=f"{template_code}:{event.id}:{employee.id}:{dedupe_suffix}",
@@ -240,6 +246,26 @@ async def notify_employees(
     await db.commit()
     # dispatch only after commit — see enqueue_email's docstring
     await dispatch_emails(queue, [oid for oid in outbox_ids if oid is not None])
+
+
+async def participating_employee_ids(
+    db: AsyncSession, event_id: int, *, shift_id: int | None = None
+) -> list[int]:
+    """Employees who submitted an affirmative registration for an event.
+
+    A selected shift narrows the audience to people affected by that shift's
+    flight timing.  Declined and draft registrations must never receive
+    operational updates.
+    """
+    stmt = select(Registration.employee_id).where(
+        Registration.event_id == event_id,
+        Registration.status == "submitted",
+        Registration.is_participating.is_(True),
+    )
+    if shift_id is not None:
+        stmt = stmt.where(Registration.shift_id == shift_id)
+    result = await db.execute(stmt)
+    return [row[0] for row in result.all()]
 
 
 async def list_templates(db: AsyncSession, event_id: int) -> list[dict]:

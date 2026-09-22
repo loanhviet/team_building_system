@@ -260,3 +260,36 @@ async def test_update_flight_after_publish_emails_passengers(client, world, auth
     )
     assert resp.status_code == 200
     assert any(job[0] == "send_email" for job in client.fake_queue.jobs)
+
+
+async def test_update_flight_time_notifies_registered_shift_before_allocation(
+    client, world, auth_headers, db_session
+):
+    """A Ca 1/2 participant needs a timing update even before BTC allocates seats."""
+    from app.models.notification import EmailOutbox
+
+    flight = Flight(
+        event_id=world.event.id,
+        flight_code="VN-CA1",
+        direction="outbound",
+        shift_id=world.shift.id,
+        depart_at=utcnow().replace(hour=7, minute=0, second=0, microsecond=0),
+        capacity=5,
+    )
+    db_session.add(flight)
+    await db_session.commit()
+
+    response = await client.patch(
+        f"/api/events/{world.event.id}/flights/{flight.id}",
+        headers=auth_headers(world.organizer_user),
+        json={"depart_at": utcnow().replace(hour=8, minute=0, second=0, microsecond=0).isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert any(job[0] == "send_email" for job in client.fake_queue.jobs)
+    result = await db_session.execute(
+        select(EmailOutbox).where(EmailOutbox.template_code == "flight_changed")
+    )
+    outbox = result.scalar_one()
+    assert outbox.to_email == world.employee.email
+    assert "ca bạn đã đăng ký" in outbox.payload_json["change_summary"]

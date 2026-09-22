@@ -5,6 +5,7 @@ def test_schedule_changed_template_exists():
     assert "schedule_changed" in DEFAULT_TEMPLATES
     assert "{{ event_name }}" in DEFAULT_TEMPLATES["schedule_changed"]["subject"]
     assert "{{ app_url }}" in DEFAULT_TEMPLATES["schedule_changed"]["body_html"]
+    assert "change_summary" in DEFAULT_TEMPLATES["schedule_changed"]["body_html"]
 
 
 def test_every_default_template_has_description():

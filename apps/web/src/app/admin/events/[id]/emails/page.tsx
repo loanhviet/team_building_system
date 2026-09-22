@@ -51,6 +51,7 @@ const VARS = [
   ["shift_name", "Ca (chỉ mẫu Xác nhận đăng ký)"],
   ["participating_label", "Tham gia (chỉ mẫu Xác nhận đăng ký)"],
   ["transport_summary", "Nhu cầu xe (chỉ mẫu Xác nhận đăng ký)"],
+  ["change_summary", "Nội dung thay đổi (email cập nhật)"],
   ["app_url", "Cổng thông tin"],
   ["journey.room.hotel_name", "Tên khách sạn"],
   ["journey.room.room_number", "Số phòng"],

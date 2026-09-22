@@ -35,7 +35,7 @@ from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
 from app.services.importer.xlsx import load_xlsx, read_xlsx
-from app.services.notification.email_service import PUBLISHED_STATUSES, notify_employees
+from app.services.notification.email_service import notify_employees, participating_employee_ids
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
@@ -198,16 +198,22 @@ async def update_flight(
     await db.refresh(flight)
 
     changed_passenger_fields = any(before.get(f) != after.get(f) for f in PASSENGER_FACING_FIELDS)
-    if changed_passenger_fields and event.status.value in PUBLISHED_STATUSES:
-        result = await db.execute(
-            select(FlightAssignment.employee_id).where(
-                FlightAssignment.event_id == event_id, FlightAssignment.flight_id == flight_id
-            )
+    if changed_passenger_fields:
+        # A flight's timing is also meaningful before allocation/publishing:
+        # people have already selected Ca 1/Ca 2 during registration.  Notify
+        # that shift's confirmed participants as well as any people manually
+        # assigned to the flight (the latter may include a shift exception).
+        shift_employee_ids = await participating_employee_ids(
+            db, event_id, shift_id=flight.shift_id
         )
-        employee_ids = [row[0] for row in result.all()]
+        employee_ids = sorted(set(assigned_ids).union(shift_employee_ids))
         await notify_employees(
             db, queue, event, employee_ids, "flight_changed",
-            dedupe_suffix=f"{flight_id}:{utcnow().isoformat()}",
+            dedupe_suffix=f"{flight_id}:{flight.updated_at.isoformat()}",
+            extra_context={
+                "change_summary": "Thời gian hoặc thông tin chuyến bay của ca bạn đã đăng ký "
+                "vừa được BTC cập nhật.",
+            },
         )
 
     return flight
