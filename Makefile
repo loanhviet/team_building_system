@@ -1,9 +1,14 @@
-.PHONY: up down build logs migrate seed seed-full test lint sh-api sh-web
+.PHONY: up dev down build logs migrate seed seed-full test lint sh-api sh-web
 
 COMPOSE = docker compose
 
 up:
 	$(COMPOSE) up -d --build
+
+# Daily local development: docker-compose.override.yml runs Next dev with
+# hot reload, so source edits do not need an image rebuild.
+dev:
+	$(COMPOSE) up -d
 
 down:
 	$(COMPOSE) down
