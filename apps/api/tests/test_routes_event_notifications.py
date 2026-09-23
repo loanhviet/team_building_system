@@ -21,7 +21,8 @@ async def test_changing_event_dates_notifies_confirmed_participants(
     )
     outbox = result.scalar_one()
     assert outbox.to_email == world.employee.email
-    assert "thời gian tổ chức" in outbox.payload_json["change_summary"]
+    assert "Ngày bắt đầu: — → 2026-12-20" in outbox.payload_json["change_summary"]
+    assert "Ngày kết thúc: — → 2026-12-22" in outbox.payload_json["change_summary"]
 
 
 async def test_changing_only_registration_window_does_not_notify_participants(
@@ -35,3 +36,22 @@ async def test_changing_only_registration_window_does_not_notify_participants(
 
     assert response.status_code == 200
     assert not any(job[0] == "send_email" for job in client.fake_queue.jobs)
+
+
+async def test_changing_shift_time_emails_people_on_that_shift(
+    client, world, auth_headers, db_session
+):
+    response = await client.patch(
+        f"/api/events/{world.event.id}/shifts/{world.shift.id}",
+        headers=auth_headers(world.organizer_user),
+        json={"depart_after_time": "18:00"},
+    )
+
+    assert response.status_code == 200
+    result = await db_session.execute(
+        select(EmailOutbox).where(EmailOutbox.template_code == "flight_changed")
+    )
+    outbox = result.scalar_one()
+    assert outbox.to_email == world.employee.email
+    assert "Ca 1" in outbox.payload_json["change_summary"]
+    assert "18:00" in outbox.payload_json["change_summary"]

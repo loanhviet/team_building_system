@@ -22,9 +22,9 @@ async def send_bulk_emails_task(
 ) -> None:
     """Fan-out: one send_email job per submitted+participating employee, each
     deduped so re-running this (e.g. a retried publish) never double-sends.
-    Both callers (info_published, schedule_changed) only ever fire once the
-    event is already published, so journey data always exists to build
-    per-employee context from — see build_email_context."""
+    info_published fires once the event is already published, so journey
+    data exists to build per-employee context from. schedule_changed for a
+    single agenda edit is sent inline by notify_visible_schedule_change."""
     async with AsyncSessionLocal() as db:
         event = await db.get(Event, event_id)
         if event is None:

@@ -1,11 +1,14 @@
 from typing import Annotated
 
+from arq import ArqRedis
 from fastapi import APIRouter, Depends, status
 
 from app.core.deps import CurrentUser, DbSession, require_admin
 from app.core.errors import AppError
+from app.core.queue import get_queue
+from app.core.time import utcnow
 from app.models.auth import User
-from app.models.event import PickupPoint, Shift, TransportLeg
+from app.models.event import Event, PickupPoint, Shift, TransportLeg
 from app.models.organization import Site
 from app.schemas.event import (
     PickupPointCreate,
@@ -20,6 +23,7 @@ from app.schemas.event import (
 )
 from app.services import master_data
 from app.services.audit_service import record_audit
+from app.services.notification.email_service import notify_employees, participating_employee_ids
 
 router = APIRouter(prefix="/events/{event_id}", tags=["event-config"])
 
@@ -50,17 +54,40 @@ async def create_shift(
 
 @router.patch("/shifts/{shift_id}", response_model=ShiftOut)
 async def update_shift(
-    event_id: int, shift_id: int, payload: ShiftUpdate, db: DbSession, user: AdminUser
+    event_id: int,
+    shift_id: int,
+    payload: ShiftUpdate,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> Shift:
     shift = await master_data.get_or_404(db, Shift, shift_id, event_id=event_id)
     before = ShiftOut.model_validate(shift).model_dump()
     await master_data.update(db, shift, payload.model_dump(exclude_unset=True))
+    after = ShiftOut.model_validate(shift).model_dump()
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="shift", entity_id=shift_id,
-        before=before, after=ShiftOut.model_validate(shift).model_dump(), event_id=event_id,
+        before=before, after=after, event_id=event_id,
     )
     await db.commit()
     await db.refresh(shift)
+
+    if before.get("depart_after_time") != after.get("depart_after_time"):
+        employee_ids = await participating_employee_ids(db, event_id, shift_id=shift.id)
+        old = before.get("depart_after_time") or "—"
+        new = after.get("depart_after_time") or "—"
+        if employee_ids:
+            await notify_employees(
+                db,
+                queue,
+                await master_data.get_or_404(db, Event, event_id),
+                employee_ids,
+                "flight_changed",
+                dedupe_suffix=f"shift:{shift.id}:{utcnow().isoformat()}",
+                extra_context={
+                    "change_summary": f"Ca {shift.name}: giờ bay sau {old} đổi thành {new}.",
+                },
+            )
     return shift
 
 

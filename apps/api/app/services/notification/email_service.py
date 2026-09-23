@@ -121,6 +121,62 @@ TEMPLATE_DESCRIPTIONS = {
 
 PUBLISHED_STATUSES = ("information_published", "event_started", "event_completed")
 
+_EVENT_FIELD_LABELS = {
+    "name": "Tên sự kiện",
+    "description": "Mô tả",
+    "destination": "Điểm đến",
+    "start_date": "Ngày bắt đầu",
+    "end_date": "Ngày kết thúc",
+}
+_DIRECTION_LABELS = {"outbound": "chiều đi", "inbound": "chiều về"}
+
+
+def _show(value: object) -> str:
+    if value is None or value == "":
+        return "—"
+    text = str(value).replace("T", " ")
+    return text[:16] if len(text) > 16 and ":" in text else text
+
+
+def describe_event_changes(before: dict, after: dict) -> str | None:
+    """One sentence listing attendee-facing event fields that actually changed."""
+    parts = [
+        f"{label}: {_show(before.get(key))} → {_show(after.get(key))}"
+        for key, label in _EVENT_FIELD_LABELS.items()
+        if before.get(key) != after.get(key)
+    ]
+    if not parts:
+        return None
+    return "BTC cập nhật thông tin sự kiện. " + ". ".join(parts) + "."
+
+
+def describe_flight_changes(
+    flight_code: str,
+    direction: str,
+    before: dict,
+    after: dict,
+) -> str:
+    """Name the flight and the old/new clock times when those moved."""
+    where = _DIRECTION_LABELS.get(direction, direction)
+    parts: list[str] = []
+    if before.get("depart_at") != after.get("depart_at"):
+        parts.append(f"giờ đi {_show(before.get('depart_at'))} → {_show(after.get('depart_at'))}")
+    if before.get("arrive_at") != after.get("arrive_at"):
+        parts.append(f"giờ đến {_show(before.get('arrive_at'))} → {_show(after.get('arrive_at'))}")
+    if before.get("flight_code") != after.get("flight_code"):
+        parts.append(f"mã {_show(before.get('flight_code'))} → {_show(after.get('flight_code'))}")
+    if not parts:
+        parts.append("thông tin chuyến vừa được BTC cập nhật")
+    return f"Chuyến {flight_code} ({where}): " + ", ".join(parts) + "."
+
+
+def describe_schedule_change(title: str, start_at: object, end_at: object, *, removed: bool) -> str:
+    if removed:
+        return f'Lịch "{title}" đã được gỡ khỏi chương trình.'
+    if start_at or end_at:
+        return f'Lịch "{title}". Giờ: {_show(start_at)} – {_show(end_at)}.'
+    return f'Lịch "{title}" vừa được BTC cập nhật.'
+
 
 async def _load_template(db: AsyncSession, event_id: int | None, code: str) -> tuple[str, str]:
     result = await db.execute(
@@ -391,8 +447,34 @@ def preview_template(subject: str, body_html: str) -> tuple[str, str]:
     return Template(subject).render(**PREVIEW_CONTEXT), Template(body_html).render(**PREVIEW_CONTEXT)
 
 
-async def enqueue_schedule_changed(queue, event, item_id: int, is_visible_to_employees: bool) -> None:
-    if event.status.value not in PUBLISHED_STATUSES or not is_visible_to_employees:
+async def notify_visible_schedule_change(
+    db: AsyncSession,
+    queue: ArqRedis,
+    event: Event,
+    *,
+    item_id: int,
+    visible: bool,
+    summary: str,
+) -> None:
+    """One email per save of a schedule item CBNV can already see.
+
+    Registration may still be open: people who already confirmed attendance
+    need the new time without waiting for the journey to be published. The
+    dedupe suffix is the save timestamp, so a second edit in the same hour
+    still sends.
+    """
+    if not visible:
         return
-    suffix = f"item{item_id}:{utcnow().strftime('%Y%m%d%H')}"
-    await queue.enqueue_job("send_bulk_emails_task", event.id, "schedule_changed", suffix)
+    employee_ids = await participating_employee_ids(db, event.id)
+    if not employee_ids:
+        await db.commit()
+        return
+    await notify_employees(
+        db,
+        queue,
+        event,
+        employee_ids,
+        "schedule_changed",
+        dedupe_suffix=f"item:{item_id}:{utcnow().isoformat()}",
+        extra_context={"change_summary": summary},
+    )

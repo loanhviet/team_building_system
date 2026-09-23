@@ -292,4 +292,50 @@ async def test_update_flight_time_notifies_registered_shift_before_allocation(
     )
     outbox = result.scalar_one()
     assert outbox.to_email == world.employee.email
-    assert "ca bạn đã đăng ký" in outbox.payload_json["change_summary"]
+    assert "VN-CA1" in outbox.payload_json["change_summary"]
+    assert "giờ đi" in outbox.payload_json["change_summary"]
+
+
+async def test_reimporting_a_flight_time_emails_the_registered_shift(
+    client, world, auth_headers, db_session
+):
+    from datetime import datetime
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from app.models.notification import EmailOutbox
+
+    flight = Flight(
+        event_id=world.event.id,
+        flight_code="VN-CA1",
+        direction="outbound",
+        shift_id=world.shift.id,
+        depart_at=datetime(2026, 12, 20, 7, 0),
+        arrive_at=datetime(2026, 12, 20, 8, 20),
+        capacity=5,
+    )
+    db_session.add(flight)
+    await db_session.commit()
+
+    book = Workbook()
+    sheet = book.active
+    sheet.append(["flight_code", "direction", "capacity", "depart_at", "arrive_at"])
+    sheet.append(["VN-CA1", "outbound", 5, datetime(2026, 12, 20, 9, 0), datetime(2026, 12, 20, 10, 20)])
+    payload = BytesIO()
+    book.save(payload)
+
+    response = await client.post(
+        f"/api/events/{world.event.id}/flights/import",
+        headers=auth_headers(world.organizer_user),
+        files={"file": ("flights.xlsx", payload.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok_rows"] == 1
+    result = await db_session.execute(
+        select(EmailOutbox).where(EmailOutbox.template_code == "flight_changed")
+    )
+    outbox = result.scalar_one()
+    assert outbox.to_email == world.employee.email
+    assert "09:00" in outbox.payload_json["change_summary"]

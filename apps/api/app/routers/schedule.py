@@ -24,7 +24,10 @@ from app.schemas.schedule import (
 from app.services import master_data
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_event_not_completed
-from app.services.notification.email_service import enqueue_schedule_changed
+from app.services.notification.email_service import (
+    describe_schedule_change,
+    notify_visible_schedule_change,
+)
 from app.services.rag.enqueue import enqueue_reindex_fire_and_forget
 
 router = APIRouter(prefix="/events/{event_id}", tags=["schedule"])
@@ -96,8 +99,13 @@ async def create_schedule_item(
         db, actor_user_id=user.id, action="create", entity_type="schedule_item", entity_id=item.id,
         after=payload.model_dump(mode="json"), event_id=event_id,
     )
-    await enqueue_schedule_changed(queue, event, item.id, item.is_published)
-    await db.commit()
+    if item.is_published:
+        await notify_visible_schedule_change(
+            db, queue, event, item_id=item.id, visible=True,
+            summary=describe_schedule_change(item.title, item.start_at, item.end_at, removed=False),
+        )
+    else:
+        await db.commit()
     await enqueue_reindex_fire_and_forget(queue, event_id)
     await db.refresh(item)
     return item
@@ -124,8 +132,14 @@ async def update_schedule_item(
     )
     # Notify on edits to an already-visible item and when a draft is made
     # visible. Editing a draft must remain internal to BTC.
-    await enqueue_schedule_changed(queue, event, item.id, before["is_published"] or item.is_published)
-    await db.commit()
+    visible = before["is_published"] or item.is_published
+    if visible:
+        await notify_visible_schedule_change(
+            db, queue, event, item_id=item.id, visible=True,
+            summary=describe_schedule_change(item.title, item.start_at, item.end_at, removed=False),
+        )
+    else:
+        await db.commit()
     await enqueue_reindex_fire_and_forget(queue, event_id)
     await db.refresh(item)
     return item
@@ -143,13 +157,18 @@ async def delete_schedule_item(
     assert_event_not_completed(event)
     item = await master_data.get_or_404(db, ScheduleItem, item_id, event_id=event_id)
     was_visible_to_employees = item.is_published
+    removed_summary = describe_schedule_change(item.title, item.start_at, item.end_at, removed=True)
     await db.delete(item)
     await record_audit(
         db, actor_user_id=user.id, action="deactivate", entity_type="schedule_item", entity_id=item_id,
         event_id=event_id,
     )
-    await enqueue_schedule_changed(queue, event, item_id, was_visible_to_employees)
-    await db.commit()
+    if was_visible_to_employees:
+        await notify_visible_schedule_change(
+            db, queue, event, item_id=item_id, visible=True, summary=removed_summary,
+        )
+    else:
+        await db.commit()
     await enqueue_reindex_fire_and_forget(queue, event_id)
 
 

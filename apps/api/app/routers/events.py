@@ -35,7 +35,11 @@ from app.services.event_service import (
     transition_event,
 )
 from app.services.journey_service import PUBLISHED_STATUSES
-from app.services.notification.email_service import notify_employees, participating_employee_ids
+from app.services.notification.email_service import (
+    describe_event_changes,
+    notify_employees,
+    participating_employee_ids,
+)
 from app.services.rag.enqueue import enqueue_reindex_fire_and_forget
 from app.services.readiness_service import build_publish_readiness
 from app.services.team_roster_service import build_team_roster, resolve_roster_team_id
@@ -199,29 +203,20 @@ async def update_event(
     await db.commit()
     await db.refresh(event)
 
-    # CBNV who already confirmed attendance need to know when the public
-    # event details change, most importantly its start/end dates.  Previously
-    # this endpoint only persisted the audit entry, so no notification was
-    # generated at all.
-    attendee_facing_fields = {"name", "description", "start_date", "end_date", "destination"}
-    changed_attendee_fields = {
-        field for field in attendee_facing_fields
-        if field in data and before.get(field) != _event_out(event).model_dump(mode="json").get(field)
-    }
-    if changed_attendee_fields:
+    after = _event_out(event).model_dump(mode="json")
+    summary = describe_event_changes(before, after)
+    if summary:
         employee_ids = await participating_employee_ids(db, event_id)
-        await notify_employees(
-            db,
-            queue,
-            event,
-            employee_ids,
-            "schedule_changed",
-            dedupe_suffix=f"event:{event.updated_at.isoformat()}",
-            extra_context={
-                "change_summary": "Thông tin sự kiện, bao gồm thời gian tổ chức nếu có thay đổi, "
-                "đã được BTC cập nhật.",
-            },
-        )
+        if employee_ids:
+            await notify_employees(
+                db,
+                queue,
+                event,
+                employee_ids,
+                "schedule_changed",
+                dedupe_suffix=f"event:{event.updated_at.isoformat()}",
+                extra_context={"change_summary": summary},
+            )
     return _event_out(event)
 
 

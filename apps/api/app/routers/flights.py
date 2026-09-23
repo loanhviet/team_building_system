@@ -35,7 +35,11 @@ from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
 from app.services.importer.xlsx import load_xlsx, read_xlsx
-from app.services.notification.email_service import notify_employees, participating_employee_ids
+from app.services.notification.email_service import (
+    describe_flight_changes,
+    notify_employees,
+    participating_employee_ids,
+)
 from app.services.xlsx_export import xlsx_file
 
 router = APIRouter(prefix="/events/{event_id}", tags=["flights"])
@@ -199,29 +203,52 @@ async def update_flight(
 
     changed_passenger_fields = any(before.get(f) != after.get(f) for f in PASSENGER_FACING_FIELDS)
     if changed_passenger_fields:
-        # A flight's timing is also meaningful before allocation/publishing:
-        # people have already selected Ca 1/Ca 2 during registration.  Notify
-        # that shift's confirmed participants as well as any people manually
-        # assigned to the flight (the latter may include a shift exception).
-        shift_employee_ids = await participating_employee_ids(
-            db, event_id, shift_id=flight.shift_id
-        )
-        employee_ids = sorted(set(assigned_ids).union(shift_employee_ids))
-        await notify_employees(
-            db, queue, event, employee_ids, "flight_changed",
-            dedupe_suffix=f"{flight_id}:{flight.updated_at.isoformat()}",
-            extra_context={
-                "change_summary": "Thời gian hoặc thông tin chuyến bay của ca bạn đã đăng ký "
-                "vừa được BTC cập nhật.",
-            },
-        )
+        await _notify_flight_change(db, queue, event, flight, assigned_ids, before, after)
 
     return flight
 
 
+async def _notify_flight_change(
+    db: DbSession,
+    queue: ArqRedis,
+    event: Event,
+    flight: Flight,
+    assigned_ids: list[int],
+    before: dict,
+    after: dict,
+) -> None:
+    """Email people on this flight's ca, plus anyone already seated on it.
+
+    A flight with no ca and nobody assigned has no audience yet — BTC links
+    the flight to Ca 1/Ca 2, or allocates it, before a clock change can be
+    delivered.
+    """
+    shift_employee_ids: list[int] = []
+    if flight.shift_id is not None:
+        shift_employee_ids = await participating_employee_ids(
+            db, event.id, shift_id=flight.shift_id
+        )
+    employee_ids = sorted(set(assigned_ids).union(shift_employee_ids))
+    if not employee_ids:
+        return
+    await notify_employees(
+        db, queue, event, employee_ids, "flight_changed",
+        dedupe_suffix=f"{flight.id}:{flight.updated_at.isoformat()}",
+        extra_context={
+            "change_summary": describe_flight_changes(
+                flight.flight_code, flight.direction, before, after
+            ),
+        },
+    )
+
+
 @router.post("/flights/import")
 async def import_flights(
-    event_id: int, db: DbSession, user: AdminUser, file: UploadFile
+    event_id: int,
+    db: DbSession,
+    user: AdminUser,
+    file: UploadFile,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> dict:
     """Small dataset (a handful of flights) — parsed synchronously, no queue needed."""
     event = await master_data.get_or_404(db, Event, event_id)
@@ -248,6 +275,8 @@ async def import_flights(
 
     ok_rows = 0
     errors: list[dict] = []
+    # Existing flights whose clock moved. New rows are not an update.
+    time_changes: list[tuple[int, object, object]] = []
     for index, raw_row in enumerate(rows_iter, start=2):
         if raw_row is None or all(v is None for v in raw_row):
             continue
@@ -273,6 +302,9 @@ async def import_flights(
                     )
                 )
                 flight = existing.scalar_one_or_none()
+                updating = flight is not None
+                previous_depart = flight.depart_at if flight is not None else None
+                previous_arrive = flight.arrive_at if flight is not None else None
                 if flight is None:
                     flight = Flight(event_id=event_id, flight_code=flight_code)
                     db.add(flight)
@@ -289,6 +321,10 @@ async def import_flights(
                 flight.capacity = int(row["capacity"])
                 flight.note = str(row["note"]).strip() if row.get("note") else None
                 await db.flush()
+                if updating and (
+                    previous_depart != flight.depart_at or previous_arrive != flight.arrive_at
+                ):
+                    time_changes.append((flight.id, previous_depart, previous_arrive))
             ok_rows += 1
         except Exception as exc:  # noqa: BLE001
             errors.append({"row": index, "error": str(exc)})
@@ -299,6 +335,27 @@ async def import_flights(
         after={"ok_rows": ok_rows, "error_rows": len(errors)}, event_id=event_id,
     )
     await db.commit()
+
+    for flight_id, previous_depart, previous_arrive in time_changes:
+        flight = await db.get(Flight, flight_id)
+        if flight is None:
+            continue
+        assigned_ids = [
+            row[0]
+            for row in (
+                await db.execute(
+                    select(FlightAssignment.employee_id).where(FlightAssignment.flight_id == flight_id)
+                )
+            ).all()
+        ]
+        before = {"depart_at": previous_depart, "arrive_at": previous_arrive, "flight_code": flight.flight_code}
+        after = {
+            "depart_at": flight.depart_at,
+            "arrive_at": flight.arrive_at,
+            "flight_code": flight.flight_code,
+        }
+        await _notify_flight_change(db, queue, event, flight, assigned_ids, before, after)
+
     return {"ok_rows": ok_rows, "error_rows": len(errors), "errors": errors}
 
 
