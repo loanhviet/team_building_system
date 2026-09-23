@@ -295,3 +295,110 @@ async def test_fixed_quota_rule_requires_a_quota(client, world, auth_headers):
         json={"name": "Gala Dinner", "seat_quota_rule": "by_headcount"},
     )
     assert unknown.status_code == 422
+
+
+async def test_draw_emails_each_team_leader(client, world, auth_headers, db_session):
+    from sqlalchemy import select
+
+    from app.models.notification import EmailOutbox
+
+    world.event.status = EventStatus.registration_closed
+    leader = await make_employee(
+        db_session, team=world.team, site=world.site, code="NV910", role=UserRole.team_leader,
+    )
+    db_session.add(GalaConfig(event_id=world.event.id, name="Gala", fixed_quota=1, seat_quota_rule="fixed"))
+    await _table_with_seats(db_session, world.event.id, "B1", 4)
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/events/{world.event.id}/gala/draw", headers=auth_headers(world.organizer_user),
+    )
+    assert response.status_code == 200
+
+    result = await db_session.execute(
+        select(EmailOutbox).where(EmailOutbox.template_code == "gala_draw_announced")
+    )
+    outbox = result.scalar_one()
+    assert outbox.to_email == leader.user.email
+    assert outbox.payload_json["order_no"] == 1
+    assert outbox.payload_json["seat_quota"] == 1
+    assert any(job[0] == "send_email" for job in client.fake_queue.jobs)
+
+
+async def test_grant_opens_the_chosen_team_immediately(client, world, auth_headers, db_session):
+    from sqlalchemy import select
+
+    from app.models.notification import EmailOutbox
+
+    other = Team(code="OPS", name="Ops")
+    db_session.add(other)
+    await db_session.flush()
+    other_person = await make_employee(db_session, team=other, site=world.site, code="NV920")
+    leader = await make_employee(
+        db_session, team=other, site=world.site, code="NV921", role=UserRole.team_leader,
+    )
+    db_session.add(Registration(
+        event_id=world.event.id, employee_id=other_person.employee.id,
+        status="submitted", is_participating=True, submitted_at=utcnow(),
+    ))
+    db_session.add(GalaConfig(event_id=world.event.id, name="Gala", fixed_quota=2, seat_quota_rule="fixed"))
+    await _table_with_seats(db_session, world.event.id, "B1", 6)
+    current = GalaTurn(
+        event_id=world.event.id, team_id=world.team.id, order_no=1, seat_quota=2, status="active",
+        started_at=utcnow(), expires_at=utcnow() + timedelta(minutes=5),
+    )
+    waiting = GalaTurn(
+        event_id=world.event.id, team_id=other.id, order_no=2, seat_quota=2, status="waiting",
+    )
+    db_session.add_all([current, waiting])
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/events/{world.event.id}/gala/turns/grant",
+        headers=auth_headers(world.organizer_user),
+        json={"team_id": other.id},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["team_id"] == other.id
+    assert body["status"] == "active"
+    assert body["is_admin_grant"] is False
+
+    event_id = world.event.id
+    paused_team_id = world.team.id
+    chosen_team_id = other.id
+    leader_email = leader.user.email
+    db_session.expire_all()
+    result = await db_session.execute(select(GalaTurn).where(GalaTurn.event_id == event_id))
+    turns = {turn.team_id: turn for turn in result.scalars().all()}
+    assert turns[paused_team_id].status == "waiting"
+    assert turns[paused_team_id].order_no < turns[chosen_team_id].order_no
+
+    mailed = await db_session.execute(
+        select(EmailOutbox).where(EmailOutbox.template_code == "gala_turn_started")
+    )
+    outbox = mailed.scalar_one()
+    assert outbox.to_email == leader_email
+    assert outbox.payload_json["opened_by_admin"] is True
+
+
+async def test_grant_refuses_a_team_that_already_filled_its_quota(
+    client, world, auth_headers, db_session
+):
+    db_session.add(GalaConfig(event_id=world.event.id, name="Gala", fixed_quota=1, seat_quota_rule="fixed"))
+    table = await _table_with_seats(db_session, world.event.id, "B1", 2)
+    seats = (await db_session.execute(select(GalaSeat).where(GalaSeat.table_id == table.id))).scalars().all()
+    seats[0].status = "confirmed"
+    seats[0].team_id = world.team.id
+    db_session.add(GalaTurn(
+        event_id=world.event.id, team_id=world.team.id, order_no=1, seat_quota=1, status="done",
+    ))
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/events/{world.event.id}/gala/turns/grant",
+        headers=auth_headers(world.organizer_user),
+        json={"team_id": world.team.id},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "quota_filled"

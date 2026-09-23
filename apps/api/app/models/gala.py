@@ -85,3 +85,5 @@ class GalaTurn(Base):
     # Without this a team that missed its turn had zero seats, permanently
     # (BRD §8 has no "you're just out of luck" case).
     is_makeup: Mapped[bool] = mapped_column(Boolean, default=False)
+    # BTC opened this turn out of order so the team can pick immediately.
+    is_admin_grant: Mapped[bool] = mapped_column(Boolean, default=False)

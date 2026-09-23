@@ -518,6 +518,7 @@ export type GalaTurn = {
   started_at: string | null;
   expires_at: string | null;
   is_makeup: boolean;
+  is_admin_grant: boolean;
   has_representative: boolean;
 };
 

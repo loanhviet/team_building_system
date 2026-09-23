@@ -62,7 +62,8 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
   const { connected } = useGalaWebSocket(
     eventId,
     (raw) => {
-      if ((raw as Record<string, unknown>).type === "occupant_update") {
+      const kind = (raw as Record<string, unknown>).type;
+      if (kind === "occupant_update" || kind === "turns_changed") {
         queryClient.invalidateQueries({ queryKey });
         return;
       }
@@ -315,6 +316,7 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
                   >
                     {t.order_no}. {t.team_name}
                     {t.is_makeup && " (bù)"}
+                    {t.is_admin_grant && " (BTC)"}
                   </span>
                 ))}
               </div>
@@ -385,13 +387,13 @@ export default function GalaSeatMapPage({ params }: { params: Promise<{ eventId:
                     ))}
                   </ul>
                 )}
-                {roster && roster.members.length > 0 && (
+                {roster && roster.members.some((m) => m.registration_status === "submitted" && m.is_participating) && (
                   <div>
                     <p className="mb-2 text-xs font-semibold text-muted-foreground">
-                      Đồng đội ngồi cùng bàn ({roster.members.length})
+                      Đồng đội ngồi cùng bàn ({roster.members.filter((m) => m.registration_status === "submitted" && m.is_participating).length})
                     </p>
                     <ul className="space-y-1">
-                      {roster.members.slice(0, 6).map((m) => (
+                      {roster.members.filter((m) => m.registration_status === "submitted" && m.is_participating).slice(0, 6).map((m) => (
                         <li key={m.employee_id} className="flex items-center gap-2 text-xs">
                           <InitialsAvatar name={m.full_name} className="size-7 text-[10px]" />
                           <span className="min-w-0 flex-1 truncate font-medium">{m.full_name}</span>

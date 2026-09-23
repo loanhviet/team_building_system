@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.time import utcnow
+from app.models.auth import User
+from app.models.enums import UserRole
 from app.models.event import Event
 from app.models.notification import EmailOutbox, EmailTemplate
 from app.models.organization import Employee
@@ -107,6 +109,26 @@ DEFAULT_TEMPLATES = {
             "<p><a href='{{ app_url }}/login'>Đăng nhập</a></p>"
         ),
     },
+    "gala_draw_announced": {
+        "subject": "Thứ tự bốc thăm Gala - {{ event_name }}",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>BTC đã bốc thăm thứ tự chọn ghế Gala <b>{{ event_name }}</b>.</p>"
+            "<p>Team <b>{{ team_name }}</b> ở lượt số <b>{{ order_no }}</b>, "
+            "được chọn {{ seat_quota }} ghế.</p>"
+            "<p><a href='{{ app_url }}'>Mở trang Gala</a></p>"
+        ),
+    },
+    "gala_turn_started": {
+        "subject": "Đến lượt chọn ghế Gala - {{ event_name }}",
+        "body_html": (
+            "<p>Chào {{ full_name }},</p>"
+            "<p>Đến lượt team <b>{{ team_name }}</b> chọn ghế Gala <b>{{ event_name }}</b>.</p>"
+            "{% if opened_by_admin %}<p>BTC vừa mở lượt này cho team bạn.</p>{% endif %}"
+            "<p>Còn được chọn {{ seats_remaining }} ghế. Hết lượt lúc {{ expires_at }}.</p>"
+            "<p><a href='{{ app_url }}'>Mở trang Gala</a></p>"
+        ),
+    },
 }
 
 TEMPLATE_DESCRIPTIONS = {
@@ -117,6 +139,8 @@ TEMPLATE_DESCRIPTIONS = {
     "schedule_changed": "Gửi khi BTC sửa lịch trình (sau khi đã công bố)",
     "registration_reminder": "Gửi khi BTC nhắc CBNV chưa gửi đăng ký",
     "account_welcome": "Gửi khi BTC tạo CBNV mới và chọn gửi email kích hoạt",
+    "gala_draw_announced": "Gửi cho trưởng nhóm khi BTC bốc thăm thứ tự Gala",
+    "gala_turn_started": "Gửi cho trưởng nhóm khi đến lượt chọn ghế Gala",
 }
 
 PUBLISHED_STATUSES = ("information_published", "event_started", "event_completed")
@@ -478,3 +502,57 @@ async def notify_visible_schedule_change(
         dedupe_suffix=f"item:{item_id}:{utcnow().isoformat()}",
         extra_context={"change_summary": summary},
     )
+
+
+async def enqueue_team_leader_emails(
+    db: AsyncSession,
+    event: Event,
+    *,
+    template_code: str,
+    messages: list[tuple[int, dict]],
+    dedupe_suffix: str,
+) -> list[int]:
+    """Queue one email per team leader. Does not commit.
+
+    `messages` is `(team_id, context)`. Teams with no leader account are skipped.
+    """
+    team_ids = {team_id for team_id, _context in messages}
+    if not team_ids:
+        return []
+    result = await db.execute(
+        select(Employee)
+        .join(User, User.employee_id == Employee.id)
+        .where(
+            Employee.team_id.in_(team_ids),
+            Employee.is_active.is_(True),
+            User.role == UserRole.team_leader,
+            User.is_active.is_(True),
+        )
+    )
+    leaders = list(result.scalars().all())
+    by_team: dict[int, list[Employee]] = {}
+    for leader in leaders:
+        if leader.team_id is not None:
+            by_team.setdefault(leader.team_id, []).append(leader)
+
+    gala_url = f"{_settings.app_base_url}/gala/{event.id}"
+    outbox_ids: list[int] = []
+    for team_id, context in messages:
+        for leader in by_team.get(team_id, []):
+            payload = {
+                "full_name": leader.full_name,
+                "event_name": event.name,
+                "app_url": gala_url,
+                **context,
+            }
+            outbox_id = await enqueue_email(
+                db,
+                event_id=event.id,
+                to_email=leader.email,
+                template_code=template_code,
+                payload=payload,
+                dedupe_key=f"{template_code}:{event.id}:{leader.id}:{dedupe_suffix}",
+            )
+            if outbox_id is not None:
+                outbox_ids.append(outbox_id)
+    return outbox_ids

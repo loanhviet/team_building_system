@@ -10,7 +10,7 @@ from app.core.errors import AppError
 from app.core.time import utcnow
 from app.core.ws_manager import publish_gala_event
 from app.models.gala import GalaConfig, GalaSeat, GalaTable, GalaTurn
-from app.models.organization import Employee
+from app.models.organization import Employee, Team
 from app.models.registration import Registration
 from app.services.gala.seat_lock import acquire_seat_lock, release_seat_lock
 
@@ -174,7 +174,9 @@ async def _spawn_makeup_turns(db: AsyncSession, event_id: int) -> list[GalaTurn]
     represented can't loop the queue forever."""
     result = await db.execute(
         select(GalaTurn).where(
-            GalaTurn.event_id == event_id, GalaTurn.status.in_(["expired", "skipped"])
+            GalaTurn.event_id == event_id,
+            GalaTurn.status.in_(["expired", "skipped"]),
+            GalaTurn.is_admin_grant.is_(False),
         )
     )
     ended = result.scalars().all()
@@ -264,6 +266,144 @@ async def start_turn(db: AsyncSession, event_id: int, config: GalaConfig) -> Gal
     return waiting
 
 
+async def _team_quota(db: AsyncSession, event_id: int, config: GalaConfig, team_id: int) -> int:
+    """Quota from the draw when the team was drawn, otherwise from registrations."""
+    drawn = await db.scalar(
+        select(GalaTurn.seat_quota).where(
+            GalaTurn.event_id == event_id,
+            GalaTurn.team_id == team_id,
+            GalaTurn.is_makeup.is_(False),
+            GalaTurn.is_admin_grant.is_(False),
+        ).limit(1)
+    )
+    if drawn is not None:
+        return drawn
+    return await compute_team_quota(db, event_id, team_id, config)
+
+
+async def grant_team_turn(
+    db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig, team_id: int
+) -> GalaTurn:
+    """Open a seat-picking turn for one team immediately.
+
+    A turn already in progress is paused and placed at the front of the
+    waiting queue. It is not marked skipped or expired, so the team keeps
+    its automatic makeup. Confirmed seats stay; unconfirmed holds are released.
+    """
+    quota = await _team_quota(db, event_id, config, team_id)
+    if quota <= 0:
+        raise AppError(
+            "no_participants",
+            "Team không có người tham gia để chọn ghế",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    confirmed = await _confirmed_seat_count(db, event_id, team_id)
+    if confirmed >= quota:
+        raise AppError("quota_filled", "Team đã chọn đủ ghế", status.HTTP_409_CONFLICT)
+
+    active = await get_active_turn(db, event_id, for_update=True)
+    if active is not None and active.team_id == team_id:
+        await _activate_turn(db, config, active)
+        config.status = "in_progress"
+        await db.flush()
+        return active
+
+    if active is not None:
+        await _release_team_holds(db, redis, event_id, active.team_id)
+        active.status = "waiting"
+        active.started_at = None
+        active.expires_at = None
+        await db.flush()
+        min_order = await db.scalar(
+            select(func.coalesce(func.min(GalaTurn.order_no), 0)).where(
+                GalaTurn.event_id == event_id, GalaTurn.status == "waiting"
+            )
+        )
+        active.order_no = int(min_order or 0) - 1
+
+    waiting = await db.scalar(
+        select(GalaTurn).where(
+            GalaTurn.event_id == event_id,
+            GalaTurn.team_id == team_id,
+            GalaTurn.status == "waiting",
+        ).order_by(GalaTurn.order_no).limit(1)
+    )
+    if waiting is None:
+        max_order = await db.scalar(
+            select(func.coalesce(func.max(GalaTurn.order_no), 0)).where(GalaTurn.event_id == event_id)
+        )
+        waiting = GalaTurn(
+            event_id=event_id,
+            team_id=team_id,
+            order_no=int(max_order or 0) + 1,
+            seat_quota=quota,
+            status="waiting",
+            is_admin_grant=True,
+        )
+        db.add(waiting)
+        await db.flush()
+
+    await _activate_turn(db, config, waiting)
+    config.status = "in_progress"
+    await db.flush()
+    return waiting
+
+
+async def queue_gala_draw_emails(db: AsyncSession, event, turns: list[GalaTurn], draw_seed: int) -> list[int]:
+    from app.services.notification.email_service import enqueue_team_leader_emails
+
+    if not turns:
+        return []
+    names = dict(
+        (
+            await db.execute(select(Team.id, Team.name).where(Team.id.in_({t.team_id for t in turns})))
+        ).all()
+    )
+    return await enqueue_team_leader_emails(
+        db,
+        event,
+        template_code="gala_draw_announced",
+        messages=[
+            (
+                turn.team_id,
+                {
+                    "team_name": names.get(turn.team_id, "Team"),
+                    "order_no": turn.order_no,
+                    "seat_quota": turn.seat_quota,
+                },
+            )
+            for turn in turns
+        ],
+        dedupe_suffix=f"draw:{draw_seed}",
+    )
+
+
+async def queue_gala_turn_email(db: AsyncSession, event, turn: GalaTurn, *, opened_by_admin: bool) -> list[int]:
+    from app.services.notification.email_service import enqueue_team_leader_emails
+
+    confirmed = await _confirmed_seat_count(db, event.id, turn.team_id)
+    team_name = await db.scalar(select(Team.name).where(Team.id == turn.team_id))
+    expires = turn.expires_at.strftime("%H:%M %d/%m/%Y") if turn.expires_at else "—"
+    started = turn.started_at.isoformat() if turn.started_at else "open"
+    return await enqueue_team_leader_emails(
+        db,
+        event,
+        template_code="gala_turn_started",
+        messages=[
+            (
+                turn.team_id,
+                {
+                    "team_name": team_name or "Team",
+                    "seats_remaining": max(turn.seat_quota - confirmed, 0),
+                    "expires_at": expires,
+                    "opened_by_admin": opened_by_admin,
+                },
+            )
+        ],
+        dedupe_suffix=f"turn:{turn.id}:{started}",
+    )
+
+
 async def _release_team_holds(
     db: AsyncSession, redis: Redis, event_id: int, team_id: int
 ) -> None:
@@ -346,7 +486,9 @@ async def set_seat_blocked(
     return seat
 
 
-async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig) -> None:
+async def expire_stale(
+    db: AsyncSession, redis: Redis, event_id: int, config: GalaConfig
+) -> GalaTurn | None:
     now = utcnow()
 
     result = await db.execute(
@@ -366,6 +508,7 @@ async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: Ga
             redis, event_id, {"type": "seat_update", "seat_id": seat.id, "status": "available"}
         )
 
+    activated: GalaTurn | None = None
     turn = await get_active_turn(db, event_id, for_update=True)
     if turn is not None and turn.expires_at is not None and turn.expires_at < now:
         active = turn
@@ -374,6 +517,7 @@ async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: Ga
         # the pool now rather than whenever each seat's own TTL happens to run out
         await _release_team_holds(db, redis, event_id, active.team_id)
         next_turn = await advance_turn(db, event_id, config)
+        activated = next_turn
         await publish_gala_event(
             redis, event_id,
             {
@@ -384,6 +528,7 @@ async def expire_stale(db: AsyncSession, redis: Redis, event_id: int, config: Ga
             },
         )
     await db.flush()
+    return activated
 
 
 async def hold_seat(

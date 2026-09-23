@@ -33,6 +33,12 @@ import { useCountdown } from "@/lib/use-countdown";
 import { useGalaWebSocket } from "@/lib/use-gala-ws";
 import type { GalaConfig, GalaSeat, GalaState, GalaTable, GalaTurn } from "@/types/api";
 
+function warnMissingLeader(turns: GalaTurn[]) {
+  if (turns.length === 0) return;
+  const names = turns.map((turn) => turn.team_name ?? "Team").join(", ");
+  toast.warning(`${names} chưa có trưởng nhóm nên không nhận được email.`);
+}
+
 const DEFAULT_CONFIG_FORM = {
   name: "Gala Dinner",
   stageLabel: "Sân khấu",
@@ -54,6 +60,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   const [editingTable, setEditingTable] = useState<GalaTable | null>(null);
   const [blockMode, setBlockMode] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [grantTeamId, setGrantTeamId] = useState("");
 
   const { data: state } = useQuery({
     queryKey,
@@ -61,7 +68,8 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   });
 
   useGalaWebSocket(eventId, (raw) => {
-    if ((raw as Record<string, unknown>).type === "occupant_update") {
+    const kind = (raw as Record<string, unknown>).type;
+    if (kind === "occupant_update" || kind === "turns_changed") {
       queryClient.invalidateQueries({ queryKey });
       return;
     }
@@ -163,8 +171,9 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
 
   const drawMutation = useMutation({
     mutationFn: () => apiFetch<GalaTurn[]>(`/api/events/${eventId}/gala/draw`, { method: "POST" }),
-    onSuccess: () => {
+    onSuccess: (turns) => {
       toast.success("Đã bốc thăm. Bấm Bắt đầu lượt khi sẵn sàng.");
+      warnMissingLeader(turns.filter((turn) => !turn.has_representative));
       invalidate();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
@@ -172,11 +181,26 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
 
   const startMutation = useMutation({
     mutationFn: () => apiFetch<GalaTurn>(`/api/events/${eventId}/gala/turns/start`, { method: "POST" }),
-    onSuccess: () => {
+    onSuccess: (turn) => {
       toast.success("Đã bắt đầu lượt");
+      if (!turn.has_representative) warnMissingLeader([turn]);
       invalidate();
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Có lỗi xảy ra"),
+  });
+
+  const grantMutation = useMutation({
+    mutationFn: (teamId: number) =>
+      apiFetch<GalaTurn>(`/api/events/${eventId}/gala/turns/grant`, {
+        method: "POST",
+        body: JSON.stringify({ team_id: teamId }),
+      }),
+    onSuccess: (turn) => {
+      toast.success(`${turn.team_name ?? "Team"} được chọn ghế ngay`);
+      if (!turn.has_representative) warnMissingLeader([turn]);
+      invalidate();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không mở được lượt"),
   });
 
   const skipMutation = useMutation({
@@ -223,7 +247,7 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
   // was spawned, so counting both would double-count (mirrors the same
   // reasoning in dashboard_service.build_dashboard's gala_unseated_count)
   const neededSeatCount = (state?.turns ?? [])
-    .filter((t) => !t.is_makeup)
+    .filter((t) => !t.is_makeup && !t.is_admin_grant)
     .reduce((sum, t) => sum + Math.max(t.seat_quota - (confirmedCountByTeam.get(t.team_id) ?? 0), 0), 0);
   const assignedSeatCount = (state?.seats ?? []).filter(
     (seat) => seat.status === "confirmed" && seat.employee_id != null,
@@ -544,7 +568,37 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
           <CardHeader>
             <CardTitle className="text-base">Thứ tự bốc thăm</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex min-w-48 flex-col gap-1">
+                <Label htmlFor="grant-team">Chỉ định team chọn ghế ngay</Label>
+                <Select value={grantTeamId} onValueChange={(value) => setGrantTeamId(value ?? "")}>
+                  <SelectTrigger id="grant-team">
+                    <SelectValue placeholder="Chọn team" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[...new Map(state.turns.map((turn) => [turn.team_id, turn.team_name ?? "Team"])).entries()].map(
+                      ([teamId, teamName]) => (
+                        <SelectItem key={teamId} value={String(teamId)}>
+                          {teamName}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                size="sm"
+                disabled={!grantTeamId || grantMutation.isPending}
+                onClick={() => grantMutation.mutate(Number(grantTeamId))}
+              >
+                Mở lượt chọn ghế
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Team được chọn vào chọn ngay. Lượt đang chạy được tạm dừng và xếp lên đầu hàng chờ, ghế đã xác nhận vẫn giữ.
+            </p>
+            <div className="flex flex-wrap gap-2">
             {state.turns.map((t) => (
               <Badge
                 key={t.id}
@@ -554,9 +608,11 @@ export function GalaAdminPanel({ eventId }: { eventId: number }) {
                 #{t.order_no} {t.team_name} ({confirmedCountByTeam.get(t.team_id) ?? 0}/{t.seat_quota} ghế) —{" "}
                 {galaTurnStatusLabel(t.status)}
                 {t.is_makeup && " · Lượt bù"}
+                {t.is_admin_grant && " · Lượt BTC chỉ định"}
                 {!t.has_representative && " · Chưa có trưởng nhóm"}
               </Badge>
             ))}
+            </div>
           </CardContent>
         </Card>
       )}

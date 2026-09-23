@@ -23,6 +23,7 @@ from app.models.registration import Registration
 from app.schemas.gala import (
     GalaConfigIn,
     GalaConfigOut,
+    GalaGrantTurnIn,
     GalaSeatBlockIn,
     GalaSeatOccupantIn,
     GalaSeatOut,
@@ -39,13 +40,17 @@ from app.services.gala.gala_service import (
     confirm_seat,
     draw_turns,
     get_active_turn,
+    grant_team_turn,
     hold_seat,
+    queue_gala_draw_emails,
+    queue_gala_turn_email,
     release_seat,
     resize_table_seats,
     set_seat_blocked,
     skip_turn,
     start_turn,
 )
+from app.services.notification.email_service import dispatch_emails
 
 router = APIRouter(prefix="/events/{event_id}/gala", tags=["gala"])
 
@@ -172,7 +177,12 @@ DRAW_ALLOWED_STATUSES = {
 
 
 @router.post("/draw", response_model=list[GalaTurnOut])
-async def draw(event_id: int, db: DbSession, user: AdminUser) -> list[GalaTurnOut]:
+async def draw(
+    event_id: int,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> list[GalaTurnOut]:
     event = await master_data.get_or_404(db, Event, event_id)
     if event.status not in DRAW_ALLOWED_STATUSES:
         raise AppError(
@@ -198,11 +208,18 @@ async def draw(event_id: int, db: DbSession, user: AdminUser) -> list[GalaTurnOu
         raise AppError("no_teams", "Không có Team nào để bốc thăm", status.HTTP_400_BAD_REQUEST)
 
     await draw_turns(db, event_id, config, team_ids)
+    drawn = list(
+        (
+            await db.execute(select(GalaTurn).where(GalaTurn.event_id == event_id))
+        ).scalars().all()
+    )
+    outbox_ids = await queue_gala_draw_emails(db, event, drawn, config.draw_seed or 0)
     await record_audit(
         db, actor_user_id=user.id, action="draw", entity_type="gala_turn", entity_id=event_id,
         after={"team_ids": team_ids}, event_id=event_id,
     )
     await db.commit()
+    await dispatch_emails(queue, outbox_ids)
     return await _turns_out(db, event_id)
 
 
@@ -213,13 +230,16 @@ async def start_next_turn(
     user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> GalaTurnOut:
+    event = await master_data.get_or_404(db, Event, event_id)
     config = await _get_or_create_config(db, event_id)
     turn = await start_turn(db, event_id, config)
+    outbox_ids = await queue_gala_turn_email(db, event, turn, opened_by_admin=False)
     await record_audit(
         db, actor_user_id=user.id, action="turn_start", entity_type="gala_turn", entity_id=turn.id,
         after={"team_id": turn.team_id, "order_no": turn.order_no}, event_id=event_id,
     )
     await db.commit()
+    await dispatch_emails(queue, outbox_ids)
     await publish_gala_event(
         queue,
         event_id,
@@ -241,16 +261,48 @@ async def skip_current_turn(
     user: AdminUser,
     queue: Annotated[ArqRedis, Depends(get_queue)],
 ) -> list[GalaTurnOut]:
+    event = await master_data.get_or_404(db, Event, event_id)
     config = await _get_or_create_config(db, event_id)
     active_turn = await get_active_turn(db, event_id)
     skipped_team_id = active_turn.team_id if active_turn else None
-    await skip_turn(db, queue, event_id, config)
+    next_turn = await skip_turn(db, queue, event_id, config)
+    outbox_ids = (
+        await queue_gala_turn_email(db, event, next_turn, opened_by_admin=bool(next_turn.is_admin_grant))
+        if next_turn is not None
+        else []
+    )
     await record_audit(
         db, actor_user_id=user.id, action="turn_skip", entity_type="gala_turn", entity_id=event_id,
         before={"team_id": skipped_team_id}, event_id=event_id,
     )
     await db.commit()
+    await dispatch_emails(queue, outbox_ids)
     return await _turns_out(db, event_id)
+
+
+@router.post("/turns/grant", response_model=GalaTurnOut)
+async def grant_turn(
+    event_id: int,
+    payload: GalaGrantTurnIn,
+    db: DbSession,
+    user: AdminUser,
+    queue: Annotated[ArqRedis, Depends(get_queue)],
+) -> GalaTurnOut:
+    """BTC chỉ định một team chọn ghế ngay, kể cả khi đang có lượt khác."""
+    await lock_sqlite_write_transaction(db)
+    event = await master_data.get_or_404(db, Event, event_id)
+    config = await _get_or_create_config(db, event_id)
+    turn = await grant_team_turn(db, queue, event_id, config, payload.team_id)
+    outbox_ids = await queue_gala_turn_email(db, event, turn, opened_by_admin=True)
+    await record_audit(
+        db, actor_user_id=user.id, action="grant_turn", entity_type="gala_turn", entity_id=turn.id,
+        after={"team_id": turn.team_id, "order_no": turn.order_no}, event_id=event_id,
+    )
+    await db.commit()
+    await dispatch_emails(queue, outbox_ids)
+    await publish_gala_event(queue, event_id, {"type": "turns_changed"})
+    turns = await _turns_out(db, event_id)
+    return next(t for t in turns if t.id == turn.id)
 
 
 async def _turns_out(db: DbSession, event_id: int) -> list[GalaTurnOut]:
@@ -277,7 +329,7 @@ async def _turns_out(db: DbSession, event_id: int) -> list[GalaTurnOut]:
         GalaTurnOut(
             id=t.id, team_id=t.team_id, team_name=name, order_no=t.order_no,
             seat_quota=t.seat_quota, status=t.status, started_at=t.started_at,
-            expires_at=t.expires_at, is_makeup=t.is_makeup,
+            expires_at=t.expires_at, is_makeup=t.is_makeup, is_admin_grant=t.is_admin_grant,
             has_representative=t.team_id in represented_team_ids,
         )
         for t, name in rows
@@ -380,12 +432,21 @@ async def confirm(
     await lock_sqlite_write_transaction(db)
     team_id = await _my_team_id(db, user)
     config = await _get_or_create_config(db, event_id)
+    before_turn = await get_active_turn(db, event_id)
     seat = await confirm_seat(db, queue, event_id, config, seat_id, team_id)
+    after_turn = await get_active_turn(db, event_id)
+    outbox_ids: list[int] = []
+    if after_turn is not None and (before_turn is None or before_turn.id != after_turn.id):
+        event = await master_data.get_or_404(db, Event, event_id)
+        outbox_ids = await queue_gala_turn_email(
+            db, event, after_turn, opened_by_admin=bool(after_turn.is_admin_grant)
+        )
     await record_audit(
         db, actor_user_id=user.id, action="confirm", entity_type="gala_seat", entity_id=seat_id,
         after={"team_id": team_id, "seat_id": seat_id}, event_id=event_id,
     )
     await db.commit()
+    await dispatch_emails(queue, outbox_ids)
     return seat
 
 

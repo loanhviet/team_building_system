@@ -139,7 +139,9 @@ async def build_dashboard(db: AsyncSession, event_id: int) -> DashboardOut:
         (
             await db.execute(
                 select(GalaTurn.team_id, GalaTurn.seat_quota).where(
-                    GalaTurn.event_id == event_id, GalaTurn.is_makeup.is_(False)
+                    GalaTurn.event_id == event_id,
+                    GalaTurn.is_makeup.is_(False),
+                    GalaTurn.is_admin_grant.is_(False),
                 )
             )
         ).all()
