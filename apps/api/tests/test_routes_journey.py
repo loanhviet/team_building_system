@@ -7,6 +7,34 @@ from app.models.event import Shift
 from app.models.schedule import ScheduleItem
 
 
+async def test_admin_can_preview_one_employee_before_publish(client, world, auth_headers):
+    resp = await client.get(
+        f"/api/journey/me?event_id={world.event.id}&employee_id={world.employee.id}",
+        headers=auth_headers(world.organizer_user),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["employee_code"] == world.employee.employee_code
+    assert body["full_name"] == world.employee.full_name
+    for key in ("flights", "buses", "room", "gala"):
+        assert key in body
+
+
+async def test_employee_cannot_preview_someone_else(client, world, auth_headers, db_session):
+    from tests.conftest import make_employee
+
+    other = await make_employee(db_session, team=world.team, site=world.site, code="NV777")
+    world.event.status = EventStatus.information_published
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/journey/me?event_id={world.event.id}&employee_id={other.employee.id}",
+        headers=auth_headers(world.employee_user),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["employee_code"] == world.employee.employee_code
+
+
 async def test_journey_404_before_event_published(client, world, auth_headers):
     resp = await client.get("/api/journey/me", headers=auth_headers(world.employee_user))
     assert resp.status_code == 404

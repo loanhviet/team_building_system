@@ -12,6 +12,7 @@ import {
   LogOut,
   Mail,
   PartyPopper,
+  MapPin,
   Plane,
   ScrollText,
   Settings,
@@ -45,6 +46,7 @@ const NAV_GROUPS = [
     items: [
       { href: "", label: "Tổng quan", icon: LayoutDashboard },
       { href: "/registrations", label: "Đăng ký", icon: ClipboardList },
+      { href: "/journey", label: "Hành trình", icon: MapPin },
       { href: "/settings", label: "Cấu hình", icon: Settings },
     ],
   },
