@@ -35,6 +35,7 @@ from app.services.allocation.base import preset_weights
 from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
+from app.services.leg_pickup import pickup_constraint
 from app.services.notification.email_service import PUBLISHED_STATUSES, notify_employees
 
 router = APIRouter(prefix="/events/{event_id}", tags=["buses"])
@@ -169,7 +170,24 @@ async def update_bus(
                 RegistrationTransportNeed.leg_id == bus.leg_id,
             )
         )
-        pickup_by_employee = dict(needs.all())
+        raw_pickups = dict(needs.all())
+        kind_ids = {pickup_id for pickup_id in raw_pickups.values() if pickup_id is not None}
+        pickup_kinds: dict[int, str] = {}
+        if kind_ids:
+            pickup_kinds = dict(
+                (
+                    await db.execute(
+                        select(PickupPoint.id, PickupPoint.kind).where(PickupPoint.id.in_(kind_ids))
+                    )
+                ).all()
+            )
+        pickup_by_employee = {
+            employee_id: pickup_constraint(
+                leg.direction, leg.flight_timing, pickup_id,
+                pickup_kinds.get(pickup_id) if pickup_id is not None else None,
+            )
+            for employee_id, pickup_id in raw_pickups.items()
+        } if leg is not None else raw_pickups
         flight_by_employee = (
             await _flight_times_by_employee(db, event_id, leg.direction)
             if leg is not None and leg.direction in ("outbound", "inbound")
@@ -308,6 +326,28 @@ async def _bus_preflight(db: DbSession, event_id: int, leg_id: int) -> dict:
             )
         )
     ).all()
+    pickup_ids = {pickup_id for _employee_id, pickup_id in needs if pickup_id is not None}
+    pickup_kinds: dict[int, str] = {}
+    if pickup_ids:
+        pickup_kinds = dict(
+            (
+                await db.execute(
+                    select(PickupPoint.id, PickupPoint.kind).where(PickupPoint.id.in_(pickup_ids))
+                )
+            ).all()
+        )
+    needs = [
+        (
+            employee_id,
+            pickup_constraint(
+                leg.direction,
+                leg.flight_timing,
+                pickup_id,
+                pickup_kinds.get(pickup_id) if pickup_id is not None else None,
+            ),
+        )
+        for employee_id, pickup_id in needs
+    ]
     buses = list(
         (
             await db.execute(
@@ -556,7 +596,26 @@ async def adjust_bus_assignments(
                 RegistrationTransportNeed.leg_id == target_bus.leg_id,
             )
         )
-        pickup_by_employee = dict(pickup_result.all())
+        raw_pickups = dict(pickup_result.all())
+        kind_ids = {pickup_id for pickup_id in raw_pickups.values() if pickup_id is not None}
+        pickup_kinds: dict[int, str] = {}
+        if kind_ids:
+            pickup_kinds = dict(
+                (
+                    await db.execute(
+                        select(PickupPoint.id, PickupPoint.kind).where(PickupPoint.id.in_(kind_ids))
+                    )
+                ).all()
+            )
+        pickup_by_employee = {
+            employee_id: pickup_constraint(
+                target_leg.direction,
+                target_leg.flight_timing,
+                pickup_id,
+                pickup_kinds.get(pickup_id) if pickup_id is not None else None,
+            )
+            for employee_id, pickup_id in raw_pickups.items()
+        }
         flight_by_employee = (
             await _flight_times_by_employee(db, event_id, target_leg.direction)
             if target_leg.direction in ("outbound", "inbound")

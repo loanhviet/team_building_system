@@ -280,17 +280,27 @@ function RegistrationForm({
   const isEditingExisting = registration.status === "submitted" && !readOnly;
   const showAll = readOnly || isEditingExisting;
 
-  const outboundLegs = legs.filter((l) => l.direction === "outbound");
-  const inboundLegs = legs.filter((l) => l.direction === "inbound");
-  const otherLegs = legs.filter((l) => l.direction !== "outbound" && l.direction !== "inbound");
+  const homeLeg = (leg: TransportLeg) =>
+    (leg.direction === "outbound" && leg.flight_timing === "before_flight") ||
+    (leg.direction === "inbound" && leg.flight_timing === "after_flight");
+  const destinationLeg = (leg: TransportLeg) =>
+    (leg.direction === "outbound" && leg.flight_timing === "after_flight") ||
+    (leg.direction === "inbound" && leg.flight_timing === "before_flight");
   const workplacePickups = pickupPoints.filter(
     (p) => p.kind === "workplace" && (!employeeSiteId || p.site_id === employeeSiteId),
   );
   const venuePickups = pickupPoints.filter((p) => p.kind === "venue");
+  const homeLegs = legs.filter(homeLeg);
+  const destinationLegs = legs.filter(destinationLeg);
+  const plainLegs = legs.filter((leg) => !homeLeg(leg) && !destinationLeg(leg));
+  const destinationChoosesPoint = venuePickups.length >= 2;
 
   const needsSelectionValid = legs.every((leg) => {
     const need = needs[leg.id];
-    return !need?.is_needed || !!need.pickup_point_id;
+    if (!need?.is_needed) return true;
+    if (homeLeg(leg)) return !!need.pickup_point_id;
+    if (destinationLeg(leg) && destinationChoosesPoint) return !!need.pickup_point_id;
+    return true;
   });
 
   const submitMutation = useMutation({
@@ -310,7 +320,11 @@ function RegistrationForm({
           transport_needs: legs.map((leg) => ({
             leg_id: leg.id,
             is_needed: needs[leg.id]?.is_needed ?? false,
-            pickup_point_id: needs[leg.id]?.pickup_point_id ?? null,
+            pickup_point_id:
+              needs[leg.id]?.is_needed &&
+              (homeLeg(leg) || (destinationLeg(leg) && destinationChoosesPoint))
+                ? needs[leg.id]?.pickup_point_id ?? null
+                : null,
           })),
         }),
       });
@@ -548,36 +562,39 @@ function RegistrationForm({
             </SectionTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {outboundLegs.length > 0 && (
+            {homeLegs.length > 0 && (
               <TransportLegGroup
-                title="Chiều đi"
-                legs={outboundLegs}
+                title="Nhà / văn phòng ↔ sân bay"
+                legs={homeLegs}
                 needs={needs}
                 setNeeds={setNeeds}
                 pickupPoints={workplacePickups}
                 emptyLabel="BTC chưa cấu hình điểm đón nơi làm việc"
+                choosePickup
                 disabled={readOnly}
               />
             )}
-            {inboundLegs.length > 0 && (
+            {destinationLegs.length > 0 && (
               <TransportLegGroup
-                title="Chiều về"
-                legs={inboundLegs}
+                title="Sân bay ↔ khách sạn"
+                legs={destinationLegs}
                 needs={needs}
                 setNeeds={setNeeds}
                 pickupPoints={venuePickups}
-                emptyLabel="BTC chưa cấu hình điểm đón chiều về"
+                emptyLabel="BTC chưa cấu hình điểm tập trung ở nơi tổ chức"
+                choosePickup={destinationChoosesPoint}
                 disabled={readOnly}
               />
             )}
-            {otherLegs.length > 0 && (
+            {plainLegs.length > 0 && (
               <TransportLegGroup
                 title="Chặng khác"
-                legs={otherLegs}
+                legs={plainLegs}
                 needs={needs}
                 setNeeds={setNeeds}
-                pickupPoints={venuePickups}
-                emptyLabel="BTC chưa cấu hình điểm đón của chặng này"
+                pickupPoints={[]}
+                emptyLabel=""
+                choosePickup={false}
                 disabled={readOnly}
               />
             )}
@@ -746,6 +763,7 @@ function TransportLegGroup({
   setNeeds,
   pickupPoints,
   emptyLabel,
+  choosePickup,
   disabled,
 }: {
   title: string;
@@ -754,6 +772,7 @@ function TransportLegGroup({
   setNeeds: React.Dispatch<React.SetStateAction<Record<number, TransportNeed>>>;
   pickupPoints: PickupPoint[];
   emptyLabel: string;
+  choosePickup: boolean;
   disabled: boolean;
 }) {
   return (
@@ -761,7 +780,7 @@ function TransportLegGroup({
       <Label>Nhu cầu xe đưa đón — {title}</Label>
       {legs.map((leg) => {
         const need = needs[leg.id];
-        const missingPickup = need?.is_needed && !need.pickup_point_id;
+        const missingPickup = choosePickup && need?.is_needed && !need.pickup_point_id;
         return (
           <div key={leg.id} className="rounded-xl border border-border bg-card p-3">
             <label className="flex min-h-11 items-center gap-2 text-sm font-medium">
@@ -781,7 +800,7 @@ function TransportLegGroup({
               />
               Cần xe: {leg.name}
             </label>
-            {need?.is_needed && (
+            {choosePickup && need?.is_needed && (
               <div className="mt-2 pl-6">
                 <Select
                   value={need.pickup_point_id ? String(need.pickup_point_id) : undefined}

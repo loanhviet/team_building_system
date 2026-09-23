@@ -5,13 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.time import utcnow
 from app.models.bus import Bus, BusAssignment
-from app.models.event import TransportLeg
+from app.models.event import PickupPoint, TransportLeg
 from app.models.flight import Flight, FlightAssignment
 from app.models.organization import Employee
 from app.models.registration import Registration, RegistrationTransportNeed
 from app.models.system import AllocationRun
 from app.services.allocation.base import DEFAULT_BUS_WEIGHTS, merge_weights
 from app.services.allocation.bus_greedy import BusCandidate, BusSlot, allocate_buses
+from app.services.leg_pickup import is_destination_leg, pickup_constraint
 
 
 async def run_bus_allocation(
@@ -98,14 +99,34 @@ async def run_bus_allocation(
             if fid is not None:
                 slots[a.bus_id].flight_ids_present.add(fid)
 
-    # Only home-pickup legs require a point. Destination legs (airport →
-    # hotel, hotel → airport) intentionally have buses without pickup points.
-    requires_pickup = any(slot.pickup_point_id is not None for slot in slots.values())
-    # A missing required pickup is not a wildcard. Keep the person visible as
-    # a flagged unassigned row so BTC can follow up instead of silently placing
-    # them on an arbitrary bus.
+    destination_leg = leg is not None and is_destination_leg(leg.direction, leg.flight_timing)
+    pickup_ids = {pickup_point_id for _eid, _tid, pickup_point_id in rows if pickup_point_id}
+    pickup_kinds = {}
+    if pickup_ids:
+        pickup_kinds = dict(
+            (
+                await db.execute(
+                    select(PickupPoint.id, PickupPoint.kind).where(PickupPoint.id.in_(pickup_ids))
+                )
+            ).all()
+        )
+    direction = leg.direction if leg is not None else None
+    flight_timing = leg.flight_timing if leg is not None else None
+    constrained = [
+        (
+            eid,
+            tid,
+            pickup_constraint(direction, flight_timing, pickup_point_id, pickup_kinds.get(pickup_point_id)),
+        )
+        for eid, tid, pickup_point_id in rows
+    ]
+    # City legs and any leg whose buses name a stop still need a chosen point.
+    # Airport ↔ hotel ignores a workplace point copied onto that leg.
+    requires_pickup = (
+        not destination_leg and any(slot.pickup_point_id is not None for slot in slots.values())
+    )
     missing_pickup_ids = {
-        eid for eid, _tid, pickup_point_id in rows if requires_pickup and pickup_point_id is None
+        eid for eid, _tid, pickup_point_id in constrained if requires_pickup and pickup_point_id is None
     }
     candidates = [
         BusCandidate(
@@ -114,7 +135,7 @@ async def run_bus_allocation(
             flight_depart_at=flight_by_employee.get(eid, (None, None, None))[1],
             flight_arrive_at=flight_by_employee.get(eid, (None, None, None))[2],
         )
-        for eid, tid, pickup_point_id in rows
+        for eid, tid, pickup_point_id in constrained
         if eid not in locked_employee_ids and (pickup_point_id is not None or not requires_pickup)
     ]
 

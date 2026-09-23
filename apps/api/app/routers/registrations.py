@@ -39,6 +39,7 @@ from app.services.event_service import (
     is_accepting_registration,
 )
 from app.services.notification.email_service import dispatch_email, enqueue_email
+from app.services.leg_pickup import is_destination_leg, is_home_pickup_leg
 from app.services.registration_service import (
     assert_can_edit,
     cancel_registration,
@@ -225,17 +226,33 @@ async def update_my_registration(
                     "invalid_pickup_point", "Điểm đón không thuộc sự kiện này",
                     status.HTTP_400_BAD_REQUEST,
                 )
+        venue_count = (
+            await db.execute(
+                select(PickupPoint.id).where(
+                    PickupPoint.event_id == event_id,
+                    PickupPoint.kind == "venue",
+                    PickupPoint.is_active.is_(True),
+                )
+            )
+        ).all()
         for need in payload.transport_needs:
-            if not need.is_needed or need.pickup_point_id is None:
+            if not need.is_needed:
                 continue
             leg = legs_by_id.get(need.leg_id)
-            point = pickups_by_id[need.pickup_point_id]
-            going = leg is not None and leg.direction == "outbound"
-            if going:
+            if leg is None:
+                continue
+            point = pickups_by_id.get(need.pickup_point_id) if need.pickup_point_id else None
+            if is_home_pickup_leg(leg.direction, leg.flight_timing):
+                if point is None:
+                    raise AppError(
+                        "pickup_required",
+                        "Chọn điểm đón cho chặng từ nhà ra sân bay hoặc từ sân bay về nhà",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
                 if point.kind != "workplace":
                     raise AppError(
                         "pickup_kind_mismatch",
-                        "Chiều đi chỉ được chọn điểm đón nơi làm việc",
+                        "Chặng nhà – sân bay chỉ được chọn điểm đón nơi làm việc",
                         status.HTTP_400_BAD_REQUEST,
                     )
                 if employee.site_id is not None and point.site_id != employee.site_id:
@@ -244,12 +261,19 @@ async def update_my_registration(
                         "Điểm đón không phục vụ địa điểm làm việc của bạn",
                         status.HTTP_400_BAD_REQUEST,
                     )
-            elif point.kind != "venue":
-                raise AppError(
-                    "pickup_kind_mismatch",
-                    "Chiều về chỉ được chọn điểm đón tại khách sạn hoặc sân chơi",
-                    status.HTTP_400_BAD_REQUEST,
-                )
+            elif is_destination_leg(leg.direction, leg.flight_timing):
+                if len(venue_count) >= 2 and point is None:
+                    raise AppError(
+                        "pickup_required",
+                        "Chọn điểm tập trung cho chặng sân bay – khách sạn",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+                if point is not None and point.kind != "venue":
+                    raise AppError(
+                        "pickup_kind_mismatch",
+                        "Chặng sân bay – khách sạn không dùng điểm đón nơi làm việc",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
         await replace_transport_needs(
             db, reg.id, [n.model_dump() for n in payload.transport_needs]
         )

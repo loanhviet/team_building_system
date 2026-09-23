@@ -13,6 +13,13 @@ from app.models.event import PickupPoint, TransportLeg
 from app.models.flight import Flight, FlightAssignment
 from app.models.registration import RegistrationTransportNeed
 from app.models.system import AllocationRun
+from app.services.leg_pickup import pickup_constraint
+
+
+def test_workplace_pickup_does_not_block_a_hotel_leg() -> None:
+    assert pickup_constraint("inbound", "before_flight", 7, "workplace") is None
+    assert pickup_constraint("outbound", "before_flight", 7, "workplace") == 7
+    assert pickup_constraint("inbound", "before_flight", 9, "venue") == 9
 from app.services.allocation.bus_runner import run_bus_allocation
 
 

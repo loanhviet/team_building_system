@@ -479,10 +479,12 @@ async def _legs_and_points(db_session, world):
     db_session.add(other)
     await db_session.flush()
     outbound = TransportLeg(
-        event_id=world.event.id, code="DI", name="Đi", direction="outbound", sort_order=1,
+        event_id=world.event.id, code="DI", name="Nhà ra sân bay", direction="outbound",
+        sort_order=1, flight_timing="before_flight",
     )
     inbound = TransportLeg(
-        event_id=world.event.id, code="VE", name="Về", direction="inbound", sort_order=2,
+        event_id=world.event.id, code="KS", name="Khách sạn ra sân bay", direction="inbound",
+        sort_order=2, flight_timing="before_flight",
     )
     home = PickupPoint(
         event_id=world.event.id, site_id=world.site.id, kind="workplace", name="Văn phòng HN",
@@ -542,3 +544,10 @@ async def test_return_leg_accepts_only_a_venue_point(client, world, auth_headers
     )
     assert workplace_on_return.status_code == 400
     assert workplace_on_return.json()["error"]["code"] == "pickup_kind_mismatch"
+
+    no_point = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"transport_needs": [{"leg_id": inbound.id, "is_needed": True, "pickup_point_id": None}]},
+    )
+    assert no_point.status_code == 200
