@@ -163,12 +163,22 @@ async def list_pickup_points(event_id: int, db: DbSession, _user: CurrentUser) -
     return await master_data.list_all(db, PickupPoint, event_id=event_id)
 
 
+def _assert_pickup_kind(kind: str, site_id: int | None) -> None:
+    if kind == "workplace" and site_id is None:
+        raise AppError(
+            "workplace_site_required",
+            "Điểm nơi làm việc phải gắn địa điểm làm việc",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+
 @router.post("/pickup-points", response_model=PickupPointOut, status_code=status.HTTP_201_CREATED)
 async def create_pickup_point(
     event_id: int, payload: PickupPointCreate, db: DbSession, user: AdminUser
 ) -> PickupPoint:
     if payload.site_id is not None and await db.get(Site, payload.site_id) is None:
         raise AppError("invalid_site", "Địa điểm làm việc không tồn tại", status.HTTP_400_BAD_REQUEST)
+    _assert_pickup_kind(payload.kind, payload.site_id)
     point = await master_data.create(db, PickupPoint, payload.model_dump(), event_id=event_id)
     await record_audit(
         db, actor_user_id=user.id, action="create", entity_type="pickup_point", entity_id=point.id,
@@ -186,8 +196,10 @@ async def update_pickup_point(
     point = await master_data.get_or_404(db, PickupPoint, point_id, event_id=event_id)
     if payload.site_id is not None and await db.get(Site, payload.site_id) is None:
         raise AppError("invalid_site", "Địa điểm làm việc không tồn tại", status.HTTP_400_BAD_REQUEST)
+    data = payload.model_dump(exclude_unset=True)
+    _assert_pickup_kind(data.get("kind", point.kind), data.get("site_id", point.site_id))
     before = PickupPointOut.model_validate(point).model_dump()
-    await master_data.update(db, point, payload.model_dump(exclude_unset=True))
+    await master_data.update(db, point, data)
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="pickup_point", entity_id=point_id,
         before=before, after=PickupPointOut.model_validate(point).model_dump(), event_id=event_id,

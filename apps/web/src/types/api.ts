@@ -193,6 +193,7 @@ export type PickupPoint = {
   id: number;
   event_id: number;
   site_id: number | null;
+  kind: "workplace" | "venue";
   name: string;
   address: string | null;
   is_active: boolean;

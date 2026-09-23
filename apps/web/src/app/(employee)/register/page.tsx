@@ -283,9 +283,10 @@ function RegistrationForm({
   const outboundLegs = legs.filter((l) => l.direction === "outbound");
   const inboundLegs = legs.filter((l) => l.direction === "inbound");
   const otherLegs = legs.filter((l) => l.direction !== "outbound" && l.direction !== "inbound");
-  const sitePickupPoints = employeeSiteId
-    ? pickupPoints.filter((p) => p.site_id === employeeSiteId)
-    : pickupPoints;
+  const workplacePickups = pickupPoints.filter(
+    (p) => p.kind === "workplace" && (!employeeSiteId || p.site_id === employeeSiteId),
+  );
+  const venuePickups = pickupPoints.filter((p) => p.kind === "venue");
 
   const needsSelectionValid = legs.every((leg) => {
     const need = needs[leg.id];
@@ -553,7 +554,8 @@ function RegistrationForm({
                 legs={outboundLegs}
                 needs={needs}
                 setNeeds={setNeeds}
-                pickupPoints={sitePickupPoints}
+                pickupPoints={workplacePickups}
+                emptyLabel="BTC chưa cấu hình điểm đón nơi làm việc"
                 disabled={readOnly}
               />
             )}
@@ -563,7 +565,8 @@ function RegistrationForm({
                 legs={inboundLegs}
                 needs={needs}
                 setNeeds={setNeeds}
-                pickupPoints={sitePickupPoints}
+                pickupPoints={venuePickups}
+                emptyLabel="BTC chưa cấu hình điểm đón chiều về"
                 disabled={readOnly}
               />
             )}
@@ -573,7 +576,8 @@ function RegistrationForm({
                 legs={otherLegs}
                 needs={needs}
                 setNeeds={setNeeds}
-                pickupPoints={sitePickupPoints}
+                pickupPoints={venuePickups}
+                emptyLabel="BTC chưa cấu hình điểm đón của chặng này"
                 disabled={readOnly}
               />
             )}
@@ -741,6 +745,7 @@ function TransportLegGroup({
   needs,
   setNeeds,
   pickupPoints,
+  emptyLabel,
   disabled,
 }: {
   title: string;
@@ -748,6 +753,7 @@ function TransportLegGroup({
   needs: Record<number, TransportNeed>;
   setNeeds: React.Dispatch<React.SetStateAction<Record<number, TransportNeed>>>;
   pickupPoints: PickupPoint[];
+  emptyLabel: string;
   disabled: boolean;
 }) {
   return (
@@ -799,7 +805,7 @@ function TransportLegGroup({
                   </SelectContent>
                 </Select>
                 {pickupPoints.length === 0 && (
-                  <p className="mt-1 text-xs text-muted-foreground">BTC chưa cấu hình điểm đón</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{emptyLabel}</p>
                 )}
                 {missingPickup && (
                   <p className="mt-1 text-xs text-destructive">Chọn điểm đón trước khi gửi</p>

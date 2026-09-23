@@ -164,12 +164,20 @@ class PickupPointCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     site_id: int | None = None
     address: str | None = None
+    kind: Literal["workplace", "venue"] = "workplace"
+
+    @model_validator(mode="after")
+    def workplace_needs_a_site(self):
+        if self.kind == "workplace" and self.site_id is None:
+            raise ValueError("Điểm nơi làm việc phải gắn địa điểm làm việc")
+        return self
 
 
 class PickupPointUpdate(BaseModel):
     name: str | None = None
     site_id: int | None = None
     address: str | None = None
+    kind: Literal["workplace", "venue"] | None = None
     is_active: bool | None = None
 
 
@@ -177,6 +185,7 @@ class PickupPointOut(BaseModel):
     id: int
     event_id: int
     site_id: int | None
+    kind: str
     name: str
     address: str | None
     is_active: bool

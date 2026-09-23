@@ -473,6 +473,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             basePath={`/api/events/${eventId}/pickup-points`}
             fields={[
               { name: "name", label: "Tên điểm" },
+              { name: "kind", label: "Loại", options: [{ value: "workplace", label: "Nơi làm việc" }, { value: "venue", label: "Điểm sự kiện" }] },
               { name: "site_id", label: "Địa điểm làm việc", required: false, options: (sites ?? []).map((site) => ({ value: String(site.id), label: `${site.code} · ${site.name}` })) },
               { name: "address", label: "Địa chỉ", required: false },
             ]}

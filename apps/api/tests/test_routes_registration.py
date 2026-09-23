@@ -469,3 +469,76 @@ async def test_already_nudged_today_drops_out_of_the_remind_count(
     )
     assert exhausted.status_code == 400
     assert exhausted.json()["error"]["code"] == "nothing_to_remind"
+
+
+async def _legs_and_points(db_session, world):
+    from app.models.event import PickupPoint, TransportLeg
+    from app.models.organization import Site
+
+    other = Site(code="HCM", name="Ho Chi Minh")
+    db_session.add(other)
+    await db_session.flush()
+    outbound = TransportLeg(
+        event_id=world.event.id, code="DI", name="Đi", direction="outbound", sort_order=1,
+    )
+    inbound = TransportLeg(
+        event_id=world.event.id, code="VE", name="Về", direction="inbound", sort_order=2,
+    )
+    home = PickupPoint(
+        event_id=world.event.id, site_id=world.site.id, kind="workplace", name="Văn phòng HN",
+    )
+    other_home = PickupPoint(
+        event_id=world.event.id, site_id=other.id, kind="workplace", name="Văn phòng HCM",
+    )
+    hotel = PickupPoint(event_id=world.event.id, kind="venue", name="Khách sạn Team Building")
+    db_session.add_all([outbound, inbound, home, other_home, hotel])
+    await db_session.commit()
+    return outbound, inbound, home, other_home, hotel
+
+
+async def test_going_leg_accepts_only_the_employee_workplace(
+    client, world, auth_headers, db_session
+):
+    outbound, _inbound, home, other_home, hotel = await _legs_and_points(db_session, world)
+
+    ok = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"transport_needs": [{"leg_id": outbound.id, "is_needed": True, "pickup_point_id": home.id}]},
+    )
+    assert ok.status_code == 200
+
+    wrong_site = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"transport_needs": [{"leg_id": outbound.id, "is_needed": True, "pickup_point_id": other_home.id}]},
+    )
+    assert wrong_site.status_code == 400
+    assert wrong_site.json()["error"]["code"] == "pickup_site_mismatch"
+
+    venue_on_outbound = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"transport_needs": [{"leg_id": outbound.id, "is_needed": True, "pickup_point_id": hotel.id}]},
+    )
+    assert venue_on_outbound.status_code == 400
+    assert venue_on_outbound.json()["error"]["code"] == "pickup_kind_mismatch"
+
+
+async def test_return_leg_accepts_only_a_venue_point(client, world, auth_headers, db_session):
+    _outbound, inbound, home, _other_home, hotel = await _legs_and_points(db_session, world)
+
+    ok = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"transport_needs": [{"leg_id": inbound.id, "is_needed": True, "pickup_point_id": hotel.id}]},
+    )
+    assert ok.status_code == 200
+
+    workplace_on_return = await client.put(
+        f"/api/events/{world.event.id}/registrations/me",
+        headers=auth_headers(world.employee_user),
+        json={"transport_needs": [{"leg_id": inbound.id, "is_needed": True, "pickup_point_id": home.id}]},
+    )
+    assert workplace_on_return.status_code == 400
+    assert workplace_on_return.json()["error"]["code"] == "pickup_kind_mismatch"

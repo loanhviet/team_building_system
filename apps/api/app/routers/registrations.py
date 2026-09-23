@@ -206,23 +206,48 @@ async def update_my_registration(
                 raise AppError(
                     "invalid_leg", "Chặng xe không thuộc sự kiện này", status.HTTP_400_BAD_REQUEST
                 )
+        legs_by_id = {
+            leg.id: leg
+            for leg in (
+                await db.execute(select(TransportLeg).where(TransportLeg.id.in_(leg_ids)))
+            ).scalars().all()
+        } if leg_ids else {}
+        pickups_by_id: dict[int, PickupPoint] = {}
         if pickup_ids:
             result = await db.execute(
-                select(PickupPoint.id, PickupPoint.site_id).where(
+                select(PickupPoint).where(
                     PickupPoint.event_id == event_id, PickupPoint.id.in_(pickup_ids)
                 )
             )
-            pickup_rows = result.all()
-            if {row[0] for row in pickup_rows} != pickup_ids:
+            pickups_by_id = {point.id: point for point in result.scalars().all()}
+            if set(pickups_by_id) != pickup_ids:
                 raise AppError(
                     "invalid_pickup_point", "Điểm đón không thuộc sự kiện này",
                     status.HTTP_400_BAD_REQUEST,
                 )
-            wrong_site = [point_id for point_id, site_id in pickup_rows if site_id is not None and site_id != employee.site_id]
-            if wrong_site:
+        for need in payload.transport_needs:
+            if not need.is_needed or need.pickup_point_id is None:
+                continue
+            leg = legs_by_id.get(need.leg_id)
+            point = pickups_by_id[need.pickup_point_id]
+            going = leg is not None and leg.direction == "outbound"
+            if going:
+                if point.kind != "workplace":
+                    raise AppError(
+                        "pickup_kind_mismatch",
+                        "Chiều đi chỉ được chọn điểm đón nơi làm việc",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+                if employee.site_id is not None and point.site_id != employee.site_id:
+                    raise AppError(
+                        "pickup_site_mismatch",
+                        "Điểm đón không phục vụ địa điểm làm việc của bạn",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+            elif point.kind != "venue":
                 raise AppError(
-                    "pickup_site_mismatch",
-                    "Điểm đón không phục vụ địa điểm làm việc của bạn",
+                    "pickup_kind_mismatch",
+                    "Chiều về chỉ được chọn điểm đón tại khách sạn hoặc sân chơi",
                     status.HTTP_400_BAD_REQUEST,
                 )
         await replace_transport_needs(

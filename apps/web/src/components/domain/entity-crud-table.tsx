@@ -115,7 +115,11 @@ export function EntityCrudTable({
     ...fields.map((f) => ({
       key: f.name,
       header: f.label,
-      cell: (e: EntityRecord) => String(e[f.name] ?? ""),
+      cell: (e: EntityRecord) => {
+        const raw = e[f.name];
+        const match = f.options?.find((option) => option.value === String(raw ?? ""));
+        return match?.label ?? (raw == null || raw === "" ? "" : String(raw));
+      },
       sortValue: (e: EntityRecord) => String(e[f.name] ?? ""),
       className: f.name === "code" ? "font-mono" : undefined,
     })),

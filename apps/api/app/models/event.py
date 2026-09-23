@@ -80,6 +80,9 @@ class PickupPoint(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
     site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True)
+    # workplace: đón lúc đi, gắn site nơi làm việc.
+    # venue: khách sạn / sân chơi, dùng cho chiều về.
+    kind: Mapped[str] = mapped_column(String(20), default="workplace")
     name: Mapped[str] = mapped_column(String(200))
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
