@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import EventStatus
+from app.schemas.common import clock_hhmm, code, optional_text, required_text
 
 
 class EventCreate(BaseModel):
@@ -17,12 +18,25 @@ class EventCreate(BaseModel):
     registration_open_at: datetime | None = None
     registration_close_at: datetime | None = None
 
-    @field_validator("name", "code")
+    @field_validator("code")
     @classmethod
-    def required_text(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Tên và mã sự kiện không được để trống")
-        return value.strip()
+    def normalize_code(cls, value: str) -> str:
+        return code(value, label="Mã sự kiện", max_length=50, required=True) or ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return required_text(value, label="Tên sự kiện", max_length=200)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Mô tả", max_length=2000)
+
+    @field_validator("destination")
+    @classmethod
+    def normalize_destination(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Điểm đến", max_length=200)
 
     @model_validator(mode="after")
     def validate_ranges(self):
@@ -45,9 +59,23 @@ class EventUpdate(BaseModel):
     @field_validator("name")
     @classmethod
     def name_not_blank(cls, value: str | None) -> str | None:
-        if value is not None and not value.strip():
+        return optional_text(value, label="Tên sự kiện", max_length=200)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Mô tả", max_length=2000)
+
+    @field_validator("destination")
+    @classmethod
+    def normalize_destination(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Điểm đến", max_length=200)
+
+    @model_validator(mode="after")
+    def name_cannot_be_cleared(self):
+        if "name" in self.model_fields_set and self.name is None:
             raise ValueError("Tên sự kiện không được để trống")
-        return value.strip() if value is not None else None
+        return self
 
 
 class EventTransition(BaseModel):
@@ -107,6 +135,26 @@ class ShiftCreate(BaseModel):
     depart_after_time: str | None = None
     sort_order: int = 0
 
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return code(value, label="Mã ca", max_length=50, required=True) or ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return required_text(value, label="Tên ca", max_length=200)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Mô tả ca", max_length=500)
+
+    @field_validator("depart_after_time")
+    @classmethod
+    def normalize_time(cls, value: str | None) -> str | None:
+        return clock_hhmm(value)
+
 
 class ShiftUpdate(BaseModel):
     code: str | None = None
@@ -115,6 +163,26 @@ class ShiftUpdate(BaseModel):
     depart_after_time: str | None = None
     sort_order: int | None = None
     is_active: bool | None = None
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str | None) -> str | None:
+        return code(value, label="Mã ca", max_length=50)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Tên ca", max_length=200)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Mô tả ca", max_length=500)
+
+    @field_validator("depart_after_time")
+    @classmethod
+    def normalize_time(cls, value: str | None) -> str | None:
+        return clock_hhmm(value)
 
 
 class ShiftOut(BaseModel):

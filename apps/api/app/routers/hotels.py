@@ -312,6 +312,8 @@ async def import_rooms(
                 if not room_number:
                     raise ValueError("room_number trống")
                 capacity = int(row["capacity"]) if row.get("capacity") else 2
+                if capacity < 1:
+                    raise ValueError("Sức chứa phải ít nhất 1")
                 # Upsert on (hotel_id, room_number) — the same shape the flight
                 # import uses. Blind-inserting hit the uq_room_hotel_number
                 # constraint, so re-importing a corrected file reported every

@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.schemas.common import code, optional_text
 
 
 class FlightCreate(BaseModel):
@@ -16,6 +18,26 @@ class FlightCreate(BaseModel):
     destination: str | None = None
     capacity: int = Field(default=1, ge=1)
     note: str | None = None
+
+    @field_validator("flight_code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return code(value, label="Mã chuyến bay", max_length=50, required=True) or ""
+
+    @field_validator("airline")
+    @classmethod
+    def normalize_airline(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Hãng bay", max_length=100)
+
+    @field_validator("origin", "destination")
+    @classmethod
+    def normalize_place(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Điểm đi/đến", max_length=100)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Ghi chú", max_length=500)
 
     @model_validator(mode="after")
     def validate_times(self):
@@ -36,6 +58,26 @@ class FlightUpdate(BaseModel):
     destination: str | None = None
     capacity: int | None = Field(default=None, ge=1)
     note: str | None = None
+
+    @field_validator("flight_code")
+    @classmethod
+    def normalize_code(cls, value: str | None) -> str | None:
+        return code(value, label="Mã chuyến bay", max_length=50)
+
+    @field_validator("airline")
+    @classmethod
+    def normalize_airline(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Hãng bay", max_length=100)
+
+    @field_validator("origin", "destination")
+    @classmethod
+    def normalize_place(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Điểm đi/đến", max_length=100)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Ghi chú", max_length=500)
 
     @model_validator(mode="after")
     def validate_times(self):

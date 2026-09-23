@@ -45,10 +45,15 @@ def code(value: str | None, *, label: str, max_length: int, required: bool = Fal
     return normalized
 
 
+_CLOCK = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
 def phone(value: str | None) -> str | None:
     if value is None or not value.strip():
         return None
     raw = value.strip()
+    if re.search(r"[A-Za-z]", raw):
+        raise ValueError("Số điện thoại không được chứa chữ")
     try:
         parsed = phonenumbers.parse(raw, "VN")
     except phonenumbers.NumberParseException as exc:
@@ -56,6 +61,15 @@ def phone(value: str | None) -> str | None:
     if not phonenumbers.is_valid_number(parsed):
         raise ValueError("Số điện thoại không hợp lệ")
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def clock_hhmm(value: str | None) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    text = str(value).strip()
+    if not _CLOCK.fullmatch(text):
+        raise ValueError("Giờ phải theo dạng HH:MM, từ 00:00 đến 23:59")
+    return text
 
 
 class TrimmedModel(BaseModel):

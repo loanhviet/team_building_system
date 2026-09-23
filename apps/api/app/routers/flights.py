@@ -34,6 +34,7 @@ from app.services.allocation.base import preset_weights
 from app.services.allocation.bus_greedy import bus_compatible
 from app.services.audit_service import record_audit
 from app.services.event_service import assert_allocation_allowed, assert_event_not_completed
+from app.schemas.common import code as normalize_code
 from app.services.importer.xlsx import load_xlsx, read_xlsx
 from app.services.notification.email_service import (
     describe_flight_changes,
@@ -288,7 +289,12 @@ async def import_flights(
                     raise ValueError("direction phải là outbound hoặc inbound")
                 depart_at = row.get("depart_at")
                 arrive_at = row.get("arrive_at")
-                flight_code = str(row["flight_code"]).strip()
+                flight_code = normalize_code(
+                    str(row["flight_code"]).strip() if row.get("flight_code") else None,
+                    label="Mã chuyến bay",
+                    max_length=50,
+                    required=True,
+                )
                 site_code = str(row["site_code"]).strip() if row.get("site_code") else None
                 if site_code and site_code not in sites_by_code:
                     raise ValueError(f"site_code '{site_code}' không tồn tại")
@@ -318,7 +324,16 @@ async def import_flights(
                 flight.destination = (
                     str(row["destination"]).strip() if row.get("destination") else None
                 )
-                flight.capacity = int(row["capacity"])
+                capacity = int(row["capacity"])
+                if capacity < 1:
+                    raise ValueError("Sức chứa phải ít nhất 1")
+                if (
+                    isinstance(depart_at, datetime)
+                    and isinstance(arrive_at, datetime)
+                    and arrive_at <= depart_at
+                ):
+                    raise ValueError("Giờ đến phải sau giờ khởi hành")
+                flight.capacity = capacity
                 flight.note = str(row["note"]).strip() if row.get("note") else None
                 await db.flush()
                 if updating and (

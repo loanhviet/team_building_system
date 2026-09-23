@@ -1,11 +1,24 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.schemas.common import code, optional_text, required_text
 
 
 class GalaConfigIn(BaseModel):
     name: str
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return required_text(value, label="Tên Gala", max_length=200)
+
+    @field_validator("stage_label")
+    @classmethod
+    def normalize_stage(cls, value: str) -> str:
+        return required_text(value, label="Nhãn sân khấu", max_length=100)
+
     stage_label: str = "SÂN KHẤU"
     turn_duration_seconds: int = Field(default=60, ge=5)
     hold_ttl_seconds: int = Field(default=30, ge=5)
@@ -45,8 +58,18 @@ class GalaTableCreate(BaseModel):
     name: str | None = None
     x: int = 0
     y: int = 0
-    shape: str = "round"
-    seat_count: int = 8
+    shape: Literal["round", "rect"] = "round"
+    seat_count: int = Field(default=8, ge=1)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        return code(value, label="Mã bàn", max_length=50, required=True) or ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Tên bàn", max_length=200)
 
 
 class GalaTableUpdate(BaseModel):
@@ -54,9 +77,19 @@ class GalaTableUpdate(BaseModel):
     name: str | None = None
     x: int | None = None
     y: int | None = None
-    shape: str | None = None
-    seat_count: int | None = None
+    shape: Literal["round", "rect"] | None = None
+    seat_count: int | None = Field(default=None, ge=1)
     is_active: bool | None = None
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str | None) -> str | None:
+        return code(value, label="Mã bàn", max_length=50)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return optional_text(value, label="Tên bàn", max_length=200)
 
 
 class GalaTableOut(BaseModel):

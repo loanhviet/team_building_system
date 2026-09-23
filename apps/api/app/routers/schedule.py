@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
 from app.core.deps import CurrentUser, DbSession, require_admin
+from app.core.errors import AppError
 from app.core.queue import get_queue
 from app.core.time import utcnow
 from app.models.auth import User
@@ -123,8 +124,15 @@ async def update_schedule_item(
     event = await master_data.get_or_404(db, Event, event_id)
     assert_event_not_completed(event)
     item = await master_data.get_or_404(db, ScheduleItem, item_id, event_id=event_id)
+    data = payload.model_dump(exclude_unset=True)
+    start_at = data.get("start_at", item.start_at)
+    end_at = data.get("end_at", item.end_at)
+    if start_at and end_at and end_at <= start_at:
+        raise AppError(
+            "invalid_schedule_time", "Giờ kết thúc phải sau giờ bắt đầu", status.HTTP_400_BAD_REQUEST
+        )
     before = ScheduleItemOut.model_validate(item).model_dump(mode="json")
-    await master_data.update(db, item, payload.model_dump(exclude_unset=True))
+    await master_data.update(db, item, data)
     await record_audit(
         db, actor_user_id=user.id, action="update", entity_type="schedule_item", entity_id=item_id,
         before=before, after=ScheduleItemOut.model_validate(item).model_dump(mode="json"),
