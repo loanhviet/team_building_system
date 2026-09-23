@@ -10,7 +10,18 @@ import { FormField } from "@/components/domain/form-field";
 import { InitialsAvatar } from "@/components/domain/initials-avatar";
 import { JobProgress } from "@/components/domain/job-progress";
 import { WorkspaceHeader } from "@/components/domain/workspace-header";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/domain/confirm-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -74,6 +85,9 @@ export default function EmployeesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [isActive, setIsActive] = useState("");
   const [sendWelcome, setSendWelcome] = useState(true);
+  const [pendingRole, setPendingRole] = useState<string | null>(null);
+  const [soleLeaderNote, setSoleLeaderNote] = useState<string | null>(null);
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [showImportLog, setShowImportLog] = useState(false);
   const isSuperAdmin = user?.role === "super_admin";
 
@@ -182,7 +196,7 @@ export default function EmployeesPage() {
       if (!editing?.account_id) throw new Error("Hồ sơ chưa có tài khoản");
       return apiFetch<{ temporary_password: string }>(`/api/users/${editing.account_id}/reset-password`, { method: "POST" });
     },
-    onSuccess: (result) => toast.success(`Mật khẩu tạm mới: ${result.temporary_password}`, { duration: 12000 }),
+    onSuccess: (result) => setTempPassword(result.temporary_password),
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Không đặt lại được mật khẩu"),
   });
 
@@ -356,7 +370,30 @@ export default function EmployeesPage() {
                   <p className="mt-1 text-xs text-muted-foreground">{editing.email} · {editing.account_is_active ? "Đang hoạt động" : "Đã khoá"}</p>
                   {isSuperAdmin ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Select value={editing.account_role ?? "employee"} onValueChange={(role) => role && accountMutation.mutate(role)}>
+                      <Select
+                        value={editing.account_role ?? "employee"}
+                        onValueChange={(role) => {
+                          if (!role || role === editing.account_role) return;
+                          setSoleLeaderNote(null);
+                          setPendingRole(role);
+                          const leavingLeader =
+                            editing.account_role === "team_leader" &&
+                            (role === "organizer" || role === "super_admin");
+                          if (!leavingLeader || !editing.team_id) return;
+                          void apiFetch<EmployeeList>(
+                            `/api/employees?team_id=${editing.team_id}&role=team_leader&limit=20`,
+                          ).then((result) => {
+                            const others = result.items.filter(
+                              (person) => person.id !== editing.id && person.account_is_active !== false,
+                            );
+                            if (others.length === 0) {
+                              setSoleLeaderNote(
+                                `${editing.team_name ?? "Team này"} sẽ không còn trưởng nhóm nhận thư chọn ghế gala. Đăng ký, vé, xe, phòng và ghế của người này giữ nguyên.`,
+                              );
+                            }
+                          }).catch(() => undefined);
+                        }}
+                      >
                         <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="employee">Nhân viên</SelectItem>
@@ -365,9 +402,18 @@ export default function EmployeesPage() {
                           <SelectItem value="super_admin">Super Admin</SelectItem>
                         </SelectContent>
                       </Select>
-                      <Button type="button" size="sm" variant="outline" disabled={resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()}>
-                        Đặt lại mật khẩu
-                      </Button>
+                      <ConfirmDialog
+                        trigger={
+                          <Button type="button" size="sm" variant="outline" disabled={resetPasswordMutation.isPending}>
+                            Đặt lại mật khẩu
+                          </Button>
+                        }
+                        title="Đặt lại mật khẩu?"
+                        description={`Tạo mật khẩu tạm mới cho ${editing.full_name}. Mật khẩu cũ sẽ không dùng được nữa.`}
+                        confirmLabel="Đặt lại"
+                        destructive
+                        onConfirm={() => resetPasswordMutation.mutate()}
+                      />
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-muted-foreground">Chỉ Super Admin có thể thay vai trò hoặc đặt lại mật khẩu.</p>
@@ -648,6 +694,58 @@ export default function EmployeesPage() {
           </Button>
         </div>
       </div>
+
+      <AlertDialog open={!!pendingRole} onOpenChange={(open) => !open && setPendingRole(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Đổi vai trò tài khoản?</AlertDialogTitle>
+            {editing && pendingRole && (
+              <AlertDialogDescription>
+                Đổi vai trò của {editing.full_name} từ &quot;{ROLE_LABEL[editing.account_role ?? "employee"]}&quot; sang &quot;{ROLE_LABEL[pendingRole]}&quot;. Quyền đăng nhập đổi ngay.
+                {soleLeaderNote ? ` ${soleLeaderNote}` : ""}
+              </AlertDialogDescription>
+            )}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Huỷ</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingRole) return;
+                accountMutation.mutate(pendingRole);
+                setPendingRole(null);
+              }}
+            >
+              Đổi vai trò
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={!!tempPassword} onOpenChange={(open) => !open && setTempPassword(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mật khẩu tạm</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              Mật khẩu này chỉ hiện một lần. Gửi cho nhân viên qua kênh riêng. Họ nên đổi ngay khi đăng nhập.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-md border bg-muted px-3 py-2 font-mono text-sm">{tempPassword}</code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (tempPassword) void navigator.clipboard.writeText(tempPassword);
+                  toast.success("Đã sao chép");
+                }}
+              >
+                Sao chép
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

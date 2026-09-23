@@ -500,56 +500,9 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
       .includes(assignmentQuery),
   );
 
-  const assignmentColumns: DataTableColumn<RoomGroup>[] = [
-    {
-      key: "room",
-      header: "Phòng",
-      cell: (group) => {
-        const genders = roomGenders(group.room_id);
-        return (
-          <span className="inline-flex items-center gap-1.5 font-medium">
-            {group.room_number}
-            {genders.size > 1 && (
-              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                Lẫn giới tính
-              </span>
-            )}
-          </span>
-        );
-      },
-      sortValue: (group) => group.room_number,
-    },
-    {
-      key: "occupants",
-      header: "Nhân sự",
-      cell: (group) => (
-        <div className="flex flex-col gap-1">
-          {group.occupants.map((a) => (
-            <div key={a.id} className="flex items-center gap-1.5">
-              <span className="truncate">{a.full_name}</span>
-              {a.gender && <span className="shrink-0 text-xs text-muted-foreground">({genderLabel(a.gender)})</span>}
-              {a.team_name && <span className="shrink-0 text-xs text-muted-foreground">· {a.team_name}</span>}
-              <ConfirmDialog
-                trigger={<Button size="sm" variant="ghost" className="h-6 px-1.5 text-[11px]">Bỏ</Button>}
-                title="Bỏ gán phòng?"
-                description={`${a.full_name} sẽ trở lại danh sách chưa có phòng.`}
-                confirmLabel="Bỏ gán"
-                destructive
-                onConfirm={() => unassignMutation.mutate(a.id)}
-              />
-            </div>
-          ))}
-        </div>
-      ),
-      sortValue: (group) => group.occupants.map((a) => a.full_name).join(", "),
-    },
-    {
-      key: "count",
-      header: "Số người",
-      cell: (group) => `${group.occupants.length}/${allRooms.find((r) => r.id === group.room_id)?.capacity ?? "?"}`,
-      sortValue: (group) => group.occupants.length,
-    },
-  ];
+  const assignedRooms = [...visibleRoomGroups].sort((a, b) =>
+    a.room_number.localeCompare(b.room_number, "vi", { numeric: true }),
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -762,24 +715,57 @@ export function HotelRoomsPanel({ eventId }: { eventId: number }) {
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-4">
-            <DataTable
-              columns={assignmentColumns}
-              rows={visibleRoomGroups}
-              rowKey={(group) => group.room_id}
-              emptyMessage="Khách sạn này chưa có ai được gán phòng."
-              pageSize={15}
-              toolbar={
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="mr-auto font-medium">Danh sách đã gán · {currentHotel?.code} ({roomGroupsAll.length} phòng · {currentHotelAssignments.length} người)</h3>
-                  <Input
-                    className="w-56"
-                    value={assignmentSearch}
-                    onChange={(e) => setAssignmentSearch(e.target.value)}
-                    placeholder="Tìm tên, mã NV, team, số phòng..."
-                  />
-                </div>
-              }
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="mr-auto font-medium">Danh sách đã gán · {currentHotel?.code} ({roomGroupsAll.length} phòng · {currentHotelAssignments.length} người)</h3>
+              <Input
+                className="w-56"
+                value={assignmentSearch}
+                onChange={(e) => setAssignmentSearch(e.target.value)}
+                placeholder="Tìm tên, mã NV, team, số phòng..."
+              />
+            </div>
+            {assignedRooms.length === 0 ? (
+              <p className="p-8 text-center text-sm text-muted-foreground">Khách sạn này chưa có ai được gán phòng.</p>
+            ) : (
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {assignedRooms.map((group) => {
+                  const capacity = allRooms.find((room) => room.id === group.room_id)?.capacity;
+                  const full = capacity != null && group.occupants.length >= capacity;
+                  const mixedGenders = roomGenders(group.room_id).size > 1;
+                  return (
+                    <div key={group.room_id} className="rounded-xl border border-border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-semibold">Phòng {group.room_number}</p>
+                        <span className={`text-xs font-medium tabular-nums ${full ? "text-muted-foreground" : "text-primary"}`}>
+                          {mixedGenders ? "Lẫn giới tính · " : ""}
+                          {group.occupants.length}/{capacity ?? "?"}
+                        </span>
+                      </div>
+                      <div className="mt-2 space-y-1.5">
+                        {group.occupants.map((person) => (
+                          <div key={person.id} className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm">{person.full_name}</span>
+                            {person.team_name && (
+                              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                {person.team_name}
+                              </span>
+                            )}
+                            <ConfirmDialog
+                              trigger={<Button size="sm" variant="ghost" className="h-7 px-2 text-xs">Bỏ</Button>}
+                              title="Bỏ gán phòng?"
+                              description={`${person.full_name} sẽ trở lại danh sách chưa có phòng.`}
+                              confirmLabel="Bỏ gán"
+                              destructive
+                              onConfirm={() => unassignMutation.mutate(person.id)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {(selectedEmployee || selectedRoom) && (
