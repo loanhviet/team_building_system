@@ -515,7 +515,7 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
             <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })} onClick={openCreateBus}>
               Thêm xe
             </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingBus ? "Sửa xe" : "Thêm xe cho chặng này"}</DialogTitle>
               </DialogHeader>
@@ -539,26 +539,24 @@ export function BusAllocationPanel({ eventId }: { eventId: number }) {
                     placeholder="Họ tên"
                   />
                 </FormField>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <FormField label="Giờ tập trung" hint={gatherLead ? `Trước giờ khởi hành ${gatherLead}.` : "Có thể chọn nhanh theo khoảng đệm."}>
-                    <EventDateTimeField
-                      ariaLabel="Giờ tập trung"
-                      value={busForm.gather_at}
-                      onChange={(gatherAt) => setBusForm({ ...busForm, gather_at: gatherAt })}
-                      dateOptions={busDateOptions}
-                      defaultDate={event?.start_date ?? undefined}
-                    />
-                  </FormField>
-                  <FormField label="Giờ khởi hành" hint="Điểm đón và giờ bay sẽ được kiểm tra khi phân xe.">
-                    <EventDateTimeField
-                      ariaLabel="Giờ khởi hành"
-                      value={busForm.depart_at}
-                      onChange={(departAt) => setBusForm({ ...busForm, depart_at: departAt })}
-                      dateOptions={busDateOptions}
-                      defaultDate={event?.start_date ?? undefined}
-                    />
-                  </FormField>
-                </div>
+                <FormField label="Giờ tập trung" hint={gatherLead ? `Trước giờ khởi hành ${gatherLead}.` : "Có thể chọn nhanh theo khoảng đệm."}>
+                  <EventDateTimeField
+                    ariaLabel="Giờ tập trung"
+                    value={busForm.gather_at}
+                    onChange={(gatherAt) => setBusForm({ ...busForm, gather_at: gatherAt })}
+                    dateOptions={busDateOptions}
+                    defaultDate={event?.start_date ?? undefined}
+                  />
+                </FormField>
+                <FormField label="Giờ khởi hành" hint="Điểm đón và giờ bay sẽ được kiểm tra khi phân xe.">
+                  <EventDateTimeField
+                    ariaLabel="Giờ khởi hành"
+                    value={busForm.depart_at}
+                    onChange={(departAt) => setBusForm({ ...busForm, depart_at: departAt })}
+                    dateOptions={busDateOptions}
+                    defaultDate={event?.start_date ?? undefined}
+                  />
+                </FormField>
                 <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-muted/30 p-2 text-xs">
                   <span className="mr-1 text-muted-foreground">Đặt tập trung trước:</span>
                   {[15, 30, 45, 60].map((minutes) => (

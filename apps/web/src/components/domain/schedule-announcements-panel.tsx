@@ -396,20 +396,18 @@ export function ScheduleAnnouncementsPanel({ eventId }: { eventId: number }) {
                 <FormField label="Tiêu đề" required>
                   <Input value={scheduleForm.title} onChange={(e) => setScheduleForm({ ...scheduleForm, title: e.target.value })} />
                 </FormField>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <FormField label="Bắt đầu" hint="Chọn ngày thuộc chương trình và giờ bắt đầu.">
-                    <EventDateTimeField
-                      ariaLabel="Bắt đầu hoạt động"
-                      value={scheduleForm.start_at}
-                      onChange={updateScheduleStart}
-                      dateOptions={scheduleDateOptions}
-                      defaultDate={event?.start_date ?? undefined}
-                    />
-                  </FormField>
-                  <FormField label="Địa điểm">
-                    <Input value={scheduleForm.location} onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })} />
-                  </FormField>
-                </div>
+                <FormField label="Bắt đầu" hint="Chọn ngày thuộc chương trình và giờ bắt đầu.">
+                  <EventDateTimeField
+                    ariaLabel="Bắt đầu hoạt động"
+                    value={scheduleForm.start_at}
+                    onChange={updateScheduleStart}
+                    dateOptions={scheduleDateOptions}
+                    defaultDate={event?.start_date ?? undefined}
+                  />
+                </FormField>
+                <FormField label="Địa điểm">
+                  <Input value={scheduleForm.location} onChange={(e) => setScheduleForm({ ...scheduleForm, location: e.target.value })} />
+                </FormField>
                 <FormField label="Kết thúc" hint={scheduleDuration ? `Thời lượng: ${scheduleDuration}.` : "Chọn giờ kết thúc hoặc dùng nút thời lượng nhanh."}>
                   <EventDateTimeField
                     ariaLabel="Kết thúc hoạt động"

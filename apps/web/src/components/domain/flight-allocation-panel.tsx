@@ -614,28 +614,28 @@ export function FlightAllocationPanel({ eventId }: { eventId: number }) {
             <DialogTrigger className={buttonVariants({ variant: "outline", size: "sm" })} onClick={openCreateFlight}>
               Thêm chuyến
             </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingFlight ? "Sửa chuyến bay" : "Thêm chuyến bay"}</DialogTitle>
               </DialogHeader>
               <div className="flex flex-col gap-3">
-                <FormField label="Mã chuyến" required>
-                  <Input value={flightForm.flight_code} onChange={(e) => setFlightForm({ ...flightForm, flight_code: e.target.value })} />
-                </FormField>
                 <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Mã chuyến" required>
+                    <Input value={flightForm.flight_code} onChange={(e) => setFlightForm({ ...flightForm, flight_code: e.target.value })} />
+                  </FormField>
                   <FormField label="Sức chứa" required>
                     <Input type="number" value={flightForm.capacity} onChange={(e) => setFlightForm({ ...flightForm, capacity: e.target.value })} />
                   </FormField>
-                  <FormField label="Khởi hành" hint="Chọn ngày chương trình rồi chọn giờ; hạ cánh tự gợi ý sau 90 phút.">
-                    <EventDateTimeField
-                      ariaLabel="Khởi hành"
-                      value={flightForm.depart_at}
-                      onChange={updateFlightDeparture}
-                      dateOptions={flightDateOptions}
-                      defaultDate={event?.start_date ?? undefined}
-                    />
-                  </FormField>
                 </div>
+                <FormField label="Khởi hành" hint="Chọn ngày chương trình rồi chọn giờ; hạ cánh tự gợi ý sau 90 phút.">
+                  <EventDateTimeField
+                    ariaLabel="Khởi hành"
+                    value={flightForm.depart_at}
+                    onChange={updateFlightDeparture}
+                    dateOptions={flightDateOptions}
+                    defaultDate={event?.start_date ?? undefined}
+                  />
+                </FormField>
                 <FormField label="Hạ cánh" hint={flightDuration ? `Thời lượng dự kiến: ${flightDuration}` : "Nhập giờ hạ cánh để kiểm tra thời lượng."}>
                   <EventDateTimeField
                     ariaLabel="Hạ cánh"

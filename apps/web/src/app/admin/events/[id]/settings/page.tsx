@@ -147,7 +147,7 @@ function EventMetaForm({ event }: { event: Event }) {
             <Button type="button" size="sm" variant="outline" onClick={() => applyRegistrationPreset("close_7_days")}>Đóng trước 7 ngày</Button>
             <Button type="button" size="sm" variant="outline" onClick={() => applyRegistrationPreset("close_48_hours")}>Đóng trước 48 giờ</Button>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Mở đăng ký</Label>
               <EventDateTimeField ariaLabel="Mở đăng ký" value={openAt} onChange={setOpenAt} dateOptions={dateOptions} constrainToDateOptions={false} defaultDate={startDate || undefined} />
