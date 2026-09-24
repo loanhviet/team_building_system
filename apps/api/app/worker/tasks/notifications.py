@@ -20,11 +20,13 @@ settings = get_settings()
 async def send_bulk_emails_task(
     ctx: dict, event_id: int, template_code: str, dedupe_suffix: str = ""
 ) -> None:
-    """Fan-out: one send_email job per submitted+participating employee, each
-    deduped so re-running this (e.g. a retried publish) never double-sends.
-    info_published fires once the event is already published, so journey
-    data exists to build per-employee context from. schedule_changed for a
-    single agenda edit is sent inline by notify_visible_schedule_change."""
+    """Fan-out: one send_email job per submitted+participating employee.
+
+    The dedupe key includes dedupe_suffix, so an ARQ retry of the same job
+    does not double-send, while a later republish (a new suffix) does.
+    info_published runs only after the event is already published, so the
+    journey exists to build each person's context. A single agenda edit is
+    sent inline by notify_visible_schedule_change."""
     async with AsyncSessionLocal() as db:
         event = await db.get(Event, event_id)
         if event is None:

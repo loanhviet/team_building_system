@@ -299,7 +299,12 @@ async def transition_event_status(
     await db.refresh(event)
 
     if payload.status == EventStatus.information_published:
-        await queue.enqueue_job("send_bulk_emails_task", event_id, "info_published")
+        # A new suffix per click: the first publish and a later republish each
+        # mail attendees. An ARQ retry of this same job keeps the suffix, so
+        # it still cannot double-send. Other statuses do not mail.
+        await queue.enqueue_job(
+            "send_bulk_emails_task", event_id, "info_published", utcnow().isoformat()
+        )
         # No reindex here: journeys/hotels aren't indexed (served live by
         # chat tools), and this transition doesn't publish any knowledge text.
 
